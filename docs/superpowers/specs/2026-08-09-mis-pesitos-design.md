@@ -228,18 +228,24 @@ llevando cantidad y costo total en pesos. `tc_promedio = costo_total / cantidad`
 
 | Evento | Efecto |
 |---|---|
-| `exchange` buy | `cantidad += q`; `costo_total += q × rate` |
-| Cuota pagada de ingreso en USD | `cantidad += q`; `costo_total += q × rate` |
-| `exchange` sell | `resultado += (rate − tc_promedio) × q`; descarga a costo promedio |
-| Cuota pagada de egreso en USD | descarga a costo promedio, **sin generar resultado** |
+| **Entrada** — `exchange` buy, o cuota pagada de ingreso en USD | `cantidad += q`; `costo_total += q × rate` |
+| **Salida** — `exchange` sell, o cuota pagada de egreso en USD | `resultado += (rate − tc_promedio) × q`; descarga `q × tc_promedio` del costo |
 
-Sólo la venta de divisa realiza resultado. Gastar dólares baja la tenencia y su costo, pero no
-se reconoce ganancia: es lo que pediste y evita mostrar "ganancias" cada vez que alguien paga
-algo en dólares.
+**Toda salida de dólares realiza resultado, se venda o se gaste.** La ganancia se generó
+mientras se tenía la divisa; disponer de ella gastándola no es distinto de venderla. Es el
+tratamiento estándar de una partida monetaria en moneda extranjera: se da de baja la tenencia
+a costo, se registra la operación al tipo de cambio del día, y la diferencia es resultado.
 
-**Caso borde:** si se vende más de lo registrado, el resultado se calcula con el `tc_promedio`
-vigente, la posición queda en cero y no en negativo, y la app avisa que faltan movimientos por
-cargar. No se rechaza la operación.
+La consecuencia práctica es que un egreso en dólares se valúa a lo que realmente costó ese
+día. Comprar USD 100 a $1.000 y gastarlos cuando el dólar está a $1.500 registra un egreso de
+$150.000 y un resultado por diferencia de cambio de $50.000, no un egreso de $100.000.
+
+No hay dos ramas: entrada y salida, y el `rate` de cada movimiento es el tipo de cambio del
+día en que ocurrió.
+
+**Caso borde:** si se dispone de más dólares de los registrados, el resultado se calcula con el
+`tc_promedio` vigente, la posición queda en cero y no en negativo, y la app avisa que faltan
+movimientos por cargar. No se rechaza la operación.
 
 Con posición cero, `tc_promedio` es cero y no se divide por cero.
 
@@ -298,7 +304,7 @@ espera.
 | `/dashboard` | Los cuatro bloques de la sección 7.1. |
 | `/ingresos` | Lista filtrable y alta de ingresos. |
 | `/egresos` | Ídem egresos, con el bloque de cuotas. |
-| `/cambios` | Compra y venta de dólares, posición actual y resultado acumulado. |
+| `/cambios` | Compra y venta de dólares, posición actual (cantidad y TC promedio) y resultado acumulado por diferencia de cambio, que incluye tanto las ventas como los pagos hechos en dólares. |
 | `/categorias` | ABM de categorías, con archivar en lugar de borrar. |
 | `/ajustes` | Saldo inicial, dólar preferido, datos de la cuenta. |
 
@@ -353,8 +359,8 @@ Vitest sobre funciones puras, que es donde un error cuesta plata:
 1. **Reparto de cuotas** — que la suma cierre exactamente, incluyendo el caso 100,00 en 3, y
    la generación de fechas con el borde del 31 en meses cortos.
 2. **Posición en dólares y diferencia de cambio** — compra, venta con ganancia, venta con
-   pérdida, ingreso en USD entrando a la posición, egreso en USD que no genera resultado, y el
-   caso borde de vender más de lo registrado.
+   pérdida, ingreso en USD entrando a la posición al costo, egreso en USD realizando resultado
+   igual que una venta, y el caso borde de disponer de más de lo registrado.
 3. **Saldo** — que respete `initial_balance_date`, que sólo cuente cuotas pagadas y que los
    cambios muevan las dos monedas.
 
