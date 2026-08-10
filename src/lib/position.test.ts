@@ -137,4 +137,17 @@ describe("usdPosition", () => {
     expect(compraPrimero.realizedArsCents).toBe(5_000_000)
     expect(compraPrimero.oversoldUsdCents).toBe(0)
   })
+
+  it("dos salidas del mismo día dan el mismo resultado en cualquier orden", () => {
+    // Con la posición en descubierto, cuál de las dos salidas consume los
+    // dólares disponibles cambia el resultado. El desempate lo fija.
+    const eventos = [
+      buy("2026-01-10", 50, 1000),
+      sell("2026-06-10", 60, 1500),
+      sell("2026-06-10", 40, 1200),
+    ]
+    const alRevés = [eventos[0], eventos[2], eventos[1]]
+
+    expect(usdPosition(alRevés)).toEqual(usdPosition(eventos))
+  })
 })

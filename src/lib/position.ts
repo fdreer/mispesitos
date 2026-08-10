@@ -45,10 +45,19 @@ export function usdPosition(events: PositionEvent[]): UsdPosition {
   // disponer de lo que ya se tiene. Sin este desempate el resultado dependería
   // del orden en que la base devolvió las filas, y la diferencia de cambio que
   // ve el usuario cambiaría sola.
+  //
+  // ponytail: dos salidas del mismo día se desempatan por monto y después por
+  // TC. Es una elección arbitraria — con la posición en descubierto el orden sí
+  // cambia el resultado, y a nivel día no hay forma de saber cuál pasó primero.
+  // Arbitraria pero fija: el número no baila entre recargas. El techo se levanta
+  // cuando los eventos traigan la secuencia real de la base (id o created_at):
+  // ahí ese campo pasa a ser el tercer criterio y esto se puede borrar.
   const ordered = [...events].sort(
     (a, b) =>
       a.date.localeCompare(b.date) ||
-      (a.direction === b.direction ? 0 : a.direction === "in" ? -1 : 1),
+      (a.direction === b.direction ? 0 : a.direction === "in" ? -1 : 1) ||
+      a.usdCents - b.usdCents ||
+      a.rate - b.rate,
   )
 
   for (const event of ordered) {
