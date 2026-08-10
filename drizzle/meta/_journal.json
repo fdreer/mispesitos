@@ -15,6 +15,20 @@
       "when": 1786332000000,
       "tag": "0001_rls_tablas_de_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786334148089,
+      "tag": "0002_broken_tarot",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786334167221,
+      "tag": "0003_rls_tablas_de_la_app",
+      "breakpoints": true
     }
   ]
 }
