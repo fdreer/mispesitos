@@ -1,7 +1,22 @@
 # Mis Pesitos — Rediseño sobre el sistema visual de Linear
 
 **Fecha:** 2026-08-10
-**Estado:** aprobado, sin implementar.
+**Estado:** **implementado el 2026-08-10.** El código manda sobre este documento.
+Los desvíos están anotados en el encabezado del
+[plan](../plans/2026-08-10-linear-design-system.md) y lo que quedó pendiente en
+[`docs/PENDIENTES.md`](../../PENDIENTES.md).
+
+> **Una regla que este spec no tenía y el sistema pide.** Sobre esta paleta el
+> relleno no puede llevar el estado: Graphite sobre Void da 1.30:1 y `--secondary`
+> da 1.09:1, los dos muy por debajo del 3:1 que WCAG pide para señalar estado.
+> Entonces **lo elegido/activo cambia el color de la etiqueta** (Fog → Mist →
+> Paper), y el relleno acompaña. Así quedaron la nav, el filtro de estado y el
+> toggle de compra/venta. Cualquier control nuevo con estado sigue esa regla.
+>
+> El §6.1 además tiene un error: lista `/categorias` → "Agregar" como si fuera un
+> solo botón, pero `CategoryManager` se monta dos veces en esa pantalla. Se
+> resolvió dejando los dos en `outline`: agregar una categoría es mantenimiento,
+> no la acción principal de la pantalla.
 
 Referencia de origen: `DESIGN.md` de Linear ("midnight precision instrument"), provisto
 por el usuario. Este documento traduce ese sistema a la app y deja asentado dónde nos

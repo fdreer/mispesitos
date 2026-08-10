@@ -71,8 +71,11 @@ Se dejó afuera a propósito, con el alcance ya acordado.
   (pendiente / pagado / vencido), que es el que el dashboard usa para enlazar.
   Los otros cuatro que pide el spec —categoría, moneda, desde y hasta— **ya
   existen en la capa de consultas y están testeados**: falta sólo la interfaz.
-- **Modo oscuro.** Las variables del tema están en `globals.css`, pero nada agrega
-  nunca la clase `dark`: no hay selector ni proveedor de tema.
+- **Tema claro.** Desde el rediseño del 2026-08-10 la app tiene **un solo tema, el
+  oscuro**: `:root` es la paleta de Linear y el bloque `.dark` no existe más. La
+  variante `dark:` sigue declarada contra `.dark`, una clase que nadie agrega, así
+  que las decenas de utilidades `dark:` que traen los componentes de shadcn quedan
+  inertes. Volver a tener dos temas es alcance nuevo, no un arreglo.
 
 ---
 
@@ -142,3 +145,82 @@ Cuatro cosas que fallan en producción y no en desarrollo:
    `redirect_uri_mismatch`.
 4. **No correr `pnpm test:db` contra producción.** Siembra y borra filas con ids
    fijos sobre una base real.
+
+---
+
+## 5. El rediseño sobre el sistema visual de Linear (2026-08-10)
+
+La app pasó del tema claro de shadcn al sistema visual de Linear: lienzo casi
+negro, Inter de tracking cerrado en pesos 400–590, bordes capilares en vez de
+sombras y el lima ácido `#e4f222` como única acción cromática. El plan y el spec
+están en `docs/superpowers/`, con los desvíos anotados en sus encabezados.
+
+Nada de esto cambió comportamiento: no se tocó ninguna Server Action, consulta,
+esquema de Zod, migración ni tabla, y la suite quedó en 256 tests, la misma
+cantidad que antes.
+
+### 5.1 Lo que quedó sin verificar en el navegador
+
+Se verificaron las ocho rutas con estilo computado, con sesión abierta. Lo que
+**no** se llegó a mirar, y por qué:
+
+- **`/onboarding`.** Redirige a `/dashboard` cuando la cuenta ya lo completó, y la
+  única cuenta de prueba disponible ya lo había hecho. Hace falta un usuario
+  recién creado.
+- **Las filas de cuotas y los badges de estado de `/ingresos` y `/egresos`.** La
+  cuenta de prueba no tiene movimientos cargados, así que `InstallmentRows` y los
+  badges "N pendiente(s)" nunca se dibujaron. Ahí viven el radio de 4px del badge
+  y las variantes de estado de la Task 2, y el botón `outline` de "Marcar pagada"
+  de la Task 4.
+- **El foco del `SelectTrigger`.** Los dos selects de shadcn viven en
+  `movement-form.tsx` y `settings-form.tsx`. La regla es la misma que la de los
+  inputs (`focus-visible:border-ring` más `focus-visible:ring-0`), y en los inputs
+  sí se verificó que el borde salta a Mist con el teclado, pero el disparador no
+  se midió.
+- **Las capturas de pantalla.** Se verificó por estilo computado, no por imagen.
+
+### 5.2 Lo que se decidió no hacer
+
+Todo esto salió de la revisión final de branch y se dejó afuera a propósito:
+
+- **La escala `text-13`.** Cuatro lugares usan `text-[13px]` (los links y el botón
+  de la nav, y dos de la landing). Tailwind no le cuelga tracking ni interlineado
+  a un tamaño arbitrario, así que esos cuatro son los únicos textos del sistema
+  con tracking 0. La diferencia es de unos 0,13px por caracter.
+- **Cortarle a Tailwind el escaneo de `docs/`.** Hoy el CSS de producción compila
+  `text-emerald-600`, `max-w-5xl` y `font-bold` —tres clases que el rediseño
+  borró del código— porque el plan y el spec las citan en sus bloques de código y
+  Tailwind 4 escanea el proyecto entero. Se arregla con
+  `@import "tailwindcss" source(none);` más un `@source` apuntando a `src/`.
+- **Dos comentarios equivocados en `globals.css`.** El que explica la separación
+  en dos bloques `@theme` afirma que `@theme inline` no emite la variable a
+  `:root`; sí la emite. Y `--accent` está anotado "Slate" cuando la paleta de este
+  proyecto llama Graphite a ese valor.
+- **La píldora y el botón del hero de la landing comparten nombre accesible**
+  ("Crear cuenta") y destino. Es el patrón habitual de una landing; si molesta, se
+  diferencia con `aria-label` o cambiando el texto de uno de los dos.
+- **`charts.tsx` mezcla constantes con nombre y hexadecimales sueltos** en el
+  array `COLORS`, aunque los tres sueltos también tienen nombre en la paleta
+  (`--color-ash`, `--color-iris-violet`, `--color-lavender`).
+- **La barra activa de la nav se apila sobre el hairline** en vez de fundirse con
+  él: son 3px de línea bajo la sección activa, no 2. Se resuelve con `-mb-px`.
+
+### 5.3 Lo que hay que mirar la próxima vez que se abra el dashboard
+
+El padding de tarjeta pasó de 16px a 24px en toda la app, y eso sólo se vio en
+`/login`, que tiene una sola tarjeta grande. `/dashboard` tiene cuatro tarjetas de
+saldo en fila, cada una con un `CardHeader` que ya traía su propio `pb-2`. No es
+un defecto: es lo más probable que se vea apretado o suelto cuando alguien lo mire
+con ojo de diseño.
+
+### 5.4 La regla que el spec no traía
+
+Sobre esta paleta **el relleno no puede llevar el estado**: Graphite sobre Void da
+1.30:1 y `--secondary` da 1.09:1, los dos muy por debajo del 3:1 que WCAG pide
+para señalar estado o borde. Por eso lo elegido cambia el color de la etiqueta
+(Fog → Mist → Paper) y el relleno sólo acompaña. La nav, el filtro de estado y el
+toggle de compra/venta ya siguen esa regla; cualquier control con estado que se
+agregue tiene que seguirla también.
+
+Es inherente a la estética de Linear, no un error del rediseño: Linear misma vive
+con esos contrastes.

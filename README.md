@@ -12,6 +12,24 @@ dólares, y un dashboard con saldo, deudas y flujo proyectado.
 Next.js 16 · React 19 · TypeScript · Tailwind 4 · shadcn/ui · Drizzle · Supabase ·
 better-auth · Recharts · Vitest. Gestor de paquetes: **pnpm**.
 
+## El sistema visual
+
+Un solo tema, el oscuro: lienzo casi negro (`#08090a`), Inter de tracking cerrado
+en pesos 400–590, bordes capilares en vez de sombras y el lima ácido `#e4f222`
+como única acción cromática — un botón lima por pantalla, y nunca en un gráfico.
+Los importes van en gris; el verde y el rojo señalan estado, no monto.
+
+Todo vive en la capa de tokens de `src/app/globals.css`: los componentes de
+shadcn están escritos contra los tokens semánticos, así que la paleta se cambia
+ahí y no en cada componente. El único lugar con hexadecimales sueltos es
+`src/components/dashboard/charts.tsx`, porque Recharts recibe colores como
+strings de JavaScript y no puede leer tokens de Tailwind.
+
+Una regla para cualquier control con estado que se agregue: **sobre esta paleta
+lo elegido cambia el color de la etiqueta** (Fog → Mist → Paper), no sólo el
+relleno. Los rellenos disponibles están todos por debajo del contraste que hace
+falta para señalar estado.
+
 ## Qué hace, pantalla por pantalla
 
 | Ruta | Qué es |

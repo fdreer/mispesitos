@@ -1,5 +1,34 @@
 # Rediseño sobre el sistema visual de Linear — Plan de implementación
 
+> **Documento histórico — ejecutado el 2026-08-10.** Las nueve tareas están
+> implementadas y revisadas, más una tanda de arreglos posterior a la revisión de
+> branch. El estado real del código manda sobre este archivo. Lo que se hizo
+> distinto de lo que dice acá:
+>
+> 1. **El `font-medium` de las variantes `default` y `pill` de `button.tsx` no se
+>    agregó** (Task 2, Step 5): la clase base del `cva` ya lo trae, así que
+>    repetirlo no cambiaba nada.
+> 2. **El comentario del `stroke` de la torta decía "en Void" y el código pasa
+>    `CARBON`** (Task 8). Se corrigió el comentario.
+> 3. **El fallback `text-4xl sm:text-hero` no se aplicó** (Task 6, Step 4): a
+>    375px el hero de 64px entra en tres líneas sin scroll horizontal.
+> 4. **El grep de colores fuera del sistema no da "sin resultados"** (Task 7,
+>    Step 4 y Task 9, Step 5). El patrón incluye `slate-`, que matchea las
+>    utilidades `translate-x/y-*`: `button.tsx` y `select.tsx` aparecen siempre.
+>    El criterio real es "ningún color fuera de la paleta y ningún hexadecimal
+>    fuera de `charts.tsx`".
+> 5. **El comentario sobre `@theme inline` en `globals.css` afirma algo falso.**
+>    Dice que el bloque `inline` no emite la variable a `:root`; sí la emite (se
+>    compiló y se verificó). Lo que `inline` decide es si la utilidad referencia
+>    la variable o su valor resuelto. La separación en dos bloques queda igual,
+>    porque se lee mejor, pero el motivo escrito no es el correcto.
+> 6. **Seis arreglos más, decididos después de la revisión final de branch**, que
+>    este plan no contemplaba: `color-scheme: dark`, el doble botón lima de
+>    `/categorias`, `aria-current` en la nav, el `<select>` crudo de
+>    `movement-form.tsx`, el idioma viejo de `status-filter.tsx` y el contraste
+>    del toggle de `/cambios`. Están detallados en
+>    [`docs/PENDIENTES.md`](../../PENDIENTES.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** llevar la app del tema claro por defecto de shadcn al sistema visual de Linear — lienzo casi negro, Inter de tracking cerrado en pesos 400–590, bordes capilares en vez de sombras, y el lima ácido `#e4f222` como única acción cromática.
