@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
-import { eq, sql } from "drizzle-orm"
+import { eq, inArray, sql } from "drizzle-orm"
 
 import { db, sqlClient, withUser, type Tx } from "@/db/client"
 import { category, installment, movement, user, userSettings } from "@/db/schema"
 
 const USER_A = "rls-test-user-a"
 const USER_B = "rls-test-user-b"
+const USUARIOS = [USER_A, USER_B]
 
 /**
  * Las cuatro policies de la app son copias del mismo predicado sobre tablas
@@ -163,45 +164,71 @@ async function seedUser(id: string) {
   })
 }
 
+/**
+ * Borra todo lo que siembra o escribe este archivo. Corre ANTES de sembrar y
+ * DESPUÉS de los tests, igual que en `queries.db.test.ts` y en
+ * `actions.db.test.ts`: si una corrida anterior murió por la mitad, la
+ * siguiente arranca limpia igual en vez de reventar contra la PK.
+ *
+ * Sin la pasada de antes, una sola fila sobreviviente de una corrida cortada
+ * —`cat-ingreso-rls-test-user-a`, `mov-exchange`— pone en rojo los cuatro
+ * casos que esperan EXACTAMENTE una fila por tabla, por una razón que no tiene
+ * nada que ver con el código. Un test que se pone rojo por basura de la
+ * corrida anterior enseña a ignorar los rojos.
+ *
+ * Los `borrar` de cada caso van sin WHERE a propósito: adentro de withUser()
+ * la policy ya limita lo visible a ese usuario, así que barren también las
+ * filas que crean los tests en el medio y no sólo las de la siembra.
+ *
+ * El orden es el inverso al de siembra y no es negociable: `movement →
+ * category` es ON DELETE RESTRICT, así que la categoría no se puede ir antes
+ * que el movimiento que la usa.
+ */
+async function limpiar() {
+  for (const id of USUARIOS) {
+    await withUser(id, async (tx) => {
+      for (const tabla of [...tablas].reverse()) await tabla.borrar(tx)
+    })
+  }
+
+  await db.delete(user).where(inArray(user.id, USUARIOS))
+}
+
 beforeAll(async () => {
-  await seedUser(USER_A)
-  await seedUser(USER_B)
+  await limpiar()
+  for (const id of USUARIOS) await seedUser(id)
 })
 
 afterAll(async () => {
-  // Limpieza a prueba de fallas: un guard que rechaza, un error de red
-  // transitorio o una violación de RESTRICT en cualquiera de los cuatro
-  // withUser() de abajo no puede impedir que se borre `user` ni que se cierre
-  // el cliente. Ya pasó: un fallo acá dejó `rls-test-user-a` colgado en la
-  // base real y hubo que borrarlo a mano.
-  try {
-    // Las filas de la app se borran por withUser (afuera no son visibles) y en
-    // el orden inverso al de siembra: `movement -> category` es ON DELETE
-    // RESTRICT, así que la categoría no se puede ir antes que el movimiento
-    // que la usa. Va en su propio try: si esto falla, no puede tragarse el
-    // borrado de `user` ni el cierre del cliente de abajo.
-    try {
-      for (const id of [USER_A, USER_B]) {
-        await withUser(id, async (tx) => {
-          for (const tabla of [...tablas].reverse()) await tabla.borrar(tx)
-        })
-      }
-    } catch (error) {
-      // No se traga en silencio: queda visible en la salida, pero no corta la
-      // limpieza que sigue.
-      console.error(
-        "afterAll: no se pudieron borrar por withUser() las filas de prueba de las " +
-          "tablas de la app. Puede haber quedado basura colgada en la base real:",
-        error,
-      )
-    }
+  // La limpieza no puede impedir que se cierre el cliente —si el socket queda
+  // abierto, Vitest se queja de handles colgados y la salida deja de estar
+  // limpia— pero tampoco puede fallar en silencio: la base es real y
+  // COMPARTIDA, y las filas que queden colgadas acá ponen en rojo la próxima
+  // corrida. Ya pasó: un fallo acá dejó `rls-test-user-a` colgado y hubo que
+  // borrarlo a mano.
+  //
+  // Por eso el error se guarda, se cierra el cliente igual, y recién después
+  // se relanza. Antes sólo se imprimía, y un `console.error` en una suite
+  // verde no lo lee nadie.
+  let fallaDeLimpieza: unknown
 
-    await db.delete(user).where(eq(user.id, USER_A))
-    await db.delete(user).where(eq(user.id, USER_B))
+  try {
+    await limpiar()
+  } catch (error) {
+    fallaDeLimpieza = error
   } finally {
-    // Pase lo que pase arriba, hay que cerrar el socket: si no, Vitest se
-    // queja de handles colgados y la salida de tests deja de estar limpia.
     await sqlClient.end()
+  }
+
+  if (fallaDeLimpieza !== undefined) {
+    // `cause` en vez de tragarse el original: el motivo real —una violación de
+    // RESTRICT, un timeout, un guard que rechaza— es lo único que dice qué
+    // filas quedaron y por qué. Si además falló un test, Vitest reporta las
+    // dos cosas: esto no tapa nada.
+    throw new Error(
+      "afterAll: falló la limpieza y pueden haber quedado filas de prueba colgadas en la base real.",
+      { cause: fallaDeLimpieza },
+    )
   }
 })
 
@@ -350,13 +377,18 @@ describe("RLS", () => {
     const CAT_INGRESO = `cat-ingreso-${USER_A}`
     const MOV_INGRESO = "mov-ingreso-ok"
 
-    await withUser(USER_A, (tx) =>
-      tx
-        .insert(category)
-        .values({ id: CAT_INGRESO, userId: USER_A, name: "Sueldo", kind: "income" }),
-    )
-
+    // El INSERT de la categoría va ADENTRO del try: si quedaba afuera y la
+    // fila sobrevivía de una corrida cortada, reventaba por clave primaria y
+    // el `finally` de limpieza no llegaba a correr nunca — la fila colgada se
+    // volvía permanente y ponía en rojo los cuatro casos que esperan
+    // exactamente una fila por tabla.
     try {
+      await withUser(USER_A, (tx) =>
+        tx
+          .insert(category)
+          .values({ id: CAT_INGRESO, userId: USER_A, name: "Sueldo", kind: "income" }),
+      )
+
       const [fila] = await withUser(USER_A, (tx) =>
         tx
           .insert(movement)
@@ -419,36 +451,37 @@ describe("RLS", () => {
   // de ser MATCH SIMPLE —o si alguien le pusiera MATCH FULL— ningún cambio de
   // divisa entraría nunca más.
   it("un movimiento de tipo exchange entra con category_id nulo", async () => {
-    const [fila] = await withUser(USER_A, (tx) =>
-      tx
-        .insert(movement)
-        .values({
-          id: "mov-exchange",
-          userId: USER_A,
-          kind: "exchange",
-          description: "Compra de dólares",
-          categoryId: null,
-          date: "2026-01-06",
-          currency: "USD",
-          amountCents: 100_00,
-          rate: "1450",
-          direction: "buy",
-        })
-        .returning(),
-    )
+    try {
+      const [fila] = await withUser(USER_A, (tx) =>
+        tx
+          .insert(movement)
+          .values({
+            id: "mov-exchange",
+            userId: USER_A,
+            kind: "exchange",
+            description: "Compra de dólares",
+            categoryId: null,
+            date: "2026-01-06",
+            currency: "USD",
+            amountCents: 100_00,
+            rate: "1450",
+            direction: "buy",
+          })
+          .returning(),
+      )
 
-    expect(fila.categoryId).toBeNull()
-    expect(fila.userId).toBe(USER_A)
-
-    // Limpieza in situ: esta fila no forma parte de la siembra de beforeAll,
-    // y "movement: un usuario sólo ve sus propias filas" espera exactamente 1
-    // fila para USER_A. Sin este borrado, el test de arriba sólo pasa porque
-    // Vitest respeta el orden de declaración (este test está después); una
-    // corrida interrumpida después de acá dejaría `mov-exchange` colgado y
-    // pondría en rojo la siguiente corrida por una razón ajena al código.
-    await withUser(USER_A, (tx) =>
-      tx.delete(movement).where(eq(movement.id, "mov-exchange")),
-    )
+      expect(fila.categoryId).toBeNull()
+      expect(fila.userId).toBe(USER_A)
+    } finally {
+      // Limpieza in situ y en un `finally`: esta fila no forma parte de la
+      // siembra de beforeAll, y "movement: un usuario sólo ve sus propias
+      // filas" espera exactamente 1 fila para USER_A. Sin el `finally`, una
+      // aserción en rojo se saltea el borrado y deja `mov-exchange` colgado:
+      // el rojo de un caso se propaga a otros cuatro en la corrida siguiente.
+      await withUser(USER_A, (tx) =>
+        tx.delete(movement).where(eq(movement.id, "mov-exchange")),
+      )
+    }
   })
 
   // NO BORRAR NI RELAJAR.

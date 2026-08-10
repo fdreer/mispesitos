@@ -444,19 +444,31 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  // Limpieza a prueba de fallas: pase lo que pase con las filas, el socket se
-  // cierra. Si no, Vitest se queja de handles colgados y la salida deja de
-  // estar limpia.
+  // La limpieza no puede impedir que se cierre el cliente —si el socket queda
+  // abierto, Vitest se queja de handles colgados y la salida deja de estar
+  // limpia— pero tampoco puede fallar en silencio: la base es real y
+  // COMPARTIDA, y las filas que queden colgadas acá ensucian la próxima
+  // corrida. Por eso el error se guarda, se cierra el cliente igual, y recién
+  // después se relanza. Antes sólo se imprimía, y un `console.error` en una
+  // suite verde no lo lee nadie.
+  let fallaDeLimpieza: unknown
+
   try {
     await limpiar()
   } catch (error) {
-    // No se traga en silencio, pero tampoco puede impedir el `end()`.
-    console.error(
-      "afterAll: falló la limpieza. Puede haber quedado basura colgada en la base real:",
-      error,
-    )
+    fallaDeLimpieza = error
   } finally {
     await sqlClient.end()
+  }
+
+  if (fallaDeLimpieza !== undefined) {
+    // `cause` en vez de tragarse el original: el motivo real es lo único que
+    // dice qué filas quedaron y por qué. Si además falló un test, Vitest
+    // reporta las dos cosas: esto no tapa nada.
+    throw new Error(
+      "afterAll: falló la limpieza y pueden haber quedado filas de prueba colgadas en la base real.",
+      { cause: fallaDeLimpieza },
+    )
   }
 })
 
