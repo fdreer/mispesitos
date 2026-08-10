@@ -1,14 +1,10 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
+# Las entradas de yarn (.yarn/*, .pnp*) y de npm (npm-debug.log) que traía
+# create-next-app se fueron: el proyecto es pnpm-only y esos archivos no los
+# puede generar nadie acá.
 /node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
 
 # testing
 /coverage
@@ -25,9 +21,6 @@
 *.pem
 
 # debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 .pnpm-debug.log*
 
 # env files
