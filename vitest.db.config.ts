@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/db/**/*.test.ts"],
+    include: ["src/**/*.db.test.ts"],
     // Las pruebas comparten filas en una base real: no pueden correr en paralelo.
     fileParallelism: false,
   },
