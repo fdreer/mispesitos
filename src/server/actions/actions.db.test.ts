@@ -700,6 +700,58 @@ describe("createMovement", () => {
     expect(await movimientosPorDescripcion(USUARIO_A, "Categoría ajena")).toEqual([])
   })
 
+  /**
+   * NO BORRAR NI RELAJAR. `createMovement` NO consulta la categoría antes de
+   * insertar: lo que impide guardar un ingreso con una categoría de egresos es
+   * la FK compuesta, que lleva `kind` adentro. Desde la interfaz esto no pasa
+   * —el desplegable ya viene filtrado por tipo— pero el borde de confianza es
+   * la Server Action, no el formulario, y el efecto de que pasara era un
+   * dashboard con un ingreso adentro de la torta de egresos.
+   *
+   * Las dos mitades van juntas a propósito: sin la que entra, la que se rechaza
+   * también pasaría con una acción que no guarda nada.
+   */
+  it("no guarda un ingreso con una categoría de egresos, y sí uno con la del tipo correcto", async () => {
+    comoUsuario(USUARIO_A)
+
+    const { resultado, etiquetas } = await conErroresDeConsola(() =>
+      createMovement(
+        null,
+        formulario({
+          ...ALTA_VALIDA,
+          kind: "income",
+          description: "Ingreso con categoría de egresos",
+          // CAT_A_COMIDA es de egresos: el tipo no coincide con el movimiento.
+          categoryId: CAT_A_COMIDA,
+        }),
+      ),
+    )
+
+    const { message } = rechazo(resultado)
+    expect(message).toBe("No pudimos guardar el movimiento. Probá de nuevo.")
+    expect(etiquetas).toEqual(["createMovement"])
+    expect(await movimientosPorDescripcion(USUARIO_A, "Ingreso con categoría de egresos")).toEqual(
+      [],
+    )
+    expect(rutasRevalidadas()).toEqual([])
+
+    // El mismo alta con la categoría del tipo correcto entra sin problema.
+    const conLaCategoriaCorrecta = await createMovement(
+      null,
+      formulario({
+        ...ALTA_VALIDA,
+        kind: "income",
+        description: "Ingreso con categoría de ingresos",
+        categoryId: CAT_A_SUELDO,
+      }),
+    )
+
+    expect(conLaCategoriaCorrecta).toEqual({ ok: true })
+    expect(
+      await movimientosPorDescripcion(USUARIO_A, "Ingreso con categoría de ingresos"),
+    ).toHaveLength(1)
+  })
+
   it("revalida el dashboard y la pantalla del tipo que se cargó", async () => {
     comoUsuario(USUARIO_A)
 

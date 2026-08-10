@@ -281,7 +281,7 @@ describe("RLS", () => {
     )
 
     expect(motivo).toMatch(
-      /violates foreign key constraint "movement_user_id_category_id_category_user_id_id_fk"/,
+      /violates foreign key constraint "movement_user_id_kind_category_id_category_user_id_kind_id_fk"/,
     )
   })
 
@@ -304,10 +304,120 @@ describe("RLS", () => {
     )
   })
 
+  // NO BORRAR NI RELAJAR.
+  //
+  // La FK compuesta lleva `kind` adentro —(user_id, kind, category_id) →
+  // category (user_id, kind, id)— y por eso la categoría referenciada tiene que
+  // ser del mismo TIPO que el movimiento. Sin eso se podía guardar un ingreso
+  // con una categoría de egresos: desde la interfaz no pasa, porque el
+  // desplegable ya viene filtrado, pero el borde de confianza es la base y no el
+  // formulario. El efecto era un dashboard mostrando un ingreso adentro de la
+  // torta de egresos.
+  //
+  // Si esto se pone en rojo, lo más probable es que la FK haya vuelto a ser sólo
+  // (user_id, category_id). El arreglo es volver a meter `kind` adentro, nunca
+  // bajar la expectativa.
+  it("no se puede guardar un movimiento con una categoría del tipo equivocado", async () => {
+    // La categoría sembrada de A es de egresos; el movimiento dice ser ingreso.
+    // El user_id es el correcto en las dos filas: lo único desalineado es el
+    // tipo, así que ni la policy ni la parte de la FK que mira el dueño lo
+    // frenan.
+    const motivo = await motivoDelRechazo(
+      withUser(USER_A, (tx) =>
+        tx.insert(movement).values({
+          id: "mov-kind-cruzado",
+          userId: USER_A,
+          kind: "income",
+          description: "Ingreso con categoría de egresos",
+          categoryId: `cat-${USER_A}`,
+          date: "2026-01-07",
+          currency: "ARS",
+          amountCents: 100_00,
+          rate: "1",
+        }),
+      ),
+    )
+
+    expect(motivo).toMatch(
+      /violates foreign key constraint "movement_user_id_kind_category_id_category_user_id_kind_id_fk"/,
+    )
+  })
+
+  // La contracara del de arriba, y la que le da sentido: el par que SÍ coincide
+  // entra. Sin esta mitad, el test anterior también pasaría con una FK rota que
+  // rechazara todo.
+  it("el par que coincide entra, y el mismo par al revés no", async () => {
+    const CAT_INGRESO = `cat-ingreso-${USER_A}`
+    const MOV_INGRESO = "mov-ingreso-ok"
+
+    await withUser(USER_A, (tx) =>
+      tx
+        .insert(category)
+        .values({ id: CAT_INGRESO, userId: USER_A, name: "Sueldo", kind: "income" }),
+    )
+
+    try {
+      const [fila] = await withUser(USER_A, (tx) =>
+        tx
+          .insert(movement)
+          .values({
+            id: MOV_INGRESO,
+            userId: USER_A,
+            kind: "income",
+            description: "Ingreso con categoría de ingresos",
+            categoryId: CAT_INGRESO,
+            date: "2026-01-08",
+            currency: "ARS",
+            amountCents: 100_00,
+            rate: "1",
+          })
+          .returning(),
+      )
+
+      expect(fila.categoryId).toBe(CAT_INGRESO)
+      expect(fila.kind).toBe("income")
+
+      // Y la misma categoría de ingresos no sirve para un egreso.
+      const motivo = await motivoDelRechazo(
+        withUser(USER_A, (tx) =>
+          tx.insert(movement).values({
+            id: "mov-kind-cruzado-al-reves",
+            userId: USER_A,
+            kind: "expense",
+            description: "Egreso con categoría de ingresos",
+            categoryId: CAT_INGRESO,
+            date: "2026-01-08",
+            currency: "ARS",
+            amountCents: 100_00,
+            rate: "1",
+          }),
+        ),
+      )
+
+      expect(motivo).toMatch(
+        /violates foreign key constraint "movement_user_id_kind_category_id_category_user_id_kind_id_fk"/,
+      )
+    } finally {
+      // Limpieza in situ, igual que en el caso de exchange: estas filas no son
+      // parte de la siembra y "un usuario sólo ve sus propias filas" espera
+      // exactamente una fila por tabla. El orden no es negociable: la FK
+      // movement → category es ON DELETE RESTRICT.
+      await withUser(USER_A, async (tx) => {
+        await tx.delete(movement).where(eq(movement.id, MOV_INGRESO))
+        await tx.delete(category).where(eq(category.id, CAT_INGRESO))
+      })
+    }
+  })
+
   // La contracara del test de arriba: la FK compuesta NO puede haber roto los
   // movimientos de tipo exchange, que nunca llevan categoría. En Postgres el
   // MATCH SIMPLE por default no exige nada cuando alguna columna de la FK es
   // NULL, y eso es justo lo que se quiere acá.
+  //
+  // Vale doble desde que `kind` entró en la FK: `kind` de un exchange es
+  // "exchange", que NO es un tipo de categoría posible, así que si la FK dejara
+  // de ser MATCH SIMPLE —o si alguien le pusiera MATCH FULL— ningún cambio de
+  // divisa entraría nunca más.
   it("un movimiento de tipo exchange entra con category_id nulo", async () => {
     const [fila] = await withUser(USER_A, (tx) =>
       tx
