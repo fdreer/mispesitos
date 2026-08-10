@@ -58,10 +58,12 @@ export default async function CambiosPage() {
 
       {position.oversoldUsdCents > 0 && (
         <p className="text-destructive text-sm">
-          Alguna vez saliste de más dólares de los que tenías cargados: en total,{" "}
-          {formatMoney(position.oversoldUsdCents, "USD")}. Puede que te falte cargar alguna
-          compra o algún ingreso en dólares de esa fecha. Es un número acumulado: aunque lo
-          cargues, este aviso no se apaga solo.
+          En algún punto de tu historial salieron más dólares de los que tenías cargados: en
+          total, {formatMoney(position.oversoldUsdCents, "USD")}. Cargá la compra o el ingreso en
+          dólares que te falta con la fecha real en que pasó (no con la de hoy) y el aviso se
+          apaga solo. Mientras tanto es normal que este número no coincida con el saldo en
+          dólares del dashboard: acá la tenencia nunca baja de cero, ahí sí puede quedar
+          negativa, y la diferencia entre los dos es exactamente esto.
         </p>
       )}
 

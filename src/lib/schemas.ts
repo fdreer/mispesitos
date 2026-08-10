@@ -31,6 +31,16 @@ export const exchangeRate = z.coerce
   .number({ error: "Escribí un tipo de cambio válido." })
   .nonnegative({ message: "El tipo de cambio no puede ser negativo." })
 
+/**
+ * Tipo de cambio de un movimiento o de un cambio de divisa que sí ocurrió:
+ * tiene que ser mayor a cero. No confundir con `exchangeRate` (arriba), que
+ * permite cero porque ahí el TC acompaña un saldo inicial que puede no tener
+ * dólares.
+ */
+export const positiveRate = z.coerce
+  .number()
+  .positive("El tipo de cambio tiene que ser mayor a cero.")
+
 export const settingsSchema = z
   .object({
     initialBalanceArsCents: amountCents,
@@ -73,7 +83,7 @@ export const movementSchema = z
     date: isoDate,
     currency: currency,
     amountCents: amountCents,
-    rate: z.coerce.number().positive("El tipo de cambio tiene que ser mayor a cero."),
+    rate: positiveRate,
     installments: z.array(installmentInput).min(1, "Tiene que haber al menos una cuota."),
   })
   .refine((m) => m.currency === "USD" || m.rate === 1, {
@@ -101,7 +111,7 @@ export const exchangeSchema = z.object({
   direction: z.enum(["buy", "sell"]),
   date: isoDate,
   usdCents: amountCents.refine((c) => c > 0, "Poné una cantidad mayor a cero."),
-  rate: z.coerce.number().positive("El tipo de cambio tiene que ser mayor a cero."),
+  rate: positiveRate,
 })
 
 export type ExchangeInput = z.infer<typeof exchangeSchema>

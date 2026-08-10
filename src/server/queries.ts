@@ -8,6 +8,30 @@ import { buildUsdPositionEvents, type PositionEvent } from "@/lib/position"
 
 export type Settings = typeof userSettings.$inferSelect
 
+/**
+ * `movement.direction` es nullable en el schema y sólo se llena para
+ * `kind: "exchange"` (`createExchange` siempre lo setea). Acá abajo ya
+ * filtramos por `kind: "exchange"`, así que en teoría siempre es "buy" o
+ * "sell" — pero un `as` taparía la garantía en vez de sostenerla: si algún
+ * día deja de ser cierto, un direction nulo se clasificaría en silencio como
+ * venta. Mejor que reviente acá, fuerte y visible.
+ */
+function assertExchangeDirection(direction: string | null): "buy" | "sell" {
+  if (direction === "buy" || direction === "sell") return direction
+  throw new Error(`Cambio de divisa con direction inesperada: ${JSON.stringify(direction)}`)
+}
+
+/**
+ * `movement.kind` puede ser "income" | "expense" | "exchange", pero acá sólo
+ * llegan cuotas (`installment`), y las exchange no generan cuotas. Mismo
+ * motivo que `assertExchangeDirection`: que lo inesperado sea visible, no
+ * que cualquier `kind` raro caiga callado en la rama de "expense".
+ */
+function assertInstallmentMovementKind(kind: string): "income" | "expense" {
+  if (kind === "income" || kind === "expense") return kind
+  throw new Error(`Cuota de un movimiento con kind inesperado: ${JSON.stringify(kind)}`)
+}
+
 export async function getSettings(userId: string): Promise<Settings | null> {
   const rows = await withUser(userId, (tx) =>
     tx.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1),
@@ -215,13 +239,13 @@ export async function listUsdPositionEvents(userId: string): Promise<PositionEve
         date: e.date,
         usdCents: e.usdCents,
         rate: e.rate,
-        direction: e.direction as "buy" | "sell",
+        direction: assertExchangeDirection(e.direction),
       })),
       usdInstallments.map((i) => ({
         date: i.date!,
         usdCents: i.usdCents,
         rate: i.rate,
-        kind: i.kind as "income" | "expense",
+        kind: assertInstallmentMovementKind(i.kind),
       })),
     )
   })

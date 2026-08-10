@@ -7,6 +7,7 @@ import {
   type UsdExchangeRow,
   type UsdPaidInstallmentRow,
 } from "@/lib/position"
+import { computeBalances, type BalanceSettings, type PaidInstallment, type ExchangeMovement } from "@/lib/balance"
 
 const buy = (date: string, usd: number, rate: number): PositionEvent => ({
   date,
@@ -265,7 +266,7 @@ describe("buildUsdPositionEvents", () => {
     ])
   })
 
-  it("convierte el numeric que llega como string a número una sola vez y bien", () => {
+  it("convierte el rate, que llega como numeric (string), a number con decimales", () => {
     const inicial: UsdInitialBalanceRow = {
       usdCents: 1_000,
       rate: "1234.5678",
@@ -291,5 +292,141 @@ describe("buildUsdPositionEvents", () => {
     const position = usdPosition(events)
     expect(position.usdCents).toBe(30_000)
     expect(position.oversoldUsdCents).toBe(0)
+  })
+})
+
+/**
+ * La regla "sembrar el saldo inicial en dólares y contar sólo desde
+ * initialBalanceDate" está escrita DOS veces: acá (buildUsdPositionEvents) y
+ * en computeBalances (@/lib/balance). Nada más las ata entre sí. Si alguien
+ * toca el corte de fecha de una función sin tocar la otra, este test es el
+ * único que se entera — y sin él, el usuario ve dos saldos en dólares
+ * distintos en /cambios y en el dashboard, sin ningún error a la vista.
+ *
+ * La igualdad exacta que probamos:
+ *
+ *   usdPosition(buildUsdPositionEvents(datos)).usdCents - oversoldUsdCents
+ *     === computeBalances(los mismos datos).usdCents
+ *
+ * (la resta de oversoldUsdCents no es cosmética: usdPosition clampea la
+ * tenencia en cero cuando se vendió de más, computeBalances no — ver el
+ * último caso, "en sobreventa".)
+ */
+describe("usdPosition + buildUsdPositionEvents coincide con computeBalances (si esto se rompe, el usuario ve dos saldos en dólares distintos en /cambios y en el dashboard)", () => {
+  type Datos = {
+    initial: UsdInitialBalanceRow
+    exchanges: UsdExchangeRow[]
+    installments: UsdPaidInstallmentRow[]
+  }
+
+  function calcular(datos: Datos) {
+    const events = buildUsdPositionEvents(datos.initial, datos.exchanges, datos.installments)
+    const position = usdPosition(events)
+
+    const settings: BalanceSettings = {
+      initialArsCents: 0,
+      initialUsdCents: datos.initial.usdCents,
+      initialDate: datos.initial.date,
+    }
+    const paid: PaidInstallment[] = datos.installments.map((i) => ({
+      paidDate: i.date,
+      currency: "USD",
+      kind: i.kind,
+      amountCents: i.usdCents,
+    }))
+    const exchanges: ExchangeMovement[] = datos.exchanges.map((e) => ({
+      date: e.date,
+      direction: e.direction,
+      usdCents: e.usdCents,
+      rate: Number(e.rate),
+    }))
+    const balances = computeBalances(settings, paid, exchanges)
+
+    return { position, balances }
+  }
+
+  function esperarInvariante(datos: Datos) {
+    const { position, balances } = calcular(datos)
+    expect(position.usdCents - position.oversoldUsdCents).toBe(balances.usdCents)
+  }
+
+  it("eventos exactamente en initialBalanceDate cuentan y eventos anteriores se ignoran, igual en las dos funciones", () => {
+    // El caso que realmente ata el corte de fecha: si buildUsdPositionEvents
+    // o computeBalances cambian su "<" por "<=" (o al revés) en cualquiera de
+    // los dos filtros, esto se rompe.
+    esperarInvariante({
+      initial: { usdCents: 40_000, rate: "1000", date: "2026-02-01" },
+      exchanges: [
+        // anterior al saldo inicial: las dos funciones lo tienen que ignorar
+        { date: "2026-01-31", usdCents: 99_900, rate: "1000", direction: "buy" },
+        // misma fecha que el saldo inicial: las dos funciones lo tienen que contar
+        { date: "2026-02-01", usdCents: 5_000, rate: "1300", direction: "buy" },
+      ],
+      installments: [
+        { date: "2026-01-31", usdCents: 50_000, rate: "1000", kind: "income" },
+        { date: "2026-02-01", usdCents: 1_000, rate: "1200", kind: "expense" },
+      ],
+    })
+  })
+
+  it("sólo saldo inicial, sin movimientos", () => {
+    esperarInvariante({
+      initial: { usdCents: 40_000, rate: "1000", date: "2026-01-01" },
+      exchanges: [],
+      installments: [],
+    })
+  })
+
+  it("saldo inicial más compras y ventas de divisa", () => {
+    esperarInvariante({
+      initial: { usdCents: 40_000, rate: "1000", date: "2026-01-01" },
+      exchanges: [
+        { date: "2026-02-01", usdCents: 10_000, rate: "1200", direction: "buy" },
+        { date: "2026-03-01", usdCents: 5_000, rate: "1500", direction: "sell" },
+      ],
+      installments: [],
+    })
+  })
+
+  it("saldo inicial más cuotas cobradas y pagadas en USD", () => {
+    esperarInvariante({
+      initial: { usdCents: 40_000, rate: "1000", date: "2026-01-01" },
+      exchanges: [],
+      installments: [
+        { date: "2026-02-01", usdCents: 3_000, rate: "1100", kind: "income" },
+        { date: "2026-02-15", usdCents: 2_000, rate: "1300", kind: "expense" },
+      ],
+    })
+  })
+
+  it("saldo inicial, compras y ventas de divisa, y cuotas cobradas y pagadas en USD, todo mezclado", () => {
+    esperarInvariante({
+      initial: { usdCents: 40_000, rate: "1000", date: "2026-01-01" },
+      exchanges: [
+        { date: "2026-02-01", usdCents: 10_000, rate: "1200", direction: "buy" },
+        { date: "2026-03-01", usdCents: 5_000, rate: "1500", direction: "sell" },
+      ],
+      installments: [
+        { date: "2026-02-10", usdCents: 3_000, rate: "1100", kind: "income" },
+        { date: "2026-02-20", usdCents: 2_000, rate: "1300", kind: "expense" },
+      ],
+    })
+  })
+
+  it("en sobreventa, restar oversoldUsdCents es lo que hace que la igualdad se cumpla (y sin eso, no se cumple)", () => {
+    const datos: Datos = {
+      initial: { usdCents: 40_000, rate: "1000", date: "2026-01-01" },
+      // vende US$1000 de una tenencia que sólo tiene US$400: sobreventa de US$600.
+      exchanges: [{ date: "2026-06-01", usdCents: 100_000, rate: "1500", direction: "sell" }],
+      installments: [],
+    }
+    const { position, balances } = calcular(datos)
+
+    expect(position.oversoldUsdCents).toBeGreaterThan(0)
+    // Sin la resta, la igualdad no se sostiene: usdPosition clampea la
+    // tenencia en cero (nunca negativa) mientras computeBalances deja el
+    // saldo irse a negativo — son las dos caras de la sección 5.5 del spec.
+    expect(position.usdCents).not.toBe(balances.usdCents)
+    expect(position.usdCents - position.oversoldUsdCents).toBe(balances.usdCents)
   })
 })
