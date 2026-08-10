@@ -37,8 +37,15 @@ export async function MovementScreen({ kind, statusParam }: Props) {
   const { user, settings } = await requireSettings()
   const today = todayInAr()
 
-  const [categories, movements, rate] = await Promise.all([
+  // Dos consultas a propósito, no una: el desplegable de carga (MovementForm)
+  // no debe ofrecer una categoría archivada, pero la lista (MovementList)
+  // arma el nombre de la categoría de CADA movimiento —viejo incluido— y una
+  // categoría archivada tiene que seguir resolviendo su nombre ahí. Si las dos
+  // pantallas compartieran la misma lista "sólo activas", archivar una
+  // categoría haría que los movimientos que la usaban pasen a mostrar "—".
+  const [activeCategories, allCategories, movements, rate] = await Promise.all([
     listCategories(user.id, kind),
+    listCategories(user.id, kind, true),
     listMovements(user.id, { kind }),
     fetchSuggestedRate(settings.preferredRate as RatePreference),
   ])
@@ -55,13 +62,13 @@ export async function MovementScreen({ kind, statusParam }: Props) {
 
       <MovementForm
         kind={kind}
-        categories={categories}
+        categories={activeCategories}
         suggestedRate={rate?.referenceRate ?? null}
       />
 
       <StatusFilter basePath={BASE_PATHS[kind]} current={statusFilter} />
 
-      <MovementList movements={filtered} categories={categories} today={today} />
+      <MovementList movements={filtered} categories={allCategories} today={today} />
     </div>
   )
 }
