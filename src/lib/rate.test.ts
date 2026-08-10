@@ -83,6 +83,103 @@ describe("fetchSuggestedRate", () => {
     expect(await fetchSuggestedRate("blue")).toBeNull()
   })
 
+  it("devuelve null si uno solo de los dos lados es inservible", async () => {
+    // Basta con que uno falle: pre-llenar la mitad del formulario con un
+    // número y la otra con basura es peor que dejarlo vacío.
+    const mitades = [
+      { compra: 1400 },
+      { venta: 1450 },
+      { compra: 1400, venta: 0 },
+      { compra: 0, venta: 1450 },
+      { compra: 1400, venta: null },
+      { compra: 1400, venta: -1 },
+    ]
+
+    for (const body of mitades) {
+      stubFetch(() => ok(body))
+      expect(await fetchSuggestedRate("blue")).toBeNull()
+    }
+  })
+
+  it("devuelve null si el cuerpo no es JSON", async () => {
+    // Un proxy o un portal cautivo que responde 200 con una página HTML.
+    // `response.json()` tira, y eso no puede salir de esta función.
+    stubFetch(
+      () =>
+        new Response("<html>bloqueado</html>", {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        }),
+    )
+
+    expect(await fetchSuggestedRate("blue")).toBeNull()
+  })
+
+  it("devuelve null si el JSON no es un objeto con los campos", async () => {
+    for (const body of [null, 1450, "1450", [], [{ compra: 1400, venta: 1450 }], {}]) {
+      stubFetch(() => ok(body))
+      expect(await fetchSuggestedRate("blue")).toBeNull()
+    }
+  })
+
+  it("no convierte los números que vienen como texto", async () => {
+    // "1450" con comillas no es una cotización: es una API que cambió de forma.
+    // Coercionarla en silencio es peor que no sugerir nada.
+    stubFetch(() => ok({ compra: "1400", venta: "1450" }))
+
+    expect(await fetchSuggestedRate("blue")).toBeNull()
+  })
+
+  it("devuelve null si los números no son finitos", async () => {
+    // JSON no puede transportar NaN ni Infinity, pero el cuerpo lo puede armar
+    // cualquier cosa en el medio. Un TC infinito pre-llenaría el formulario con
+    // algo que después rompe todas las cuentas.
+    for (const par of [
+      { compra: Number.NaN, venta: 1450 },
+      { compra: 1400, venta: Number.POSITIVE_INFINITY },
+    ]) {
+      stubFetch(
+        () => ({ ok: true, json: async () => par }) as unknown as Response,
+      )
+      expect(await fetchSuggestedRate("blue")).toBeNull()
+    }
+  })
+
+  it("devuelve null si la espera se corta por timeout", async () => {
+    // Es lo que tira AbortSignal.timeout cuando vence.
+    stubFetch(() =>
+      Promise.reject(new DOMException("The operation was aborted.", "TimeoutError")),
+    )
+
+    expect(await fetchSuggestedRate("blue")).toBeNull()
+  })
+
+  it("devuelve null ante cualquier estado de error, no sólo el 500", async () => {
+    for (const status of [301, 400, 401, 403, 404, 429, 503]) {
+      stubFetch(() => new Response("nope", { status }))
+      expect(await fetchSuggestedRate("blue")).toBeNull()
+    }
+  })
+
+  it("nunca tira, pase lo que pase con la respuesta", async () => {
+    // El contrato de la sección 5.6: una API de terceros no puede bloquear la
+    // carga de un movimiento. Si esta función tira, el render del formulario
+    // se cae con ella.
+    const respuestasHostiles: (() => Response | Promise<Response>)[] = [
+      () => {
+        throw new Error("fetch explotó de entrada")
+      },
+      () => ({ ok: true, json: () => Promise.reject(new Error("cuerpo cortado")) }) as unknown as Response,
+      () => ({}) as Response,
+      () => null as unknown as Response,
+    ]
+
+    for (const impl of respuestasHostiles) {
+      stubFetch(impl)
+      await expect(fetchSuggestedRate("blue")).resolves.toBeNull()
+    }
+  })
+
   it("corta la espera en vez de colgar el render", async () => {
     const spy = stubFetch(() => ok({ compra: 1400, venta: 1450 }))
 

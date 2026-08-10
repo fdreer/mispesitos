@@ -52,6 +52,79 @@ describe("projectBalance", () => {
     ])
   })
 
+  it("con hoy en un 31, el horizonte no repite ni saltea ningún mes", () => {
+    // El 31 de enero + 1 mes recorta al 28 de febrero. Si el recorte llegara al
+    // mes y no sólo al día, el horizonte devolvería febrero dos veces o se
+    // saltearía uno, y el gráfico mostraría un mes de más o de menos.
+    for (const hoy of ["2026-01-31", "2026-03-31", "2026-05-31", "2028-02-29"]) {
+      const meses = projectBalance(0, [], 13, hoy).map((p) => p.month)
+
+      expect(meses).toHaveLength(13)
+      expect(new Set(meses).size).toBe(13)
+      expect([...meses].sort()).toEqual(meses)
+      expect(meses[0]).toBe(hoy.slice(0, 7))
+    }
+  })
+
+  it("el horizonte cruza el año", () => {
+    const result = projectBalance(
+      10_000_00,
+      [
+        { dueDate: "2026-12-20", arsCents: 1_000_00, kind: "expense" },
+        { dueDate: "2027-01-05", arsCents: 2_000_00, kind: "income" },
+      ],
+      3,
+      "2026-11-30",
+    )
+
+    expect(result).toEqual([
+      { month: "2026-11", arsCents: 10_000_00 },
+      { month: "2026-12", arsCents: 9_000_00 },
+      { month: "2027-01", arsCents: 11_000_00 },
+    ])
+  })
+
+  it("un vencimiento del mes actual anterior a hoy pesa en el mes actual, no se pierde", () => {
+    const result = projectBalance(
+      10_000_00,
+      [{ dueDate: "2026-08-01", arsCents: 3_000_00, kind: "expense" }],
+      2,
+      "2026-08-09",
+    )
+
+    expect(result[0].arsCents).toBe(7_000_00)
+  })
+
+  it("un vencimiento un mes después del último del horizonte no se cuenta", () => {
+    // El otro lado del borde de "un vencimiento exactamente en el último mes".
+    const result = projectBalance(
+      10_000_00,
+      [{ dueDate: "2026-10-01", arsCents: 1_000_00, kind: "expense" }],
+      2,
+      "2026-08-09",
+    )
+
+    expect(result).toEqual([
+      { month: "2026-08", arsCents: 10_000_00 },
+      { month: "2026-09", arsCents: 10_000_00 },
+    ])
+  })
+
+  it("el saldo se acumula mes a mes, no se recalcula desde el inicial en cada uno", () => {
+    const result = projectBalance(
+      10_000_00,
+      [
+        { dueDate: "2026-09-10", arsCents: 1_000_00, kind: "expense" },
+        { dueDate: "2026-10-10", arsCents: 1_000_00, kind: "expense" },
+        { dueDate: "2026-11-10", arsCents: 1_000_00, kind: "expense" },
+      ],
+      4,
+      "2026-08-09",
+    )
+
+    expect(result.map((p) => p.arsCents)).toEqual([10_000_00, 9_000_00, 8_000_00, 7_000_00])
+  })
+
   it("un vencimiento exactamente en el último mes del horizonte queda incluido", () => {
     const result = projectBalance(
       10_000_00,
@@ -96,6 +169,35 @@ describe("spendByCategory", () => {
 
   it("con la lista vacía, devuelve una lista vacía", () => {
     expect(spendByCategory([], [])).toEqual([])
+  })
+
+  it("un gasto de una categoría que no está en la lista cae en Sin categoría", () => {
+    // Pasa cuando la lista viene sólo con las categorías activas y el gasto es
+    // de una archivada: sin esto el gráfico mostraría "undefined" como nombre.
+    const result = spendByCategory(
+      [
+        { categoryId: "archivada-1", arsCents: 2_000 },
+        { categoryId: "activa-1", arsCents: 1_000 },
+      ],
+      [{ id: "activa-1", name: "Comida" }],
+    )
+
+    expect(result).toEqual([
+      { name: "Sin categoría", arsCents: 2_000 },
+      { name: "Comida", arsCents: 1_000 },
+    ])
+  })
+
+  it("los gastos sin categoría se suman junto con los de categoría desconocida", () => {
+    const result = spendByCategory(
+      [
+        { categoryId: null, arsCents: 700 },
+        { categoryId: "fantasma", arsCents: 300 },
+      ],
+      [],
+    )
+
+    expect(result).toEqual([{ name: "Sin categoría", arsCents: 1_000 }])
   })
 
   it("suma junto lo de dos categorías con ids distintos que comparten nombre", () => {
@@ -152,5 +254,58 @@ describe("monthlyTotals", () => {
       { month: "2026-07", incomeArsCents: 0, expenseArsCents: 0 },
       { month: "2026-08", incomeArsCents: 0, expenseArsCents: 0 },
     ])
+  })
+
+  it("cuenta los movimientos del primer y del último mes de la ventana", () => {
+    // El otro lado del borde del test anterior: el 01/06 y el 31/08 están
+    // adentro. Con la ventana corrida un mes, cualquiera de los dos se caería.
+    const result = monthlyTotals(
+      [
+        { date: "2026-06-01", kind: "income", arsCents: 100_00 },
+        { date: "2026-08-31", kind: "expense", arsCents: 200_00 },
+      ],
+      3,
+      "2026-08-09",
+    )
+
+    expect(result).toEqual([
+      { month: "2026-06", incomeArsCents: 100_00, expenseArsCents: 0 },
+      { month: "2026-07", incomeArsCents: 0, expenseArsCents: 0 },
+      { month: "2026-08", incomeArsCents: 0, expenseArsCents: 200_00 },
+    ])
+  })
+
+  it("la ventana termina en el mes de hoy y arranca months-1 meses atrás", () => {
+    expect(monthlyTotals([], 6, "2026-01-31").map((m) => m.month)).toEqual([
+      "2025-08",
+      "2025-09",
+      "2025-10",
+      "2025-11",
+      "2025-12",
+      "2026-01",
+    ])
+  })
+
+  it("con hoy en un 31, la ventana hacia atrás no repite ni saltea ningún mes", () => {
+    // Igual que en la proyección, pero con `addMonthsClamped` en negativo:
+    // el 31 de marzo menos un mes recorta al 28 de febrero, y el mes tiene que
+    // ser febrero, no marzo otra vez.
+    for (const hoy of ["2026-01-31", "2026-03-31", "2026-05-31", "2028-02-29"]) {
+      const meses = monthlyTotals([], 12, hoy).map((m) => m.month)
+
+      expect(meses).toHaveLength(12)
+      expect(new Set(meses).size).toBe(12)
+      expect([...meses].sort()).toEqual(meses)
+      expect(meses.at(-1)).toBe(hoy.slice(0, 7))
+    }
+  })
+
+  it("un mes sin movimientos aparece igual, en cero", () => {
+    // El gráfico necesita el punto: si el mes vacío se salteara, la línea
+    // uniría julio con septiembre como si agosto no hubiera existido.
+    const result = monthlyTotals([], 3, "2026-08-09")
+
+    expect(result).toHaveLength(3)
+    expect(result.every((m) => m.incomeArsCents === 0 && m.expenseArsCents === 0)).toBe(true)
   })
 })

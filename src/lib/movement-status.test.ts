@@ -44,6 +44,38 @@ describe("getMovementStatus", () => {
     expect(getMovementStatus([{ paid: false, dueDate: TODAY }], TODAY)).toBe("pending")
   })
 
+  it("una cuota pagada tarde no deja el movimiento vencido", () => {
+    // La única vencida está paga: ya no se debe nada de ella. Si el estado
+    // mirara todas las cuotas en vez de sólo las impagas, este movimiento
+    // aparecería en rojo en la lista de vencidos para siempre.
+    expect(
+      getMovementStatus(
+        [
+          { paid: true, dueDate: "2026-07-01" },
+          { paid: false, dueDate: "2026-09-01" },
+        ],
+        TODAY,
+      ),
+    ).toBe("pending")
+  })
+
+  it("todas pagadas es pagado aunque todas hayan vencido", () => {
+    expect(
+      getMovementStatus(
+        [
+          { paid: true, dueDate: "2025-01-01" },
+          { paid: true, dueDate: "2025-02-01" },
+        ],
+        TODAY,
+      ),
+    ).toBe("paid")
+  })
+
+  it("una sola cuota impaga que venció ayer alcanza para vencido", () => {
+    // El borde del otro lado del "vence hoy": un día antes ya es vencido.
+    expect(getMovementStatus([{ paid: false, dueDate: "2026-08-09" }], TODAY)).toBe("overdue")
+  })
+
   it("mezcla de cuotas pagadas e impagas vencidas da vencido", () => {
     expect(
       getMovementStatus(

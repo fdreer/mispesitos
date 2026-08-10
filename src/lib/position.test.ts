@@ -8,6 +8,7 @@ import {
   type UsdPaidInstallmentRow,
 } from "@/lib/position"
 import { computeBalances, type BalanceSettings, type PaidInstallment, type ExchangeMovement } from "@/lib/balance"
+import { convertToArs } from "@/lib/money"
 
 const buy = (date: string, usd: number, rate: number): PositionEvent => ({
   date,
@@ -157,6 +158,128 @@ describe("usdPosition", () => {
     const alRevés = [eventos[0], eventos[2], eventos[1]]
 
     expect(usdPosition(alRevés)).toEqual(usdPosition(eventos))
+  })
+
+  it("las 720 permutaciones de los mismos eventos dan exactamente el mismo resultado", () => {
+    // La base devuelve las filas en el orden que se le antoja y el orden puede
+    // cambiar entre recargas. El usuario tiene que ver siempre el mismo número.
+    // Seis eventos elegidos para pisar todos los desempates a la vez: misma
+    // fecha con entrada y salida, dos salidas del mismo día de distinto monto,
+    // dos del mismo monto a distinto TC, y la posición en descubierto —el caso
+    // en el que el orden sí cambiaría el resultado si no hubiera desempate.
+    const eventos = [
+      buy("2026-01-10", 50, 1000),
+      buy("2026-06-10", 30, 1300),
+      sell("2026-06-10", 60, 1500),
+      sell("2026-06-10", 40, 1200),
+      sell("2026-06-10", 40, 1700),
+      sell("2026-07-01", 25, 1600),
+    ]
+    const esperado = usdPosition(eventos)
+
+    const permutaciones = (lista: PositionEvent[]): PositionEvent[][] =>
+      lista.length <= 1
+        ? [lista]
+        : lista.flatMap((evento, i) =>
+            permutaciones([...lista.slice(0, i), ...lista.slice(i + 1)]).map((resto) => [
+              evento,
+              ...resto,
+            ]),
+          )
+
+    const todas = permutaciones(eventos)
+    expect(todas).toHaveLength(720)
+
+    const distintas = todas.filter(
+      (orden) => JSON.stringify(usdPosition(orden)) !== JSON.stringify(esperado),
+    )
+    expect(distintas).toEqual([])
+  })
+
+  it("no reordena el array que le pasan", () => {
+    // usdPosition ordena para calcular. Si ordenara sobre el array original,
+    // el llamador se quedaría con sus eventos movidos de lugar sin pedirlo.
+    const eventos = [sell("2026-06-10", 100, 1500), buy("2026-01-10", 100, 1000)]
+    const comoLlegó = JSON.parse(JSON.stringify(eventos)) as PositionEvent[]
+
+    usdPosition(eventos)
+
+    expect(eventos).toEqual(comoLlegó)
+  })
+
+  it("al liquidar toda la tenencia, el resultado es exactamente lo cobrado menos lo gastado", () => {
+    // La cuenta que el usuario puede hacer con una calculadora: vendí todo a
+    // tanto, lo había comprado a tanto, la diferencia es esto. Con TC de cuatro
+    // decimales, que es lo que permite la columna `numeric(12,4)`.
+    const casos = [
+      { compras: [[10_000, 1234.5678]], venta: [10_000, 1500.9999] },
+      { compras: [[333, 1000.3333], [777, 1450.7777]], venta: [1_110, 1601.1111] },
+      { compras: [[1, 1234.5678]], venta: [1, 1000.0001] },
+    ] as const
+
+    for (const caso of casos) {
+      const eventos: PositionEvent[] = caso.compras.map(([usdCents, rate], i) => ({
+        date: `2026-0${i + 1}-10`,
+        usdCents,
+        rate,
+        direction: "in",
+      }))
+      const [usdVendidos, tcVenta] = caso.venta
+      eventos.push({ date: "2026-09-10", usdCents: usdVendidos, rate: tcVenta, direction: "out" })
+
+      const gastado = caso.compras.reduce((a, [c, r]) => a + convertToArs(c, r), 0)
+      const cobrado = convertToArs(usdVendidos, tcVenta)
+
+      const p = usdPosition(eventos)
+      expect(p.usdCents).toBe(0)
+      expect(p.costArsCents).toBe(0)
+      expect(p.averageRate).toBe(0)
+      expect(p.realizedArsCents).toBe(cobrado - gastado)
+    }
+  })
+
+  it("la diferencia de cambio de una venta parcial se redondea al centavo", () => {
+    // Compra de US$3,33 a 1000,3333 => 333 * 1000,3333 = 333.110,9889 centavos
+    // de peso, que redondean a 333.111. El promedio queda en 333.111 / 333 =
+    // 1000,33333… Vender US$1 a 1500,5 realiza 100 * (1500,5 - 1000,33333…) =
+    // 50.016,6666… centavos, que redondean a 50.017.
+    //
+    // Y la descarga de costo va por su propio redondeo: 100 * 1000,33333… =
+    // 100.033,33… => 100.033, así que quedan 333.111 - 100.033 = 233.078.
+    const p = usdPosition([
+      { date: "2026-01-10", usdCents: 333, rate: 1000.3333, direction: "in" },
+      { date: "2026-06-10", usdCents: 100, rate: 1500.5, direction: "out" },
+    ])
+
+    expect(p.usdCents).toBe(233)
+    expect(p.realizedArsCents).toBe(50_017)
+    expect(p.costArsCents).toBe(233_078)
+    expect(Number.isInteger(p.realizedArsCents)).toBe(true)
+    expect(Number.isInteger(p.costArsCents)).toBe(true)
+  })
+
+  it("la sobreventa se acumula y no se borra con una compra posterior", () => {
+    // Una vez que se dispuso de dólares que no estaban cargados, el aviso
+    // queda: comprar después no explica de dónde salieron los de antes.
+    const p = usdPosition([
+      sell("2026-01-10", 100, 1500),
+      buy("2026-02-10", 200, 1000),
+      sell("2026-03-10", 300, 1600),
+    ])
+
+    expect(p.oversoldUsdCents).toBe(20_000) // 100 de la primera + 100 de la última
+    expect(p.usdCents).toBe(0)
+    expect(p.costArsCents).toBe(0)
+  })
+
+  it("una salida de cero dólares no toca nada", () => {
+    const antes = usdPosition([buy("2026-01-10", 100, 1000)])
+    const después = usdPosition([
+      buy("2026-01-10", 100, 1000),
+      sell("2026-06-10", 0, 1500),
+    ])
+
+    expect(después).toEqual(antes)
   })
 })
 
