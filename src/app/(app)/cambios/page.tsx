@@ -19,7 +19,7 @@ export default async function CambiosPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Cambios</h1>
+      <h1 className="text-2xl font-semibold text-paper">Cambios</h1>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>

@@ -54,7 +54,7 @@ export async function MovementScreen({ kind, statusParam }: Props) {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">{TITLES[kind]}</h1>
+      <h1 className="text-2xl font-semibold text-paper">{TITLES[kind]}</h1>
 
       <MovementForm
         kind={kind}

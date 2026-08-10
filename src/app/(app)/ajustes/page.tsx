@@ -6,7 +6,7 @@ export default async function AjustesPage() {
 
   return (
     <div className="max-w-sm space-y-6">
-      <h1 className="text-2xl font-semibold">Ajustes</h1>
+      <h1 className="text-2xl font-semibold text-paper">Ajustes</h1>
       <SettingsForm
         defaults={{
           initialBalanceArs: String(settings.initialBalanceArsCents / 100),

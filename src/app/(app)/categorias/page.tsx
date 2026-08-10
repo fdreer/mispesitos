@@ -11,7 +11,7 @@ export default async function CategoriasPage() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-2xl font-semibold">Categorías</h1>
+      <h1 className="text-2xl font-semibold text-paper">Categorías</h1>
       <CategoryManager kind="income" categories={categories.filter((c) => c.kind === "income")} />
       <CategoryManager kind="expense" categories={categories.filter((c) => c.kind === "expense")} />
     </div>

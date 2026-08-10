@@ -177,7 +177,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Dashboard</h1>
+      <h1 className="text-2xl font-semibold text-paper">Dashboard</h1>
 
       <BalanceCards
         arsCents={balances.arsCents}
