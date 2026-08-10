@@ -116,6 +116,24 @@ describe("parseAmountToCents", () => {
     expect(parseAmountToCents("1.234.567,89")).toBe(123_456_789)
   })
 
+  it("sin punto, VARIAS comas son separadores de miles: no hay otra lectura posible", () => {
+    // La contracara de "1.234.567" a la argentina. Un decimal no lleva dos
+    // comas, así que acá no hay ambigüedad que resolver: son miles y nada más.
+    // Antes devolvía null porque la rama inglesa exigía un decimal final.
+    expect(parseAmountToCents("1,234,567")).toBe(123_456_700)
+    expect(parseAmountToCents("12,345,678")).toBe(1_234_567_800)
+    expect(parseAmountToCents("-2,000,000")).toBe(-200_000_000)
+  })
+
+  it("una sola coma sigue siendo el separador decimal, que es como se escribe acá", () => {
+    // NO CAMBIAR. Con una sola coma la ambigüedad es real y se resuelve a favor
+    // de es-AR: "1,234" son $1,23. Leerla como miles rompería "1,5", que es lo
+    // que la gente tipea todo el tiempo.
+    expect(parseAmountToCents("1,234")).toBe(123)
+    expect(parseAmountToCents("1,5")).toBe(150)
+    expect(parseAmountToCents("250,75")).toBe(25_075)
+  })
+
   it("rechaza mezclas de puntos y comas que no son ningún formato, en vez de inventar un importe", () => {
     // Son errores de tipeo. Devolver null hace que el formulario pida
     // corregirlo; adivinar guardaría un importe que el usuario nunca escribió.
