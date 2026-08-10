@@ -75,6 +75,52 @@ describe("settingsSchema", () => {
     expect(result.data.initialBalanceUsdRate).toBe(1450)
   })
 
+  /**
+   * NO BORRAR NI RELAJAR. `user_settings.initial_balance_usd_rate` es
+   * `numeric(12,4)`, la misma columna que `movement.rate`, así que necesita la
+   * misma cota. Va aparte porque este TC pasa por `exchangeRate`, que admite
+   * cero, y el del movimiento por `positiveRate`, que no: son dos piezas
+   * distintas y la cota tiene que estar en las dos.
+   */
+  it("rechaza un TC del saldo inicial que no entra en la columna", () => {
+    for (const tipeado of ["100000000", "100.000.000"]) {
+      const result = settingsSchema.safeParse({ ...valid, initialBalanceUsdRate: tipeado })
+      expect(result.success).toBe(false)
+      expect(fieldError(result, "initialBalanceUsdRate")?.message).toBe(
+        "El tipo de cambio no puede pasar de 99.999.999,9999.",
+      )
+    }
+  })
+
+  it("rechaza un TC del saldo inicial con más de cuatro decimales", () => {
+    const result = settingsSchema.safeParse({ ...valid, initialBalanceUsdRate: "1450,75259" })
+    expect(result.success).toBe(false)
+    expect(fieldError(result, "initialBalanceUsdRate")?.message).toBe(
+      "El tipo de cambio admite hasta cuatro decimales.",
+    )
+  })
+
+  it("la cota no le come el cero al saldo inicial sin dólares", () => {
+    // `exchangeRate` admite cero a propósito y `positiveRate` no: la cota se
+    // agrega sin pisar esa diferencia.
+    const result = settingsSchema.safeParse({
+      ...valid,
+      initialBalanceUsdCents: "0",
+      initialBalanceUsdRate: "0",
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it("acepta el TC del saldo inicial más grande y más preciso que la columna guarda", () => {
+    const result = settingsSchema.safeParse({
+      ...valid,
+      initialBalanceUsdRate: "99.999.999,9999",
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.initialBalanceUsdRate).toBe(99_999_999.9999)
+  })
+
   it("rechaza una preferencia de dólar que no está en la lista", () => {
     const result = settingsSchema.safeParse({ ...valid, preferredRate: "turista" })
     expect(result.success).toBe(false)
@@ -207,6 +253,55 @@ describe("movementSchema", () => {
     })
     expect(result.success).toBe(false)
     expect(fieldError(result, "rate")).toBeDefined()
+  })
+
+  /**
+   * NO BORRAR NI RELAJAR. `movement.rate` es `numeric(12,4)`: 8 dígitos enteros
+   * y 4 decimales, ni uno más. Lo que no entra en la columna se rechaza acá, en
+   * el campo, y no en el INSERT.
+   *
+   * Los dos lados fallaban distinto y los dos mal: un TC de 9 dígitos hacía que
+   * Postgres tirara y el usuario viera "No pudimos guardar el movimiento" sin
+   * saber qué campo mirar, y uno de 5 decimales ni siquiera fallaba —Postgres lo
+   * redondeaba en silencio y guardaba un número distinto del que se escribió.
+   */
+  const usdConTc = (rate: string) => ({
+    ...validMovement,
+    currency: "USD",
+    rate,
+    amountCents: "100",
+    installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
+  })
+
+  it("rechaza un TC con más dígitos enteros de los que entran en la columna", () => {
+    for (const tipeado of ["100000000", "100.000.000", "999999999,5"]) {
+      const result = movementSchema.safeParse(usdConTc(tipeado))
+      expect(result.success).toBe(false)
+      expect(fieldError(result, "rate")?.message).toBe(
+        "El tipo de cambio no puede pasar de 99.999.999,9999.",
+      )
+    }
+  })
+
+  it("rechaza un TC con más de cuatro decimales, que la base redondearía en silencio", () => {
+    // "1450,75259" se guardaría como 1450,7526: un TC que la persona nunca
+    // escribió, sin un solo error a la vista.
+    for (const tipeado of ["1450,75259", "1,00001", "0,123456"]) {
+      const result = movementSchema.safeParse(usdConTc(tipeado))
+      expect(result.success).toBe(false)
+      expect(fieldError(result, "rate")?.message).toBe(
+        "El tipo de cambio admite hasta cuatro decimales.",
+      )
+    }
+  })
+
+  it("acepta el TC más grande y más preciso que la columna sí guarda", () => {
+    // El borde exacto de numeric(12,4). Un test que sólo rechazara lo grande
+    // pasaría igual con una cota inventada más chica que la columna.
+    const result = movementSchema.safeParse(usdConTc("99.999.999,9999"))
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.rate).toBe(99_999_999.9999)
   })
 
   it("rechaza un movimiento sin cuotas", () => {
