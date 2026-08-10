@@ -18,6 +18,23 @@
  * sola definición, un solo comportamiento ante la misma fila mala.
  */
 
+import type { Currency } from "@/lib/money"
+
+/**
+ * `movement.currency` es "ARS" o "USD", y lo hace cumplir el Zod de las Server
+ * Actions — pero la columna es `text` y el tipo de Drizzle es `string`.
+ *
+ * Es el mismo agujero que el `direction` nulo, en otra columna: con un `as`,
+ * una moneda inesperada se cuela sin ruido y `computeBalances` la clasifica en
+ * el `else`, o sea la cuenta como DÓLARES. Un importe en una moneda que no
+ * existe sumado al saldo en dólares y valuado al TC del día no se parece en
+ * nada a un error: se parece a un saldo.
+ */
+export function assertCurrency(currency: string): Currency {
+  if (currency === "ARS" || currency === "USD") return currency
+  throw new Error(`Movimiento con currency inesperada: ${JSON.stringify(currency)}`)
+}
+
 /**
  * `movement.direction` sólo se llena para `kind: "exchange"`
  * (`createExchange` siempre lo setea). Quien llame acá ya tiene que haber

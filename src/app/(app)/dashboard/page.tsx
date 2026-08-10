@@ -18,6 +18,7 @@ import {
 import { addMonthsClamped, monthKey, todayInAr } from "@/lib/dates"
 import { convertToArs } from "@/lib/money"
 import {
+  assertCurrency,
   assertExchangeDirection,
   assertInstallmentMovementKind,
 } from "@/lib/movement-asserts"
@@ -65,7 +66,10 @@ export default async function DashboardPage() {
       // Antes de esa constraint el supuesto no lo sostenía nadie y una fila
       // así hacía reventar el `monthKey(null)` de más abajo.
       paidDate: p.paidDate!,
-      currency: p.currency as "ARS" | "USD",
+      // Con un `as`, una moneda inesperada caía en el `else` de
+      // computeBalances y sumaba al saldo en DÓLARES en silencio. Mismo
+      // criterio que los dos asserts de abajo.
+      currency: assertCurrency(p.currency),
       kind: assertInstallmentMovementKind(p.kind),
       amountCents: p.amountCents,
     })),
@@ -142,7 +146,7 @@ export default async function DashboardPage() {
       dueDate: p.dueDate,
       amountCents: p.amountCents,
       description: p.description,
-      currency: p.currency as "ARS" | "USD",
+      currency: assertCurrency(p.currency),
       kind: assertInstallmentMovementKind(p.kind),
       status: statusByMovement.get(p.movementId) ?? "pending",
     }))
