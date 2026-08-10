@@ -60,4 +60,21 @@ describe("fetchSuggestedRate", () => {
 
     expect(await fetchSuggestedRate("blue")).toBeNull()
   })
+
+  it("devuelve null si el TC viene en cero o negativo", async () => {
+    stubFetch(() => ok({ compra: 0, venta: 0 }))
+    expect(await fetchSuggestedRate("blue")).toBeNull()
+
+    stubFetch(() => ok({ compra: -1400, venta: -1450 }))
+    expect(await fetchSuggestedRate("blue")).toBeNull()
+  })
+
+  it("corta la espera en vez de colgar el render", async () => {
+    const spy = stubFetch(() => ok({ compra: 1400, venta: 1450 }))
+
+    await fetchSuggestedRate("blue")
+
+    const init = spy.mock.calls[0][1] as RequestInit
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+  })
 })

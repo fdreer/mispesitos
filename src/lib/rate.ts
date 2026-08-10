@@ -16,6 +16,10 @@ const ENDPOINTS: Record<RatePreference, string> = {
 
 const CACHE_SECONDS = 600
 
+// Sin esto, una conexión que nunca responde cuelga el render del formulario —
+// justo lo que esta función existe para evitar. El abort cae en el catch.
+const TIMEOUT_MS = 3_000
+
 /**
  * Cotización sugerida. SIEMPRE puede devolver null: la sección 5.6 del spec
  * exige que una API de terceros nunca bloquee la carga de un movimiento.
@@ -27,7 +31,10 @@ export async function fetchSuggestedRate(
   const url = `https://dolarapi.com/v1/dolares/${ENDPOINTS[preference]}`
 
   try {
-    const response = await fetch(url, { next: { revalidate: CACHE_SECONDS } })
+    const response = await fetch(url, {
+      next: { revalidate: CACHE_SECONDS },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
     if (!response.ok) return null
 
     const data: unknown = await response.json()
@@ -36,6 +43,9 @@ export async function fetchSuggestedRate(
     const { compra, venta } = data as { compra?: unknown; venta?: unknown }
     if (typeof compra !== "number" || typeof venta !== "number") return null
     if (!Number.isFinite(compra) || !Number.isFinite(venta)) return null
+    // Un TC cero o negativo no es una cotización: pre-llenar el formulario con
+    // eso valuaría los dólares en nada. Mejor campo vacío y que lo tipee.
+    if (compra <= 0 || venta <= 0) return null
 
     // La API informa desde la perspectiva de la casa de cambio: su "venta"
     // es el precio al que vos comprás.
