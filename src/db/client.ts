@@ -6,6 +6,16 @@ import postgres from "postgres"
 
 import * as schema from "@/db/schema"
 
+/**
+ * DATABASE_URL conecta como `app_user`, NO como el dueño de las tablas. Ese rol
+ * no tiene BYPASSRLS, así que las policies de RLS también le aplican fuera de
+ * withUser(): una consulta que se olvide de filtrar por usuario devuelve cero
+ * filas en vez de devolver datos ajenos. Apuntar esto al rol `postgres` apaga
+ * esa segunda capa sin que nada falle a la vista.
+ *
+ * Las migraciones son otra cadena, MIGRATION_DATABASE_URL, y las lee
+ * drizzle.config.ts: necesitan DDL, que `app_user` no tiene.
+ */
 const connectionString = process.env.DATABASE_URL
 if (!connectionString) {
   throw new Error("Falta DATABASE_URL. Copiá .env.example a .env.local y completalo.")

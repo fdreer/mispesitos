@@ -8,8 +8,10 @@ const USER_A = "rls-test-user-a"
 const USER_B = "rls-test-user-b"
 
 async function seedUser(id: string) {
-  // `user` no lleva FORCE ROW LEVEL SECURITY: better-auth la consulta con el rol
-  // de conexión, fuera de withUser, así que ese rol la tiene que poder escribir.
+  // `user` sí se puede escribir con la conexión de la app y fuera de withUser:
+  // la migración 0004 le da a `app_user` una policy sin condición sobre las
+  // tablas de better-auth, porque better-auth las consulta así. El aislamiento
+  // por usuario de esas tablas lo hace better-auth, no RLS.
   await db
     .insert(user)
     .values({
@@ -94,9 +96,11 @@ describe("RLS", () => {
   // sobre lo que ve una consulta que se olvidó de pasar por withUser().
   //
   // El dueño de una tabla saltea sus propias policies salvo que la tabla declare
-  // FORCE. Este test es el único que verifica esa declaración. Si se pone en
-  // rojo, el arreglo es volver a poner FORCE en la migración, nunca bajar la
-  // expectativa.
+  // FORCE. Hoy la app no conecta como dueño, así que FORCE no es lo que sostiene
+  // el aislamiento — lo sostiene el rol `app_user`, y eso lo prueba el test de
+  // abajo. FORCE se declara igual porque cubre el día que algo conecte con el
+  // rol dueño, y este test verifica que la declaración sigue en pie: si se pone
+  // en rojo, el arreglo es volver a ponerla en la migración.
   it("las cuatro tablas de la app declaran FORCE ROW LEVEL SECURITY", async () => {
     const rows = await db.execute(sql`
       SELECT relname, relrowsecurity, relforcerowsecurity
@@ -114,24 +118,21 @@ describe("RLS", () => {
     ])
   })
 
-  // SALTEADO A PROPÓSITO: HOY ESTA GARANTÍA NO EXISTE. No es un test de más ni
-  // un test roto — es un agujero conocido, documentado en
-  // .superpowers/sdd/task-9-report.md.
+  // NO BORRAR NI RELAJAR. Éste es EL test de la segunda capa: el único que
+  // prueba qué pasa cuando alguien se olvida de withUser().
   //
-  // Éste es el comportamiento que se buscaba con FORCE: que una consulta que se
-  // olvide de withUser() devuelva cero filas en vez de devolver datos ajenos.
-  // No se cumple porque el rol con el que la app conecta contra Supabase es
-  // `postgres`, y ese rol tiene el atributo BYPASSRLS (verificado en pg_roles).
-  // BYPASSRLS le gana a FORCE: el rol saltea RLS por completo, sea dueño o no.
-  // Corrido sin skip hoy, `db.select().from(category)` devuelve las categorías
-  // de TODOS los usuarios.
+  // Lo que lo hace pasar no es FORCE, es con qué rol conecta la app.
+  // DATABASE_URL apunta a `app_user`, un rol sin BYPASSRLS y miembro de
+  // `authenticated`: las policies `TO authenticated` le aplican también acá
+  // afuera, donde `request.jwt.claims` no está seteado, así que la comparación
+  // da NULL y no pasa ninguna fila.
   //
-  // Para que esto pase de verdad, la app tiene que conectar con un rol propio
-  // sin BYPASSRLS (decisión de infraestructura: crear el rol en Supabase y
-  // cambiar DATABASE_URL, dejando `postgres` sólo para las migraciones).
-  // Cuando eso ocurra, sacarle el skip: pasa a ser la prueba real de la segunda
-  // capa. Mientras tanto, la única capa que aísla usuarios es withUser().
-  it.skip("fuera de withUser, ni el rol dueño ve filas de las tablas de la app", async () => {
+  // Si este test se pone en rojo, lo más probable es que DATABASE_URL haya
+  // vuelto a apuntar al rol dueño (`postgres`), que tiene BYPASSRLS y saltea RLS
+  // por completo. El arreglo es volver a apuntarla a `app_user`, nunca bajar la
+  // expectativa: en rojo, este test está diciendo que cualquier consulta sin
+  // WHERE devuelve datos de todos los usuarios.
+  it("fuera de withUser, la conexión de la app no ve filas de las tablas de la app", async () => {
     // Hay dos categorías sembradas, una de A y una de B, y ninguna es visible.
     const rows = await db.select().from(category)
 

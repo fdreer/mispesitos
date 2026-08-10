@@ -29,6 +29,20 @@
       "when": 1786334167221,
       "tag": "0003_rls_tablas_de_la_app",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786334985991,
+      "tag": "0004_rol_de_aplicacion",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786335205491,
+      "tag": "0005_policies_sin_claims",
+      "breakpoints": true
     }
   ]
 }
