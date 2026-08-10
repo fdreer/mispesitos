@@ -131,7 +131,11 @@ describe("computeBalances", () => {
   })
 
   it("la pata en pesos de un cambio se redondea al centavo", () => {
-    // US$1,23 a 1450,5678 son 1.784,1983… centavos de peso: 1.784.
+    // US$ 1,23 a 1450,5678 son $1.784,1983… — o sea 178.419,83… centavos, que
+    // redondeados al centavo dan 178.420. En centavos: 123 × 1450,5678.
+    // (El comentario decía "1.784,1983… centavos: 1.784", cien veces menos.
+    // La aserción siempre estuvo bien; el comentario era la trampa para el que
+    // viniera después a "corregirla".)
     const exchanges: ExchangeMovement[] = [
       { date: "2026-03-01", direction: "buy", usdCents: 123, rate: 1450.5678 },
     ]
