@@ -19,9 +19,15 @@
  * es quien tiene acceso a `db`. Acá sólo vive la decisión: qué hacer con lo
  * que esa consulta devuelve.
  */
+/**
+ * Fila de pg_roles tal como llega. Los dos campos son `unknown` a propósito:
+ * client.ts castea el resultado de `db.execute` a boolean, pero ese cast es una
+ * promesa de TypeScript sobre lo que devuelve la base, no una verificación de
+ * nada. La verificación se hace acá, en tiempo de ejecución.
+ */
 export type FilaRolPg = {
-  rolbypassrls: boolean
-  rolsuper: boolean
+  rolbypassrls: unknown
+  rolsuper: unknown
 }
 
 export type EjecutorConsultaRol = () => Promise<FilaRolPg[]>
@@ -37,6 +43,20 @@ export async function verificarRolNoSalteaRls(
         "devolvió ninguna fila para el rol actual (current_user). Una verificación de " +
         "seguridad que no pudo confirmar nada no puede dejar pasar la conexión. Revisá " +
         "que el rol de DATABASE_URL exista en pg_roles.",
+    )
+  }
+
+  // Los dos atributos tienen que llegar como booleanos de verdad. Si faltan
+  // —una columna renombrada, un driver que devuelve otra forma— el `||` de
+  // abajo da falsy y la verificación deja pasar la conexión sin haber
+  // confirmado nada, que es exactamente lo que el chequeo de la fila vacía
+  // evita. Un control de seguridad falla cerrado en los dos casos o en ninguno.
+  if (typeof fila.rolbypassrls !== "boolean" || typeof fila.rolsuper !== "boolean") {
+    throw new Error(
+      "No se pudo verificar el rol de conexión a la base: la consulta a pg_roles devolvió " +
+        `una fila sin los atributos booleanos esperados (${JSON.stringify(fila)}). Una ` +
+        "verificación de seguridad que no pudo confirmar nada no puede dejar pasar la " +
+        "conexión. Revisá la consulta de client.ts contra pg_roles.",
     )
   }
 
