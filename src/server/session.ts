@@ -1,15 +1,25 @@
 import "server-only"
 
+import { cache } from "react"
 import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 
 import { auth } from "@/auth"
 import { getSettings } from "@/server/queries"
 
-export async function getOptionalUser() {
+/**
+ * `cache` de React, no un memo propio: memoiza por REQUEST, que es la vida útil
+ * que corresponde a una sesión. Hace falta porque el layout de (app) y cada
+ * página llaman las dos a `requireSettings()`, así que sin esto cada carga lee
+ * la sesión dos veces —y cada lectura es un viaje a la base—.
+ *
+ * Fuera de un render de React (los tests) no hay caché instalada y la función
+ * se llama directo, sin memo: la suite no cambia de comportamiento.
+ */
+export const getOptionalUser = cache(async () => {
   const session = await auth.api.getSession({ headers: await headers() })
   return session?.user ?? null
-}
+})
 
 /**
  * Punto de entrada obligatorio de todo acceso a datos.

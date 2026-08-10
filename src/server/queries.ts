@@ -1,5 +1,7 @@
 import "server-only"
 
+import { cache } from "react"
+
 import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm"
 
 import { withUser } from "@/db/client"
@@ -12,12 +14,18 @@ import { buildUsdPositionEvents, type PositionEvent } from "@/lib/position"
 
 export type Settings = typeof userSettings.$inferSelect
 
-export async function getSettings(userId: string): Promise<Settings | null> {
+/**
+ * Memoizada por request, mismo motivo que `getOptionalUser` (@/server/session):
+ * `requireSettings()` la llama desde el layout de (app) y otra vez desde cada
+ * página, y cada llamada abre su propia transacción. Es la única consulta de la
+ * app que se repite tal cual dentro del mismo request.
+ */
+export const getSettings = cache(async (userId: string): Promise<Settings | null> => {
   const rows = await withUser(userId, (tx) =>
     tx.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1),
   )
   return rows[0] ?? null
-}
+})
 
 export type Category = typeof category.$inferSelect
 export type Movement = typeof movement.$inferSelect
