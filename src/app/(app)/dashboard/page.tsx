@@ -6,6 +6,7 @@ import { computeBalances } from "@/lib/balance"
 import { monthlyTotals, projectBalance, spendByCategory } from "@/lib/dashboard"
 import { addMonthsClamped, monthKey, todayInAr } from "@/lib/dates"
 import { convertToArs } from "@/lib/money"
+import { getMovementStatus } from "@/lib/movement-status"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import {
   listCategories,
@@ -85,6 +86,17 @@ export default async function DashboardPage() {
   )
 
   // Vencimientos: lo atrasado más lo que vence dentro de un mes.
+  //
+  // El estado del enlace se deriva del MOVIMIENTO entero, no de la cuota de la
+  // fila: es el mismo criterio que usa el filtro de /ingresos y /egresos. Un
+  // movimiento con una cuota atrasada y otra por vencer es "overdue" completo,
+  // así que la fila de la cuota que todavía no venció también tiene que llevar
+  // a esa lista — si no, el enlace deja al usuario en una lista donde el
+  // movimiento que venía a ver no está.
+  const statusByMovement = new Map(
+    movements.map((m) => [m.id, getMovementStatus(m.installments, today)]),
+  )
+
   const limit = addMonthsClamped(today, 1)
   const upcoming = pending
     .filter((p) => p.dueDate <= limit)
@@ -97,6 +109,7 @@ export default async function DashboardPage() {
       description: p.description,
       currency: p.currency as "ARS" | "USD",
       kind: p.kind as "income" | "expense",
+      status: statusByMovement.get(p.movementId) ?? "pending",
     }))
 
   const expenseMovements = movements.filter((m) => m.kind === "expense")
@@ -140,7 +153,7 @@ export default async function DashboardPage() {
           .reduce((a, p) => a + toArs(p.amountCents, p.currency, p.rate), 0)}
       />
 
-      <Upcoming items={upcoming} today={today} />
+      <Upcoming items={upcoming} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>

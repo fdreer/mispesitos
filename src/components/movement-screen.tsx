@@ -2,6 +2,7 @@ import { MovementForm } from "@/components/movement-form"
 import { MovementList } from "@/components/movement-list"
 import { StatusFilter } from "@/components/status-filter"
 import { todayInAr } from "@/lib/dates"
+import { BASE_PATHS } from "@/lib/movement-routes"
 import { getMovementStatus, type MovementStatus } from "@/lib/movement-status"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import { listCategories, listMovements } from "@/server/queries"
@@ -10,11 +11,6 @@ import { requireSettings } from "@/server/session"
 const TITLES: Record<"income" | "expense", string> = {
   income: "Ingresos",
   expense: "Egresos",
-}
-
-const BASE_PATHS: Record<"income" | "expense", string> = {
-  income: "/ingresos",
-  expense: "/egresos",
 }
 
 const STATUS_VALUES: MovementStatus[] = ["pending", "paid", "overdue"]
