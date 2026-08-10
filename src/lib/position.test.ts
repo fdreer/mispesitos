@@ -303,6 +303,12 @@ describe("buildUsdPositionEvents", () => {
  * único que se entera — y sin él, el usuario ve dos saldos en dólares
  * distintos en /cambios y en el dashboard, sin ningún error a la vista.
  *
+ * OJO con lo que este test NO cubre: el corte de fecha también existe en SQL
+ * (el gte de listUsdPositionEvents, en @/server/queries), y esa copia no tiene
+ * test. Cambiar ese gte por gt saca del cálculo los movimientos del día del
+ * saldo inicial y deja esta suite en verde. Verde acá no significa "no pueden
+ * discrepar": significa "las dos funciones puras están de acuerdo".
+ *
  * La igualdad exacta que probamos:
  *
  *   usdPosition(buildUsdPositionEvents(datos)).usdCents - oversoldUsdCents
@@ -312,7 +318,7 @@ describe("buildUsdPositionEvents", () => {
  * tenencia en cero cuando se vendió de más, computeBalances no — ver el
  * último caso, "en sobreventa".)
  */
-describe("usdPosition + buildUsdPositionEvents coincide con computeBalances (si esto se rompe, el usuario ve dos saldos en dólares distintos en /cambios y en el dashboard)", () => {
+describe("la posición en dólares coincide con el saldo en dólares", () => {
   type Datos = {
     initial: UsdInitialBalanceRow
     exchanges: UsdExchangeRow[]

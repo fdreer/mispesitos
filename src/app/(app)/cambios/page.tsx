@@ -57,14 +57,20 @@ export default async function CambiosPage() {
       </div>
 
       {position.oversoldUsdCents > 0 && (
-        <p className="text-destructive text-sm">
-          En algún punto de tu historial salieron más dólares de los que tenías cargados: en
-          total, {formatMoney(position.oversoldUsdCents, "USD")}. Cargá la compra o el ingreso en
-          dólares que te falta con la fecha real en que pasó (no con la de hoy) y el aviso se
-          apaga solo. Mientras tanto es normal que este número no coincida con el saldo en
-          dólares del dashboard: acá la tenencia nunca baja de cero, ahí sí puede quedar
-          negativa, y la diferencia entre los dos es exactamente esto.
-        </p>
+        <div className="space-y-1 text-sm">
+          <p className="text-destructive">
+            En algún punto de tu historial salieron más dólares de los que tenías cargados: en
+            total, {formatMoney(position.oversoldUsdCents, "USD")}. Cargá la compra o el ingreso
+            en dólares que te falte con la fecha real en que pasó (no con la de hoy): la posición
+            se recalcula por fecha, así que el aviso se apaga cuando lo que falta queda cargado
+            antes de la salida.
+          </p>
+          <p className="text-muted-foreground">
+            Mientras tanto es normal que este número no coincida con el saldo en dólares del
+            dashboard: acá la tenencia nunca baja de cero, ahí sí puede quedar negativa, y la
+            diferencia entre los dos es exactamente esto.
+          </p>
+        </div>
       )}
 
       <ExchangeForm buyRate={rate?.buyRate ?? null} sellRate={rate?.sellRate ?? null} />
