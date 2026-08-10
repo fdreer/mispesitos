@@ -61,8 +61,20 @@ function normalizeSeparators(text: string): string | null {
     return null
   }
 
-  // Sola, la coma es siempre el separador decimal: es como se escribe acá.
-  if (hasComma) return text.replace(",", ".")
+  if (hasComma) {
+    // Una sola coma es siempre el separador decimal: es como se escribe acá.
+    // "1,234" son $1,23. La ambigüedad con el formato inglés es real y se
+    // resuelve a favor de es-AR a propósito: leerla como miles rompería "1,5".
+    if (!/,.*,/.test(text)) return text.replace(",", ".")
+
+    // Con MÁS DE UNA coma no hay ambigüedad posible: ningún decimal lleva dos
+    // comas, así que sólo pueden ser separadores de miles —y como en la rama
+    // del punto, tienen que agrupar de a tres para ser un formato y no un error
+    // de tipeo. Es el espejo de "1.234.567", que ya se leía bien; sin esto,
+    // "1,234,567" devolvía null porque la rama inglesa de arriba exige un
+    // decimal final.
+    return /^[+-]?\d{1,3}(?:,\d{3})+$/.test(text) ? text.replace(/,/g, "") : null
+  }
 
   // Solo, el punto es ambiguo: "1234.56" es decimal pero "1.500" es el formato
   // argentino de mil quinientos. Se desambigua por la cantidad de dígitos que
@@ -72,7 +84,8 @@ function normalizeSeparators(text: string): string | null {
 
 /**
  * Lee un decimal tal como lo tipea una persona: acepta "1.234,56" (formato
- * argentino), "1,234.56" (inglés) y "1234.56" (plano).
+ * argentino), "1,234.56" (inglés), "1.234.567" y "1,234,567" (miles sin
+ * decimales, en cualquiera de los dos) y "1234.56" (plano).
  * Devuelve null si no es un número.
  *
  * Es la base de `parseAmountToCents` y también del tipo de cambio: los dos los
