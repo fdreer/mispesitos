@@ -4,7 +4,11 @@ import { fileURLToPath } from "node:url"
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    // También `.tsx`: los tests de componente viven al lado del componente,
+    // y un componente es un `.tsx`. El entorno de cada uno lo declara el
+    // propio archivo con `// @vitest-environment jsdom`, así que la suite
+    // sigue corriendo en node por default y no paga jsdom donde no hace falta.
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     // Los `*.db.test.ts` pegan contra la base real: van por `pnpm test:db`.
     // Se excluye por sufijo y no por directorio: un test unitario puro que
     // viva bajo src/db/ o src/server/ tiene que correr acá igual.

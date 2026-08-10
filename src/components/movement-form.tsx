@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { todayInAr } from "@/lib/dates"
+import { isValidIsoDate, todayInAr } from "@/lib/dates"
 import { buildInstallments } from "@/lib/installments"
 import { formatMoney, parseAmountToCents } from "@/lib/money"
 import { createMovement } from "@/server/actions/movements"
@@ -50,7 +50,14 @@ export function MovementForm({ kind, categories, suggestedRate }: Props) {
    * evita el render en cascada de recalcular después de pintar.
    * https://react.dev/learn/you-might-not-need-an-effect
    */
-  const planKey = totalCents > 0 ? `${totalCents}|${count}|${date}` : null
+  // `isValidIsoDate` y no sólo `date !== ""`: un <input type="date"> devuelve
+  // cadena vacía mientras la fecha está incompleta —el botón de limpiar de
+  // Chrome, y cada tecla mientras se tipea a mano—, y `buildInstallments` de
+  // acá abajo corre en el cuerpo del render. `addMonthsClamped` tira ante una
+  // fecha que no es un día real, así que sin este chequeo borrar la fecha se
+  // lleva puesta la pantalla entera.
+  const planKey =
+    totalCents > 0 && isValidIsoDate(date) ? `${totalCents}|${count}|${date}` : null
   const [appliedPlanKey, setAppliedPlanKey] = useState<string | null>(null)
   if (planKey !== null && planKey !== appliedPlanKey) {
     setAppliedPlanKey(planKey)
