@@ -43,6 +43,30 @@ export function AuthForm({
     router.refresh()
   }
 
+  /**
+   * Mismo trato que el formulario de correo: la promesa se espera y el
+   * resultado se mira. Era el único `onClick` de la app que descartaba lo que
+   * devolvía —y encima el camino que no está verificado, por falta de
+   * credenciales—, así que si Google fallaba el botón no hacía absolutamente
+   * nada y el usuario no veía ni un mensaje.
+   *
+   * Cuando sale bien, better-auth se lleva el navegador a Google y esta página
+   * deja de existir: el `setPending(false)` sólo llega a correr en el camino
+   * de error, y no molesta si no.
+   */
+  async function onGoogle() {
+    setError(null)
+    setPending(true)
+
+    const result = await signIn.social({ provider: "google", callbackURL: "/dashboard" })
+
+    setPending(false)
+
+    if (result.error) {
+      setError(result.error.message ?? "No pudimos entrar con Google.")
+    }
+  }
+
   return (
     <div className="space-y-4">
       {googleEnabled && (
@@ -51,7 +75,8 @@ export function AuthForm({
             type="button"
             variant="outline"
             className="w-full"
-            onClick={() => signIn.social({ provider: "google", callbackURL: "/dashboard" })}
+            disabled={pending}
+            onClick={onGoogle}
           >
             Continuar con Google
           </Button>
