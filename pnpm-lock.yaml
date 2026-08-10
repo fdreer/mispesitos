@@ -12,16 +12,16 @@ importers:
         specifier: 1.6.26
         version: 1.6.26(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(kysely@0.29.4)(postgres@3.4.9))(next@16.3.0(@babel/core@7.29.7(supports-color@7.2.0))(@types/node@26.2.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.10(@types/node@26.2.0)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.11)))
       class-variance-authority:
-        specifier: ^0.7.1
+        specifier: 0.7.1
         version: 0.7.1
       clsx:
-        specifier: ^2.1.1
+        specifier: 2.1.1
         version: 2.1.1
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(kysely@0.29.4)(postgres@3.4.9)
       lucide-react:
-        specifier: ^1.30.0
+        specifier: 1.30.0
         version: 1.30.0(react@19.2.8)
       next:
         specifier: 16.3.0
@@ -30,7 +30,7 @@ importers:
         specifier: 3.4.9
         version: 3.4.9
       radix-ui:
-        specifier: ^1.6.7
+        specifier: 1.6.7
         version: 1.6.7(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react:
         specifier: 19.2.8
@@ -42,16 +42,16 @@ importers:
         specifier: 3.10.1
         version: 3.10.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react-is@16.13.1)(react@19.2.8)(redux@5.0.1)
       server-only:
-        specifier: ^0.0.1
+        specifier: 0.0.1
         version: 0.0.1
       shadcn:
         specifier: 4.16.2
         version: 4.16.2(supports-color@7.2.0)(typescript@5.9.3)
       tailwind-merge:
-        specifier: ^3.6.0
+        specifier: 3.6.0
         version: 3.6.0
       tw-animate-css:
-        specifier: ^1.4.0
+        specifier: 1.4.0
         version: 1.4.0
       zod:
         specifier: 4.4.3
@@ -64,10 +64,10 @@ importers:
         specifier: 26.2.0
         version: 26.2.0
       '@types/react':
-        specifier: '19'
+        specifier: 19.2.18
         version: 19.2.18
       '@types/react-dom':
-        specifier: '19'
+        specifier: 19.2.4
         version: 19.2.4(@types/react@19.2.18)
       dotenv-cli:
         specifier: 11.0.0
