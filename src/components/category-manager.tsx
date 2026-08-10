@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { archiveCategory, createCategory } from "@/server/actions/categories"
@@ -23,6 +24,11 @@ export function CategoryManager({
   useEffect(() => {
     if (state?.ok) router.refresh()
   }, [state, router])
+
+  // La lista llega ordenada por nombre desde la consulta; separarlas mantiene
+  // ese orden adentro de cada grupo.
+  const activas = categories.filter((c) => !c.archived)
+  const archivadas = categories.filter((c) => c.archived)
 
   // Mismo patrón que DeleteMovementButton/InstallmentRows: la Server Action
   // devuelve un ActionResult que hay que mirar, nunca descartar con `void` —
@@ -52,8 +58,16 @@ export function CategoryManager({
 
       {state && !state.ok && <p className="text-destructive text-sm">{state.message}</p>}
 
+      {/*
+       * Las archivadas se muestran acá abajo, atenuadas y con su etiqueta, en
+       * vez de desaparecer: eran invisibles desde toda la interfaz, así que la
+       * única señal de que archivar había funcionado era que la fila se
+       * esfumaba, y no había forma de saber qué categorías existían de antes.
+       * Siguen sin ofrecerse al cargar un movimiento —para eso se archivan— y
+       * por eso tampoco llevan el botón de archivar, que ya no aplica.
+       */}
       <ul className="divide-y">
-        {categories.map((c) => (
+        {activas.map((c) => (
           <li key={c.id} className="flex items-center justify-between py-2">
             <span>{c.name}</span>
             <span className="flex flex-col items-end gap-1">
@@ -71,7 +85,30 @@ export function CategoryManager({
             </span>
           </li>
         ))}
+
+        {activas.length === 0 && (
+          <li className="text-muted-foreground py-2 text-sm">
+            No tenés categorías activas de este tipo.
+          </li>
+        )}
+
+        {archivadas.map((c) => (
+          <li
+            key={c.id}
+            className="text-muted-foreground flex items-center justify-between py-2"
+          >
+            <span>{c.name}</span>
+            <Badge variant="outline">Archivada</Badge>
+          </li>
+        ))}
       </ul>
+
+      {archivadas.length > 0 && (
+        <p className="text-muted-foreground text-xs">
+          Las archivadas no aparecen al cargar un movimiento, pero los movimientos que ya las
+          usaban las siguen mostrando.
+        </p>
+      )}
     </section>
   )
 }

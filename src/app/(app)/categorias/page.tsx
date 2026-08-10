@@ -4,7 +4,10 @@ import { requireSettings } from "@/server/session"
 
 export default async function CategoriasPage() {
   const { user } = await requireSettings()
-  const categories = await listCategories(user.id)
+  // Con las archivadas incluidas: ésta es la pantalla para la que existe el
+  // tercer parámetro de listCategories. Sin él, archivar hacía desaparecer la
+  // fila y la categoría no volvía a verse desde ningún lado.
+  const categories = await listCategories(user.id, undefined, true)
 
   return (
     <div className="space-y-8">
