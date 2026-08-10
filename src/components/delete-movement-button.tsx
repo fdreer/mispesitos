@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState, useTransition, type MouseEvent } from "react"
 
 import { Button } from "@/components/ui/button"
 import { deleteMovement } from "@/server/actions/movements"
@@ -14,7 +14,11 @@ export function DeleteMovementButton({ id, description }: Props) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
-  function handleClick() {
+  function handleClick(event: MouseEvent<HTMLButtonElement>) {
+    // Este botón vive dentro del <summary> de un <details> (Task 14): sin este
+    // preventDefault, el click también togglea el detalle además de borrar.
+    event.preventDefault()
+
     const confirmed = window.confirm(
       `¿Borrar "${description}"? Se borran también sus cuotas y no se puede deshacer.`,
     )

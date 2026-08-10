@@ -7,6 +7,7 @@ import { z } from "zod"
 
 import { withUser } from "@/db/client"
 import { installment, movement } from "@/db/schema"
+import { todayInAr } from "@/lib/dates"
 import { movementSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { requireUser } from "@/server/session"
@@ -117,6 +118,43 @@ export async function deleteMovement(id: string): Promise<ActionResult> {
   } catch (error) {
     console.error("deleteMovement", error)
     return failure("No pudimos borrar el movimiento.")
+  }
+
+  revalidatePath("/", "layout")
+  return success()
+}
+
+/**
+ * Los ids de cuota los genera `randomUUID()`, igual que los de movimiento:
+ * mismo criterio que `deleteMovementIdSchema` — validar que sea un UUID es
+ * el borde de confianza mínimo, incluso cuando la RLS ya filtra por userId.
+ */
+const setInstallmentPaidSchema = z.object({
+  id: z.uuid("Esa cuota no existe."),
+  paid: z.boolean(),
+})
+
+export async function setInstallmentPaid(id: string, paid: boolean): Promise<ActionResult> {
+  const user = await requireUser()
+
+  const parsed = setInstallmentPaidSchema.safeParse({ id, paid })
+  if (!parsed.success) {
+    return failure("Esa cuota no existe.")
+  }
+
+  try {
+    const updated = await withUser(user.id, (tx) =>
+      tx
+        .update(installment)
+        .set({ paid: parsed.data.paid, paidDate: parsed.data.paid ? todayInAr() : null })
+        .where(and(eq(installment.id, parsed.data.id), eq(installment.userId, user.id)))
+        .returning({ id: installment.id }),
+    )
+
+    if (updated.length === 0) return failure("No encontramos esa cuota.")
+  } catch (error) {
+    console.error("setInstallmentPaid", error)
+    return failure("No pudimos actualizar la cuota.")
   }
 
   revalidatePath("/", "layout")
