@@ -1,0 +1,42 @@
+-- Una cuota pagada tiene fecha de pago. Lo hace cumplir la base.
+--
+-- QUÉ SE ESTABA ESCAPANDO
+--
+-- La sección 5.2 del spec calcula el saldo por `paid_date` ("una cuota cuenta
+-- por su paid_date, no por su due_date") y declara que la fecha es obligatoria
+-- cuando la cuota está pagada. Ninguna de las nueve migraciones anteriores lo
+-- hacía cumplir: era una regla escrita en un documento y sostenida sólo por el
+-- código que escribe (`setInstallmentPaid` setea las dos columnas juntas).
+--
+-- Una fila `paid = true, paid_date = NULL` no es un dato incompleto: es una
+-- fila que cada pantalla interpreta distinto.
+--
+--   * /cambios la excluye en silencio — sus consultas comparan la fecha contra
+--     la del saldo inicial, y NULL no compara.
+--   * computeBalances la cuenta igual: sólo mira `paid`.
+--   * el dashboard revienta con ella, en el `monthKey(null)` del resumen del
+--     mes.
+--
+-- Tres lecturas de la misma fila, y tres `!` en TypeScript afirmando que no
+-- puede existir.
+--
+-- POR QUÉ ACÁ Y NO EN LA SERVER ACTION
+--
+-- El mismo motivo que la FK compuesta de la 0006 (propiedad cruzada entre
+-- usuarios) y la de la 0008 (categoría del tipo equivocado): el borde de
+-- confianza es la base, no el código que hoy escribe bien. Una validación en
+-- la acción protege al único camino que hoy existe; la CHECK protege a todos
+-- los que vengan, incluida una corrección a mano contra la base.
+--
+-- Con la constraint puesta, los `!` de `src/server/queries.ts` y del dashboard
+-- pasan a estar respaldados por algo, y cada uno lleva el comentario que dice
+-- por qué.
+--
+-- LO QUE NO SE PROHÍBE
+--
+-- Sólo la implicación que el spec declara: paid ⇒ paid_date. Una cuota IMPAGA
+-- con una fecha de pago colgada sigue siendo válida — no rompe ninguna cuenta,
+-- porque todas las consultas de saldo filtran por `paid = true` primero, y
+-- prohibirla sería inventar una regla que el spec no pide.
+
+ALTER TABLE "installment" ADD CONSTRAINT "installment_paid_date_required_when_paid" CHECK ("paid" = false OR "paid_date" IS NOT NULL);

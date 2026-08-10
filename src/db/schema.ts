@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm"
 import {
   bigint,
   boolean,
+  check,
   date,
   foreignKey,
   index,
@@ -150,11 +151,37 @@ export const installment = pgTable(
     amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
     dueDate: date("due_date").notNull(),
     paid: boolean("paid").notNull().default(false),
+    /**
+     * Cuándo se pagó de verdad. Nula mientras la cuota esté impaga; con
+     * `paid = true` es obligatoria y lo hace cumplir la CHECK de acá abajo.
+     */
     paidDate: date("paid_date"),
   },
   (t) => [
     index("installment_user_due_idx").on(t.userId, t.dueDate),
     index("installment_movement_idx").on(t.movementId),
+    /**
+     * El saldo se calcula por `paid_date` (sección 5.2 del spec), así que una
+     * cuota pagada sin fecha de pago no es un dato incompleto: es una fila que
+     * cada pantalla interpreta distinto. `/cambios` la excluía en silencio
+     * —sus consultas comparan la fecha—, `computeBalances` la contaba igual, y
+     * el dashboard reventaba en `monthKey(null)`. Tres lecturas de la misma
+     * fila.
+     *
+     * El spec lo declaraba y no lo hacía cumplir nadie: ninguna de las nueve
+     * migraciones tenía una CHECK. Va acá y no en la Server Action por el
+     * mismo motivo que la FK compuesta de la 0006 y la 0008: el borde de
+     * confianza es la base.
+     *
+     * Sólo la implicación que se necesita, no la equivalencia: una cuota
+     * impaga con fecha de pago colgada no rompe ninguna cuenta —todas las
+     * consultas de saldo filtran por `paid = true` primero— y prohibirla sería
+     * inventar una regla que el spec no pide.
+     */
+    check(
+      "installment_paid_date_required_when_paid",
+      sql`"paid" = false OR "paid_date" IS NOT NULL`,
+    ),
     // Ver el comentario de la FK compuesta de `movement`. Misma razón.
     foreignKey({
       columns: [t.userId, t.movementId],

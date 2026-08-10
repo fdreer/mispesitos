@@ -64,6 +64,13 @@
       "when": 1786365926879,
       "tag": "0008_fk_de_categoria_con_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786369693160,
+      "tag": "0009_cuota_pagada_con_fecha",
+      "breakpoints": true
     }
   ]
 }
