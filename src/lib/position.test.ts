@@ -559,3 +559,283 @@ describe("la posición en dólares coincide con el saldo en dólares", () => {
     expect(position.usdCents - position.oversoldUsdCents).toBe(balances.usdCents)
   })
 })
+
+/**
+ * LA PATA EN PESOS. El invariante de arriba ata las dos rutas en la moneda
+ * dólar; ésta es la otra mitad, y la que nadie ataba.
+ *
+ * `usdPosition` y `computeBalances` convierten las dos con `convertToArs` —la
+ * única función que multiplica un importe por una cotización— pero con
+ * SECUENCIAS DE REDONDEO distintas: la posición redondea una vez por evento y
+ * además sobre el promedio ponderado, y el saldo redondea una sola vez por
+ * pata de cambio. Es el mismo modo de falla que el invariante en dólares
+ * existe para prevenir, en la otra moneda.
+ *
+ * LA IGUALDAD, Y BAJO QUÉ CONDICIONES VALE. Se buscó primero una invariante
+ * exacta y sin condiciones: no la hay. La que sí existe es
+ *
+ *   saldo.arsCents === saldoInicialArs
+ *                      + convertToArs(saldoInicialUsd, tcDelSaldoInicial)
+ *                      - posicion.costArsCents
+ *                      + posicion.realizedArsCents
+ *
+ * y vale bajo TRES condiciones, ninguna cosmética:
+ *
+ * 1. DATOS QUE SEAN SÓLO CAMBIOS DE DIVISA. Una cuota pagada en dólares mueve
+ *    la posición (entra o sale de la tenencia) y NO mueve el saldo en pesos;
+ *    una cuota en pesos mueve el saldo en pesos y la posición ni la ve. El
+ *    término que las ataría no existe: no es un error de redondeo, es que las
+ *    dos funciones están mirando cosas distintas. Está escrito como caso más
+ *    abajo, con la diferencia exacta.
+ * 2. SIN SOBREVENTA. `usdPosition` sólo realiza y descarga lo que tiene
+ *    registrado; `computeBalances` suma los pesos de la venta ENTERA. Con
+ *    `oversoldUsdCents > 0` la igualdad se va por el importe vendido de más.
+ *    También está escrito como caso.
+ * 3. SIN EMPATES DE MEDIO CENTAVO. Cuando el promedio ponderado cae en un
+ *    ".5" de centavo, `Math.round` desempata hacia arriba en las DOS mitades
+ *    de la venta (el costo que se descarga y el resultado que se realiza) y la
+ *    suma se pasa por un centavo. Es el límite exacto de la igualdad y tiene
+ *    su propio caso, con el número pinchado: no se esconde detrás de una
+ *    tolerancia.
+ *
+ * Con las tres condiciones puestas, la igualdad es EXACTA — no aproximada, no
+ * "salvo centavos". Un barrido de 32.768 combinaciones de tasas y montos
+ * (incluidas ventas a pérdida y promedios con decimales periódicos) dio 0 de
+ * diferencia en todas menos en las de la condición 3, donde dio exactamente
+ * -1.
+ */
+describe("con sólo cambios de divisa, el costo de la posición y el saldo en pesos cuentan la misma plata", () => {
+  type DatosEnPesos = {
+    initialArsCents: number
+    initial: UsdInitialBalanceRow
+    exchanges: UsdExchangeRow[]
+  }
+
+  function calcularEnPesos(datos: DatosEnPesos) {
+    const position = usdPosition(buildUsdPositionEvents(datos.initial, datos.exchanges, []))
+
+    const settings: BalanceSettings = {
+      initialArsCents: datos.initialArsCents,
+      initialUsdCents: datos.initial.usdCents,
+      initialDate: datos.initial.date,
+    }
+    const exchanges: ExchangeMovement[] = datos.exchanges.map((e) => ({
+      date: e.date,
+      direction: e.direction,
+      usdCents: e.usdCents,
+      rate: Number(e.rate),
+    }))
+    const balances = computeBalances(settings, [], exchanges)
+
+    // El costo del saldo inicial entra en `costArsCents` (buildUsdPositionEvents
+    // lo siembra como una entrada) pero NUNCA salió de los pesos: el saldo
+    // inicial en dólares se declara, no se compra. Sin este término la igualdad
+    // no cierra, y el término es exactamente esa entrada sembrada.
+    const costoDelSaldoInicial = convertToArs(datos.initial.usdCents, Number(datos.initial.rate))
+
+    return { position, balances, costoDelSaldoInicial }
+  }
+
+  function esperarInvarianteEnPesos(datos: DatosEnPesos) {
+    const { position, balances, costoDelSaldoInicial } = calcularEnPesos(datos)
+
+    // La condición 2, verificada y no supuesta: si estos datos tuvieran
+    // sobreventa, la igualdad de abajo no tendría por qué valer y el test
+    // estaría probando otra cosa.
+    expect(position.oversoldUsdCents).toBe(0)
+
+    expect(balances.arsCents).toBe(
+      datos.initialArsCents +
+        costoDelSaldoInicial -
+        position.costArsCents +
+        position.realizedArsCents,
+    )
+  }
+
+  it("sólo compras: cada peso que sale del saldo entra al costo de la tenencia", () => {
+    esperarInvarianteEnPesos({
+      initialArsCents: 1_000_000_00,
+      initial: { usdCents: 0, rate: "0", date: "2026-01-01" },
+      exchanges: [
+        { date: "2026-02-01", usdCents: 100_00, rate: "1000", direction: "buy" },
+        { date: "2026-03-01", usdCents: 50_00, rate: "1400", direction: "buy" },
+      ],
+    })
+  })
+
+  it("una venta con ganancia: lo que vuelve al saldo es costo descargado más resultado realizado", () => {
+    esperarInvarianteEnPesos({
+      initialArsCents: 1_000_000_00,
+      initial: { usdCents: 0, rate: "0", date: "2026-01-01" },
+      exchanges: [
+        { date: "2026-02-01", usdCents: 100_00, rate: "1000", direction: "buy" },
+        { date: "2026-03-01", usdCents: 100_00, rate: "1400", direction: "buy" },
+        { date: "2026-06-01", usdCents: 150_00, rate: "1500", direction: "sell" },
+      ],
+    })
+  })
+
+  it("una venta a PÉRDIDA: el resultado realizado es negativo y la igualdad se sostiene igual", () => {
+    // El caso que un test con sólo ganancias no cubre: `realizedArsCents` entra
+    // en la igualdad con su signo, no con su valor absoluto.
+    esperarInvarianteEnPesos({
+      initialArsCents: 1_000_000_00,
+      initial: { usdCents: 0, rate: "0", date: "2026-01-01" },
+      exchanges: [
+        { date: "2026-02-01", usdCents: 100_00, rate: "1400", direction: "buy" },
+        { date: "2026-06-01", usdCents: 100_00, rate: "900", direction: "sell" },
+      ],
+    })
+  })
+
+  it("con saldo inicial en dólares: esos pesos nunca salieron del saldo y el término del costo inicial lo dice", () => {
+    esperarInvarianteEnPesos({
+      initialArsCents: 500_000_00,
+      initial: { usdCents: 400_00, rate: "1000", date: "2026-01-01" },
+      exchanges: [
+        { date: "2026-02-01", usdCents: 100_00, rate: "1300", direction: "buy" },
+        { date: "2026-06-01", usdCents: 200_00, rate: "1500", direction: "sell" },
+      ],
+    })
+  })
+
+  it("con un promedio ponderado de decimales infinitos, la igualdad sigue siendo exacta", () => {
+    // 3 + 4 centavos de dólar a tasas distintas dan un promedio de
+    // 1000,5714285714... pesos por dólar: el redondeo pasa por el camino largo
+    // y aun así las dos secuencias caen en el mismo número.
+    esperarInvarianteEnPesos({
+      initialArsCents: 10_000_00,
+      initial: { usdCents: 0, rate: "0", date: "2026-01-01" },
+      exchanges: [
+        { date: "2026-02-01", usdCents: 3, rate: "1000", direction: "buy" },
+        { date: "2026-03-01", usdCents: 4, rate: "1001", direction: "buy" },
+        { date: "2026-06-01", usdCents: 3, rate: "1500", direction: "sell" },
+      ],
+    })
+  })
+
+  it("el corte de fecha también vale en pesos: el evento del día del saldo inicial cuenta y el anterior no", () => {
+    // El mismo borde que el invariante en dólares, en la otra moneda: si
+    // buildUsdPositionEvents o computeBalances cambian su "<" por "<=" en
+    // cualquiera de sus dos filtros, las dos rutas dejan de contar los mismos
+    // cambios y esta igualdad se rompe.
+    esperarInvarianteEnPesos({
+      initialArsCents: 1_000_000_00,
+      initial: { usdCents: 400_00, rate: "1000", date: "2026-02-01" },
+      exchanges: [
+        // anterior al saldo inicial: las dos rutas lo tienen que ignorar
+        { date: "2026-01-31", usdCents: 999_00, rate: "1000", direction: "buy" },
+        // el día exacto del saldo inicial: las dos rutas lo tienen que contar
+        { date: "2026-02-01", usdCents: 50_00, rate: "1300", direction: "buy" },
+        { date: "2026-06-01", usdCents: 30_00, rate: "1500", direction: "sell" },
+      ],
+    })
+  })
+
+  /**
+   * CONDICIÓN 3, con el número pinchado. Éste es el límite exacto de la
+   * igualdad, y está escrito como caso en vez de escondido detrás de una
+   * tolerancia: un test que dijera "difieren en a lo sumo un centavo" taparía
+   * también un error de redondeo de verdad.
+   *
+   * Un centavo de dólar a 1000 y otro a 1001 dejan un promedio de 1000,5. Al
+   * vender un centavo, la posición parte la operación en dos mitades que caen
+   * las dos en un empate de medio centavo —1000,5 de costo y 499,5 de
+   * resultado— y `Math.round` desempata hacia arriba en las dos: 1001 + 500 =
+   * 1501, contra los 1500 que el saldo redondea de una sola vez.
+   *
+   * No es un error de nadie ni se ve en pantalla: `costArsCents` y
+   * `realizedArsCents` son el costo y el resultado de la tenencia, y
+   * `arsCents` es el saldo en pesos. El usuario nunca los suma. Pero es la
+   * razón por la que la igualdad de arriba NO se puede afirmar sin
+   * condiciones, y por eso vive acá con sus literales: si alguien cambia una
+   * secuencia de redondeo, este caso también se pone rojo.
+   */
+  it("el único caso en que las dos secuencias de redondeo difieren es el empate de medio centavo, y difieren en exactamente uno", () => {
+    const datos: DatosEnPesos = {
+      initialArsCents: 0,
+      initial: { usdCents: 0, rate: "0", date: "2026-01-01" },
+      exchanges: [
+        { date: "2026-02-01", usdCents: 1, rate: "1000", direction: "buy" },
+        { date: "2026-03-01", usdCents: 1, rate: "1001", direction: "buy" },
+        { date: "2026-06-01", usdCents: 1, rate: "1500", direction: "sell" },
+      ],
+    }
+    const { position, balances } = calcularEnPesos(datos)
+
+    // Los dos lados, con literales: el que redondea por evento y sobre el
+    // promedio, y el que redondea una sola vez por pata.
+    expect(position.costArsCents).toBe(1000)
+    expect(position.realizedArsCents).toBe(500)
+    expect(balances.arsCents).toBe(-501)
+
+    // Y la diferencia: exactamente un centavo, y para el lado de la posición.
+    const porLaPosicion = 0 + 0 - position.costArsCents + position.realizedArsCents
+    expect(porLaPosicion).toBe(-500)
+    expect(balances.arsCents - porLaPosicion).toBe(-1)
+  })
+
+  /**
+   * CONDICIÓN 1, escrita como caso para que nadie extienda la igualdad a datos
+   * que no la cumplen. Con una cuota pagada en dólares la diferencia no es de
+   * centavos: son 60.000 pesos sobre 100.000, o sea el 60%.
+   */
+  it("con una cuota pagada en dólares la igualdad NO vale, y no por centavos", () => {
+    const initial: UsdInitialBalanceRow = { usdCents: 0, rate: "0", date: "2026-01-01" }
+    const exchanges: UsdExchangeRow[] = [
+      { date: "2026-02-01", usdCents: 100_00, rate: "1000", direction: "buy" },
+    ]
+    // Un egreso de US$50 pagado: sale de la tenencia sin devolver un peso al
+    // saldo, porque los pesos de ese gasto nunca pasaron por la cuenta.
+    const installments: UsdPaidInstallmentRow[] = [
+      { date: "2026-03-01", usdCents: 50_00, rate: "1200", kind: "expense" },
+    ]
+
+    const position = usdPosition(buildUsdPositionEvents(initial, exchanges, installments))
+    const balances = computeBalances(
+      { initialArsCents: 0, initialUsdCents: 0, initialDate: "2026-01-01" },
+      installments.map((i) => ({
+        paidDate: i.date,
+        currency: "USD" as const,
+        kind: i.kind,
+        amountCents: i.usdCents,
+      })),
+      exchanges.map((e) => ({
+        date: e.date,
+        direction: e.direction,
+        usdCents: e.usdCents,
+        rate: Number(e.rate),
+      })),
+    )
+
+    const porLaPosicion = 0 + 0 - position.costArsCents + position.realizedArsCents
+    expect(porLaPosicion).toBe(-40_000_00)
+    expect(balances.arsCents).toBe(-100_000_00)
+    expect(balances.arsCents - porLaPosicion).toBe(-60_000_00)
+  })
+
+  /**
+   * CONDICIÓN 2, idem: en sobreventa la diferencia es todo lo que se vendió de
+   * más, valuado al TC de la venta.
+   */
+  it("en sobreventa la igualdad NO vale: el saldo cobra la venta entera y la posición sólo realiza lo que tenía", () => {
+    const datos: DatosEnPesos = {
+      initialArsCents: 0,
+      initial: { usdCents: 0, rate: "0", date: "2026-01-01" },
+      exchanges: [
+        { date: "2026-02-01", usdCents: 100_00, rate: "1000", direction: "buy" },
+        // vende US$300 teniendo US$100: sobreventa de US$200.
+        { date: "2026-06-01", usdCents: 300_00, rate: "1500", direction: "sell" },
+      ],
+    }
+    const { position, balances } = calcularEnPesos(datos)
+
+    expect(position.oversoldUsdCents).toBe(200_00)
+
+    const porLaPosicion = 0 + 0 - position.costArsCents + position.realizedArsCents
+    expect(porLaPosicion).toBe(50_000_00)
+    expect(balances.arsCents).toBe(350_000_00)
+    // Los US$200 vendidos de más, a 1500: exactamente la diferencia.
+    expect(balances.arsCents - porLaPosicion).toBe(convertToArs(200_00, 1500))
+  })
+})
