@@ -79,15 +79,13 @@ export function BalanceCards({
           <CardTitle className="text-sm font-medium">Cobrado y pagado este mes</CardTitle>
         </CardHeader>
         <CardContent>
-          <p
-            className={
-              diff >= 0
-                ? "text-2xl tabular-nums text-emerald-600"
-                : "text-destructive text-2xl tabular-nums"
-            }
-          >
-            {formatMoney(diff, "ARS")}
-          </p>
+          {/*
+           * Sin verde ni rojo: en este sistema el color señala estado, no
+           * importe, y el signo ya dice si el mes cerró para arriba o para
+           * abajo. El detalle de cuánto entró y cuánto salió está en la línea
+           * de abajo.
+           */}
+          <p className="text-2xl tabular-nums">{formatMoney(diff, "ARS")}</p>
           <p className="text-muted-foreground text-xs">
             {formatMoney(monthIncomeArsCents, "ARS")} cobrados ·{" "}
             {formatMoney(monthExpenseArsCents, "ARS")} pagados

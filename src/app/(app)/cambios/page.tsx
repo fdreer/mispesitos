@@ -44,13 +44,7 @@ export default async function CambiosPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Diferencia de cambio</CardTitle>
           </CardHeader>
-          <CardContent
-            className={
-              position.realizedArsCents >= 0
-                ? "text-2xl tabular-nums text-emerald-600"
-                : "text-destructive text-2xl tabular-nums"
-            }
-          >
+          <CardContent className="text-2xl tabular-nums">
             {formatMoney(position.realizedArsCents, "ARS")}
           </CardContent>
         </Card>
