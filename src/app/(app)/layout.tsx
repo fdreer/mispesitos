@@ -5,7 +5,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   await requireSettings()
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6">
+    <div className="mx-auto max-w-[1200px] px-6 py-8">
       <AppNav />
       {children}
     </div>
