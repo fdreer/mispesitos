@@ -4,6 +4,7 @@ App web de finanzas personales: ingresos, egresos en cuotas, compra y venta de
 dólares, y un dashboard con saldo, deudas y flujo proyectado.
 
 - Diseño: `docs/superpowers/specs/2026-08-09-mis-pesitos-design.md`
+- Sistema visual: `docs/superpowers/specs/2026-08-10-linear-design-system-design.md`
 - **Lo que falta y lo que se decidió no hacer: [`docs/PENDIENTES.md`](docs/PENDIENTES.md)**
 
 ## Stack
