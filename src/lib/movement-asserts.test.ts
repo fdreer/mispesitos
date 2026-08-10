@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest"
 
 import { computeBalances } from "@/lib/balance"
+import type { PaidInstallment } from "@/lib/balance"
 import {
+  assertCurrency,
   assertExchangeDirection,
   assertInstallmentMovementKind,
 } from "@/lib/movement-asserts"
@@ -80,5 +82,53 @@ describe("assertInstallmentMovementKind", () => {
 
   it("el mensaje dice qué valor llegó", () => {
     expect(() => assertInstallmentMovementKind("exchange")).toThrow(/"exchange"/)
+  })
+})
+
+describe("assertCurrency", () => {
+  it("deja pasar las dos monedas posibles", () => {
+    expect(assertCurrency("ARS")).toBe("ARS")
+    expect(assertCurrency("USD")).toBe("USD")
+  })
+
+  it("revienta con cualquier otra, incluidas las parecidas", () => {
+    for (const rara of ["", "ars", "usd", "Ars", "EUR", "AR$", "U$S", "peso"]) {
+      expect(() => assertCurrency(rara)).toThrow(/currency inesperada/)
+    }
+  })
+
+  it("el mensaje dice qué valor llegó, para poder ir a buscar la fila", () => {
+    expect(() => assertCurrency("EUR")).toThrow(/"EUR"/)
+    expect(() => assertCurrency("")).toThrow(/""/)
+  })
+
+  /**
+   * El motivo concreto, escrito como test, y el mismo que el de `direction`:
+   * `computeBalances` pregunta `currency === "ARS"` y manda TODO lo demás a la
+   * rama de dólares. Con un `as`, una cuota en una moneda que no existe se
+   * suma al saldo en dólares en silencio, y de ahí sale valuada al TC del día
+   * en el consolidado del dashboard. No se parece a un error: se parece a un
+   * saldo.
+   */
+  it("una cuota con una moneda inesperada no puede llegar a computeBalances como dólares", () => {
+    const settings = { initialArsCents: 0, initialUsdCents: 0, initialDate: "2026-01-01" }
+    const cuotaRota = {
+      paidDate: "2026-02-01",
+      kind: "income" as const,
+      amountCents: 500_00,
+    }
+
+    // Lo que hacía el `as`: la fila entra y se cuenta como dólares.
+    const conElAs = computeBalances(
+      { ...settings },
+      [{ ...cuotaRota, currency: "EUR" as PaidInstallment["currency"] }],
+      [],
+    )
+    expect(conElAs).toEqual({ arsCents: 0, usdCents: 500_00 })
+
+    // Lo que hace el assert: no hay resultado, hay una excepción.
+    expect(() =>
+      computeBalances({ ...settings }, [{ ...cuotaRota, currency: assertCurrency("EUR") }], []),
+    ).toThrow(/currency inesperada/)
   })
 })
