@@ -18,6 +18,7 @@ import {
 import { isValidIsoDate, todayInAr } from "@/lib/dates"
 import { buildInstallments } from "@/lib/installments"
 import { formatMoney, parseAmountToCents } from "@/lib/money"
+import { MAX_INSTALLMENTS } from "@/lib/schemas"
 import { createMovement } from "@/server/actions/movements"
 import type { Category } from "@/server/queries"
 
@@ -191,9 +192,15 @@ export function MovementForm({ kind, categories, suggestedRate }: Props) {
             id="count"
             type="number"
             min={1}
-            max={120}
+            max={MAX_INSTALLMENTS}
             value={count}
-            onChange={(e) => setCount(Math.max(1, Number(e.target.value) || 1))}
+            // El clamp va en el estado, no sólo en el atributo `max`: `max`
+            // valida al hacer submit, y las filas se generan al tipear. Sin
+            // esto, escribir 99999 pinta 99.999 filas y cuelga la pestaña
+            // antes de que haya un submit que validar.
+            onChange={(e) =>
+              setCount(Math.min(MAX_INSTALLMENTS, Math.max(1, Number(e.target.value) || 1)))
+            }
             className="w-24"
           />
         </div>

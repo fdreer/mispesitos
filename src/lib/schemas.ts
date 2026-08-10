@@ -124,6 +124,18 @@ export const settingsSchema = z
 export const currency = z.enum(["ARS", "USD"])
 
 /**
+ * Techo de cuotas de un movimiento. La cota no es de negocio: es de volumen.
+ * Cada cuota es una fila que se inserta en la misma transacción, y la cantidad
+ * la elige el cliente. Sin techo, un POST armado a mano escribe las filas que
+ * quiera. 120 son diez años de cuotas mensuales, más de lo que cualquier plan
+ * real necesita.
+ *
+ * Vive acá y no en el formulario porque los dos lados tienen que usar el mismo
+ * número: el `max` del input y este `.max()` son la misma regla.
+ */
+export const MAX_INSTALLMENTS = 120
+
+/**
  * Una cuota tal como llega del formulario.
  * A diferencia del importe total, la cuota YA viaja en centavos: la genera
  * `buildInstallments` del lado del cliente, que trabaja en centavos.
@@ -142,7 +154,10 @@ export const movementSchema = z
     currency: currency,
     amountCents: amountCents,
     rate: positiveRate,
-    installments: z.array(installmentInput).min(1, "Tiene que haber al menos una cuota."),
+    installments: z
+      .array(installmentInput)
+      .min(1, "Tiene que haber al menos una cuota.")
+      .max(MAX_INSTALLMENTS, `No se pueden cargar más de ${MAX_INSTALLMENTS} cuotas.`),
   })
   .refine((m) => m.currency === "USD" || m.rate === 1, {
     message: "Un movimiento en pesos siempre lleva tipo de cambio 1.",

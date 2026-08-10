@@ -61,4 +61,16 @@ describe("MovementForm", () => {
     const vencimiento = screen.getByLabelText("Vencimiento de la cuota 1") as HTMLInputElement
     expect(vencimiento.value).toBe("2026-03-31")
   })
+
+  it("no genera más de 120 filas de cuota aunque se tipee un número enorme", () => {
+    render(<MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} />)
+
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
+    fireEvent.change(screen.getByLabelText("Cuotas"), { target: { value: "99999" } })
+
+    // El clamp es del estado, no del atributo `max` del input: `max` sólo
+    // valida al hacer submit, y para entonces las 99.999 filas ya se pintaron.
+    expect(screen.queryByLabelText("Importe de la cuota 121 en centavos")).toBeNull()
+    expect(screen.getByLabelText("Importe de la cuota 120 en centavos")).toBeTruthy()
+  })
 })

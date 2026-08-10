@@ -365,4 +365,46 @@ describe("movementSchema", () => {
     expect(result.success).toBe(false)
     expect(fieldError(result, "installments.0.dueDate")).toBeDefined()
   })
+
+  it("acepta exactamente 120 cuotas", () => {
+    const installments = Array.from({ length: 120 }, (_, i) => ({
+      amountCents: i === 119 ? 10_000 - 119 * 83 : 83,
+      dueDate: "2026-08-10",
+    }))
+    const total = installments.reduce((a, i) => a + i.amountCents, 0)
+
+    const result = movementSchema.safeParse({
+      kind: "expense",
+      description: "Cuotas al límite",
+      categoryId: "cat-1",
+      date: "2026-08-10",
+      currency: "ARS",
+      amountCents: String(total / 100),
+      rate: "1",
+      installments,
+    })
+
+    expect(result.success).toBe(true)
+  })
+
+  it("rechaza 121 cuotas", () => {
+    const installments = Array.from({ length: 121 }, () => ({
+      amountCents: 100,
+      dueDate: "2026-08-10",
+    }))
+
+    const result = movementSchema.safeParse({
+      kind: "expense",
+      description: "Una cuota de más",
+      categoryId: "cat-1",
+      date: "2026-08-10",
+      currency: "ARS",
+      amountCents: "121",
+      rate: "1",
+      installments,
+    })
+
+    expect(result.success).toBe(false)
+    expect(fieldError(result, "installments")).toBeDefined()
+  })
 })
