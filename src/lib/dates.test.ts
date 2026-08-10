@@ -39,6 +39,17 @@ describe("addMonthsClamped", () => {
     expect(addMonthsClamped("2026-11-30", 3)).toBe("2027-02-28")
   })
 
+  it("no convierte un año de dos dígitos en uno del siglo XX", () => {
+    expect(addMonthsClamped("0025-08-09", 0)).toBe("0025-08-09")
+    expect(addMonthsClamped("0099-01-15", 1)).toBe("0099-02-15")
+  })
+
+  it("rechaza una fecha que no es YYYY-MM-DD en vez de devolver NaN", () => {
+    expect(() => addMonthsClamped("hoy", 1)).toThrow()
+    expect(() => addMonthsClamped("2026-08-09T00:00:00Z", 1)).toThrow()
+    expect(() => addMonthsClamped("", 1)).toThrow()
+  })
+
   it("acepta cero meses", () => {
     expect(addMonthsClamped("2026-05-10", 0)).toBe("2026-05-10")
   })

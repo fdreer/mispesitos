@@ -1,10 +1,20 @@
 export type RatePreference = "oficial" | "blue" | "mep"
 
 export type SuggestedRate = {
-  /** Pesos que pagás por comprar un dólar. */
+  /** Pesos que pagás por comprar un dólar. SÓLO para el form de cambios. */
   buyRate: number
-  /** Pesos que recibís por vender un dólar. */
+  /** Pesos que recibís por vender un dólar. SÓLO para el form de cambios. */
   sellRate: number
+  /**
+   * Punto medio, para valuar un movimiento que NO es una operación de cambio:
+   * un sueldo cobrado en dólares, un alquiler pagado en dólares.
+   *
+   * Usar `buyRate` y `sellRate` acá fabrica resultado de la nada: cobrar y
+   * pagar mil dólares el mismo día con la misma cotización daría $50.000 de
+   * "ganancia por diferencia de cambio" que es puro spread de la casa de
+   * cambio. Un movimiento que no cruza el mostrador se valúa a un solo TC.
+   */
+  referenceRate: number
 }
 
 // dolarapi llama "bolsa" a lo que en la calle se conoce como MEP.
@@ -49,7 +59,11 @@ export async function fetchSuggestedRate(
 
     // La API informa desde la perspectiva de la casa de cambio: su "venta"
     // es el precio al que vos comprás.
-    return { buyRate: venta, sellRate: compra }
+    return {
+      buyRate: venta,
+      sellRate: compra,
+      referenceRate: (compra + venta) / 2,
+    }
   } catch {
     return null
   }

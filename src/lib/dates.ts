@@ -26,16 +26,32 @@ function pad(n: number): string {
  * Trabaja en UTC sobre los componentes de la fecha: nunca hay corrimiento de día.
  */
 export function addMonthsClamped(date: IsoDate, months: number): IsoDate {
+  // `IsoDate` es un alias de string: el tipo no protege nada. Sin este chequeo,
+  // "hoy" devuelve "NaN-NaN-NaN" y eso termina insertado en un vencimiento.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error(`La fecha debe ser YYYY-MM-DD, no ${JSON.stringify(date)}`)
+  }
+
   const [year, month, day] = date.split("-").map(Number)
 
-  const target = new Date(Date.UTC(year, month - 1 + months, 1))
+  // `setUTCFullYear` en vez de `Date.UTC`: este último mapea los años de dos
+  // dígitos a 1900+, así que el año 0025 se convertiría solo en 1925.
+  const target = utcDate(year, month - 1 + months, 1)
   const targetYear = target.getUTCFullYear()
   const targetMonth = target.getUTCMonth()
 
   // Día 0 del mes siguiente = último día del mes destino.
-  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate()
+  const lastDay = utcDate(targetYear, targetMonth + 1, 0).getUTCDate()
 
-  return `${targetYear}-${pad(targetMonth + 1)}-${pad(Math.min(day, lastDay))}`
+  const paddedYear = String(targetYear).padStart(4, "0")
+
+  return `${paddedYear}-${pad(targetMonth + 1)}-${pad(Math.min(day, lastDay))}`
+}
+
+function utcDate(year: number, month: number, day: number): Date {
+  const d = new Date(0)
+  d.setUTCFullYear(year, month, day)
+  return d
 }
 
 export function monthKey(date: IsoDate): string {
