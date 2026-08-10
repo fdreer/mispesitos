@@ -32,7 +32,13 @@ export function ExchangeForm({ buyRate, sellRate }: Props) {
           variant="outline"
           aria-pressed={direction === "buy"}
           onClick={() => setDirection("buy")}
-          className={direction === "buy" ? "bg-accent text-paper" : "text-fog"}
+          className={
+            direction === "buy"
+              ? // El hover de `outline` pisa el relleno y la etiqueta del estado
+                // elegido, así que el elegido repite los suyos en hover.
+                "bg-accent text-paper hover:bg-accent hover:text-paper"
+              : "text-fog"
+          }
         >
           Comprar dólares
         </Button>
@@ -41,7 +47,11 @@ export function ExchangeForm({ buyRate, sellRate }: Props) {
           variant="outline"
           aria-pressed={direction === "sell"}
           onClick={() => setDirection("sell")}
-          className={direction === "sell" ? "bg-accent text-paper" : "text-fog"}
+          className={
+            direction === "sell"
+              ? "bg-accent text-paper hover:bg-accent hover:text-paper"
+              : "text-fog"
+          }
         >
           Vender dólares
         </Button>
