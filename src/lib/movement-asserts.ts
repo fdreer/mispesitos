@@ -1,0 +1,42 @@
+/**
+ * Los supuestos que las columnas `kind` y `direction` de `movement` no pueden
+ * declarar solas.
+ *
+ * Las dos son `text` en la base y `string | null` en el tipo de Drizzle, pero
+ * cada consulta que las lee ya sabe más que eso: si filtró por
+ * `kind = "exchange"`, la dirección tiene que ser "buy" o "sell"; si viene de
+ * una cuota, el tipo tiene que ser "income" o "expense".
+ *
+ * Ese "tiene que" se sostiene con un assert y no con un `as`. Un `as` afirma
+ * lo mismo pero no comprueba nada: el día que el supuesto deje de valer, el
+ * valor inesperado sigue viaje y termina clasificado en silencio en la rama
+ * del `else` —un cambio sin dirección contado como venta, una cuota rara
+ * contada como egreso—. Mejor que reviente acá, fuerte y visible.
+ *
+ * Viven en `@/lib` y no en `@/server/queries` porque los usan los dos lados:
+ * las consultas del servidor y el dashboard, que arma las mismas listas. Una
+ * sola definición, un solo comportamiento ante la misma fila mala.
+ */
+
+/**
+ * `movement.direction` sólo se llena para `kind: "exchange"`
+ * (`createExchange` siempre lo setea). Quien llame acá ya tiene que haber
+ * filtrado por ese tipo.
+ */
+export function assertExchangeDirection(direction: string | null): "buy" | "sell" {
+  if (direction === "buy" || direction === "sell") return direction
+  throw new Error(`Cambio de divisa con direction inesperada: ${JSON.stringify(direction)}`)
+}
+
+/**
+ * `movement.kind` puede ser "income" | "expense" | "exchange", pero un
+ * movimiento con cuotas nunca es un cambio de divisa: los exchange no generan
+ * cuotas. Sirve para la fila del movimiento y para el `kind` que llega por el
+ * join desde una cuota — es el mismo supuesto de los dos lados.
+ */
+export function assertInstallmentMovementKind(kind: string): "income" | "expense" {
+  if (kind === "income" || kind === "expense") return kind
+  throw new Error(
+    `Movimiento con cuotas y kind inesperado (se esperaba income o expense): ${JSON.stringify(kind)}`,
+  )
+}

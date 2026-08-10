@@ -4,33 +4,13 @@ import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm"
 
 import { withUser } from "@/db/client"
 import { category, installment, movement, userSettings } from "@/db/schema"
+import {
+  assertExchangeDirection,
+  assertInstallmentMovementKind,
+} from "@/lib/movement-asserts"
 import { buildUsdPositionEvents, type PositionEvent } from "@/lib/position"
 
 export type Settings = typeof userSettings.$inferSelect
-
-/**
- * `movement.direction` es nullable en el schema y sólo se llena para
- * `kind: "exchange"` (`createExchange` siempre lo setea). Acá abajo ya
- * filtramos por `kind: "exchange"`, así que en teoría siempre es "buy" o
- * "sell" — pero un `as` taparía la garantía en vez de sostenerla: si algún
- * día deja de ser cierto, un direction nulo se clasificaría en silencio como
- * venta. Mejor que reviente acá, fuerte y visible.
- */
-function assertExchangeDirection(direction: string | null): "buy" | "sell" {
-  if (direction === "buy" || direction === "sell") return direction
-  throw new Error(`Cambio de divisa con direction inesperada: ${JSON.stringify(direction)}`)
-}
-
-/**
- * `movement.kind` puede ser "income" | "expense" | "exchange", pero acá sólo
- * llegan cuotas (`installment`), y las exchange no generan cuotas. Mismo
- * motivo que `assertExchangeDirection`: que lo inesperado sea visible, no
- * que cualquier `kind` raro caiga callado en la rama de "expense".
- */
-function assertInstallmentMovementKind(kind: string): "income" | "expense" {
-  if (kind === "income" || kind === "expense") return kind
-  throw new Error(`Cuota de un movimiento con kind inesperado: ${JSON.stringify(kind)}`)
-}
 
 export async function getSettings(userId: string): Promise<Settings | null> {
   const rows = await withUser(userId, (tx) =>
@@ -242,6 +222,11 @@ export async function listUsdPositionEvents(userId: string): Promise<PositionEve
         direction: assertExchangeDirection(e.direction),
       })),
       usdInstallments.map((i) => ({
+        // `paid_date` no puede ser nulo en una cuota pagada, y la consulta ya
+        // filtró por `paid = true`: lo garantiza la CHECK
+        // `installment_paid_date_required_when_paid` (migración 0009), no este `!`.
+        // El `gte` de arriba ya descartaba esas filas en silencio; ahora
+        // directamente no pueden existir.
         date: i.date!,
         usdCents: i.usdCents,
         rate: i.rate,

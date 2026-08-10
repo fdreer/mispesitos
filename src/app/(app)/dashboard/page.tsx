@@ -6,6 +6,10 @@ import { computeBalances } from "@/lib/balance"
 import { monthlyTotals, projectBalance, spendByCategory } from "@/lib/dashboard"
 import { addMonthsClamped, monthKey, todayInAr } from "@/lib/dates"
 import { convertToArs } from "@/lib/money"
+import {
+  assertExchangeDirection,
+  assertInstallmentMovementKind,
+} from "@/lib/movement-asserts"
 import { getMovementStatus } from "@/lib/movement-status"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import {
@@ -45,14 +49,23 @@ export default async function DashboardPage() {
       initialDate: settings.initialBalanceDate,
     },
     paid.map((p) => ({
+      // `paid_date` no puede ser nulo con `paid = true`: lo garantiza la CHECK
+      // `installment_paid_date_required_when_paid` (migración 0009), no este `!`.
+      // Antes de esa constraint el supuesto no lo sostenía nadie y una fila
+      // así hacía reventar el `monthKey(null)` de más abajo.
       paidDate: p.paidDate!,
       currency: p.currency as "ARS" | "USD",
-      kind: p.kind as "income" | "expense",
+      kind: assertInstallmentMovementKind(p.kind),
       amountCents: p.amountCents,
     })),
     exchanges.map((e) => ({
       date: e.date,
-      direction: e.direction as "buy" | "sell",
+      // Los mismos asserts que sostiene `queries.ts`, y por el mismo motivo:
+      // con un `as`, un cambio con `direction` nulo caía en el `else` de
+      // computeBalances y se contaba en silencio como venta, mientras
+      // /cambios reventaba con esa misma fila. Dos comportamientos opuestos
+      // para el mismo dato malo.
+      direction: assertExchangeDirection(e.direction),
       usdCents: e.amountCents,
       rate: Number(e.rate),
     })),
@@ -72,6 +85,8 @@ export default async function DashboardPage() {
     currency === "ARS" ? cents : convertToArs(cents, Number(movementRate))
 
   const thisMonth = monthKey(today)
+  // El `!` lo sostiene la misma CHECK de la migración 0009: estas filas vienen
+  // todas con `paid = true`.
   const monthPaid = paid.filter((p) => monthKey(p.paidDate!) === thisMonth)
 
   const projection = projectBalance(
@@ -79,7 +94,7 @@ export default async function DashboardPage() {
     pending.map((p) => ({
       dueDate: p.dueDate,
       arsCents: toArs(p.amountCents, p.currency, p.rate),
-      kind: p.kind as "income" | "expense",
+      kind: assertInstallmentMovementKind(p.kind),
     })),
     HORIZON_MONTHS,
     today,
@@ -108,7 +123,7 @@ export default async function DashboardPage() {
       amountCents: p.amountCents,
       description: p.description,
       currency: p.currency as "ARS" | "USD",
-      kind: p.kind as "income" | "expense",
+      kind: assertInstallmentMovementKind(p.kind),
       status: statusByMovement.get(p.movementId) ?? "pending",
     }))
 
@@ -129,7 +144,7 @@ export default async function DashboardPage() {
       .filter((m) => m.kind !== "exchange")
       .map((m) => ({
         date: m.date,
-        kind: m.kind as "income" | "expense",
+        kind: assertInstallmentMovementKind(m.kind),
         arsCents: toArs(m.amountCents, m.currency, m.rate),
       })),
     HISTORY_MONTHS,
