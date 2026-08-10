@@ -1,0 +1,17 @@
+export const DEFAULT_CATEGORIES: { name: string; kind: "income" | "expense" }[] = [
+  { name: "Sueldo", kind: "income" },
+  { name: "Freelance", kind: "income" },
+  { name: "Ventas", kind: "income" },
+  { name: "Intereses", kind: "income" },
+  { name: "Otros", kind: "income" },
+  { name: "Alquiler", kind: "expense" },
+  { name: "Expensas", kind: "expense" },
+  { name: "Servicios", kind: "expense" },
+  { name: "Supermercado", kind: "expense" },
+  { name: "Transporte", kind: "expense" },
+  { name: "Salud", kind: "expense" },
+  { name: "Educación", kind: "expense" },
+  { name: "Ocio", kind: "expense" },
+  { name: "Impuestos", kind: "expense" },
+  { name: "Otros", kind: "expense" },
+]
