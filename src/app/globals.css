@@ -2,38 +2,71 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/*
+ * Tema único, oscuro: la paleta de Linear. No existe un bloque `.dark` ni nada
+ * que agregue esa clase al DOM.
+ *
+ * La variante `dark` se declara igual, y a propósito. Los componentes de shadcn
+ * traen decenas de utilidades `dark:` adentro. Sin esta línea, `dark:` vuelve a
+ * su default de Tailwind —`prefers-color-scheme`— y a cualquiera con el sistema
+ * operativo en oscuro se le aplicarían encima los retoques del tema oscuro de
+ * shadcn, sobre una paleta que ya es oscura. Atada a `.dark`, que no existe en
+ * ningún lado, quedan todas inertes y el tema es uno solo de verdad.
+ */
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
     --font-heading: var(--font-sans);
     /*
-     * Fuentes del sistema, sin descargar nada. Acá decía
-     * `--font-sans: var(--font-sans)`: una autorreferencia que create-next-app
-     * dejaba resuelta desde `next/font` en el layout, y que al sacar esa parte
-     * quedó apuntándose a sí misma. Una custom property que se referencia a sí
-     * misma es inválida, así que `html { font-family: var(--font-sans) }` se
-     * caía a la serif por defecto del navegador y toda la app se veía en Times.
+     * Inter Variable, servida por `next/font/google` desde el layout raíz: ahí
+     * se define `--font-inter` sobre <html> y acá se la consume. El stack de
+     * sistema queda de fallback para el primer paint.
      *
-     * El valor va literal y no como `var(...)` justamente por eso: este bloque
-     * es `@theme inline`, así que las utilidades (`font-sans`, y `font-heading`
-     * que apunta acá) copian el valor tal cual está escrito.
+     * Antes acá decía `--font-sans: var(--font-sans)`: una autorreferencia que
+     * create-next-app dejaba resuelta desde `next/font`, y que al sacar esa
+     * parte quedó apuntándose a sí misma. Una custom property que se referencia
+     * a sí misma es inválida, así que toda la app se caía a la serif del
+     * navegador. Ahora vuelve a haber un `var(...)`, pero apunta a otro nombre
+     * —`--font-inter`, no `--font-sans`— y por eso no reaparece el problema.
      */
-    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-        "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji",
-        "Segoe UI Emoji";
-    --color-sidebar-ring: var(--sidebar-ring);
-    --color-sidebar-border: var(--sidebar-border);
-    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-    --color-sidebar-accent: var(--sidebar-accent);
-    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-    --color-sidebar-primary: var(--sidebar-primary);
-    --color-sidebar-foreground: var(--sidebar-foreground);
-    --color-sidebar: var(--sidebar);
-    --color-chart-5: var(--chart-5);
-    --color-chart-4: var(--chart-4);
-    --color-chart-3: var(--chart-3);
-    --color-chart-2: var(--chart-2);
-    --color-chart-1: var(--chart-1);
+    --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+        "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
+        "Apple Color Emoji", "Segoe UI Emoji";
+    /*
+     * Berkeley Mono, la mono de Linear, es paga y no la tenemos; su rol allá
+     * —IDs de issue, atajos de teclado— acá no existe. Los importes van con
+     * `tabular-nums` sobre Inter, que con la feature `zero` los resuelve bien.
+     * Queda el stack del sistema por si aparece un caso.
+     */
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    /*
+     * La paleta de Linear por su nombre propio. Habilita `bg-void`, `text-fog`,
+     * `border-graphite` y compañía para los pocos lugares donde el token
+     * semántico de más abajo no alcanza: gráficos, badges de estado y títulos.
+     */
+    --color-void: #08090a;
+    --color-carbon: #0f1011;
+    --color-obsidian: #161718;
+    --color-graphite: #23252a;
+    --color-smoke: #383b3f;
+    --color-ash: #62666d;
+    --color-fog: #8a8f98;
+    --color-mist: #d0d6e0;
+    --color-bone: #e5e5e6;
+    --color-paper: #ffffff;
+    --color-acid-lime: #e4f222;
+    --color-pulse-green: #27a644;
+    --color-coral-red: #eb5757;
+    --color-signal-teal: #02b8cc;
+    --color-iris-violet: #6366f1;
+    --color-lavender: #8b5cf6;
+
+    /*
+     * Los tokens semánticos de shadcn. Los 19 componentes están escritos contra
+     * éstos, así que es acá —y no en cada componente— donde se decide cómo se
+     * ve la app.
+     */
     --color-ring: var(--ring);
     --color-input: var(--input);
     --color-border: var(--border);
@@ -52,82 +85,93 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/*
+ * Bloque aparte, y sin `inline`, a propósito. `@theme inline` copia el valor
+ * adentro de la utilidad y NO emite la variable a `:root`. Seis clases de
+ * `button.tsx` y `select.tsx` leen `--radius-md` en crudo, dentro de un
+ * `rounded-[min(var(--radius-md),10px)]`: si la variable no se emite, ese
+ * `var()` queda sin resolver y esos botones pierden el radio.
+ *
+ * Todo lo que sigue son valores literales que alguien puede leer con `var()`,
+ * así que van acá.
+ */
+@theme {
+    /*
+     * Radios literales, no calculados. Antes salían de multiplicar `--radius`
+     * (0.625rem), lo que daba 6/8/10/14px. El vocabulario de Linear es 2/4/6/12
+     * más la píldora, y cae justo encima de las clases que los componentes ya
+     * usan: `rounded-lg` de Button da 6px y `rounded-xl` de Card da 12px, sin
+     * tocar ninguno de los dos.
+     */
+    --radius-sm: 2px;
+    --radius-md: 4px;
+    --radius-lg: 6px;
+    --radius-xl: 12px;
+    --radius-2xl: 12px;
+    --radius-3xl: 9999px;
+    --radius-4xl: 9999px;
+
+    /*
+     * Linear corta la escala de pesos en 590 y prohíbe 700+. Redefinir estos dos
+     * mete en la banda todos los `font-medium` y `font-semibold` que ya están
+     * escritos, sin tocar un componente. En el proyecto no hay ningún
+     * `font-bold`; si aparece uno, está fuera del sistema.
+     */
+    --font-weight-medium: 510;
+    --font-weight-semibold: 590;
+
+    /*
+     * Tracking cerrado, colgado de la escala tipográfica en vez de repartido en
+     * `tracking-*` a mano: así un `text-2xl` que se escriba mañana ya nace con
+     * el suyo.
+     */
+    --text-xs--letter-spacing: -0.005em;
+    --text-sm--letter-spacing: -0.01em;
+    --text-base--letter-spacing: -0.011em;
+    --text-lg--letter-spacing: -0.012em;
+    --text-xl--letter-spacing: -0.012em;
+    --text-2xl--letter-spacing: -0.012em;
+    --text-3xl--letter-spacing: -0.022em;
+    --text-4xl--letter-spacing: -0.022em;
+
+    /* El hero de la landing, el único 64px del sistema. */
+    --text-hero: 64px;
+    --text-hero--line-height: 1;
+    --text-hero--letter-spacing: -0.022em;
+
+    /*
+     * En Linear la separación entre superficies la hace el borde capilar, no una
+     * sombra. Va por dentro para no correr el layout ni un pixel.
+     */
+    --shadow-hairline: inset 0 0 0 1px #23252a;
 }
 
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.129 0.042 264.695);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.129 0.042 264.695);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.129 0.042 264.695);
-    --primary: oklch(0.208 0.042 265.755);
-    --primary-foreground: oklch(0.984 0.003 247.858);
-    --secondary: oklch(0.968 0.007 247.896);
-    --secondary-foreground: oklch(0.208 0.042 265.755);
-    --muted: oklch(0.968 0.007 247.896);
-    --muted-foreground: oklch(0.554 0.046 257.417);
-    --accent: oklch(0.968 0.007 247.896);
-    --accent-foreground: oklch(0.208 0.042 265.755);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.929 0.013 255.508);
-    --input: oklch(0.929 0.013 255.508);
-    --ring: oklch(0.704 0.04 256.788);
-    --chart-1: oklch(0.869 0.022 252.894);
-    --chart-2: oklch(0.554 0.046 257.417);
-    --chart-3: oklch(0.446 0.043 257.281);
-    --chart-4: oklch(0.372 0.044 257.287);
-    --chart-5: oklch(0.279 0.041 260.031);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.984 0.003 247.858);
-    --sidebar-foreground: oklch(0.129 0.042 264.695);
-    --sidebar-primary: oklch(0.208 0.042 265.755);
-    --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-    --sidebar-accent: oklch(0.968 0.007 247.896);
-    --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
-    --sidebar-border: oklch(0.929 0.013 255.508);
-    --sidebar-ring: oklch(0.704 0.04 256.788);
-}
-
-.dark {
-    --background: oklch(0.129 0.042 264.695);
-    --foreground: oklch(0.984 0.003 247.858);
-    --card: oklch(0.208 0.042 265.755);
-    --card-foreground: oklch(0.984 0.003 247.858);
-    --popover: oklch(0.208 0.042 265.755);
-    --popover-foreground: oklch(0.984 0.003 247.858);
-    --primary: oklch(0.929 0.013 255.508);
-    --primary-foreground: oklch(0.208 0.042 265.755);
-    --secondary: oklch(0.279 0.041 260.031);
-    --secondary-foreground: oklch(0.984 0.003 247.858);
-    --muted: oklch(0.279 0.041 260.031);
-    --muted-foreground: oklch(0.704 0.04 256.788);
-    --accent: oklch(0.279 0.041 260.031);
-    --accent-foreground: oklch(0.984 0.003 247.858);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.551 0.027 264.364);
-    --chart-1: oklch(0.869 0.022 252.894);
-    --chart-2: oklch(0.554 0.046 257.417);
-    --chart-3: oklch(0.446 0.043 257.281);
-    --chart-4: oklch(0.372 0.044 257.287);
-    --chart-5: oklch(0.279 0.041 260.031);
-    --sidebar: oklch(0.208 0.042 265.755);
-    --sidebar-foreground: oklch(0.984 0.003 247.858);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-    --sidebar-accent: oklch(0.279 0.041 260.031);
-    --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.551 0.027 264.364);
+    --background: #08090a; /* Void */
+    /*
+     * Mist, no blanco. En shadcn este token pinta el cuerpo del texto, y Linear
+     * separa cuerpo (#d0d6e0) de título (#ffffff). El blanco se aplica explícito
+     * con `text-paper` en los títulos que lo piden.
+     */
+    --foreground: #d0d6e0; /* Mist */
+    --card: #0f1011; /* Carbon */
+    --card-foreground: #d0d6e0; /* Mist */
+    --popover: #161718; /* Obsidian */
+    --popover-foreground: #d0d6e0; /* Mist */
+    --primary: #e4f222; /* Acid Lime — la única acción cromática */
+    --primary-foreground: #08090a; /* Void */
+    --secondary: rgba(255, 255, 255, 0.05);
+    --secondary-foreground: #d0d6e0; /* Mist */
+    --muted: #161718; /* Obsidian */
+    --muted-foreground: #8a8f98; /* Fog */
+    --accent: #23252a; /* Slate — la superficie del hover */
+    --accent-foreground: #ffffff; /* Paper */
+    --destructive: #eb5757; /* Coral Red */
+    --border: #23252a; /* Graphite */
+    --input: rgba(255, 255, 255, 0.08);
+    --ring: #d0d6e0; /* Mist — el foco abre el borde, no agrega un halo de color */
 }
 
 @layer base {
@@ -139,5 +183,11 @@
     }
   html {
     @apply font-sans;
+    /*
+     * Los glifos alternos que definen la identidad tipográfica de Linear:
+     * `cv01` es la ele de una pierna, `ss03` el ampersand, `zero` el cero
+     * barrado. Sobre <html> para que los hereden también los importes.
+     */
+    font-feature-settings: "cv01" on, "ss03" on, "zero" on;
     }
 }
