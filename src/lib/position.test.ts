@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest"
-import { usdPosition, type PositionEvent } from "@/lib/position"
+import {
+  usdPosition,
+  buildUsdPositionEvents,
+  type PositionEvent,
+  type UsdInitialBalanceRow,
+  type UsdExchangeRow,
+  type UsdPaidInstallmentRow,
+} from "@/lib/position"
 
 const buy = (date: string, usd: number, rate: number): PositionEvent => ({
   date,
@@ -149,5 +156,140 @@ describe("usdPosition", () => {
     const alRevés = [eventos[0], eventos[2], eventos[1]]
 
     expect(usdPosition(alRevés)).toEqual(usdPosition(eventos))
+  })
+})
+
+describe("buildUsdPositionEvents", () => {
+  const sinSaldoInicial: UsdInitialBalanceRow = {
+    usdCents: 0,
+    rate: "0",
+    date: "2026-01-01",
+  }
+
+  it("con saldo inicial en dólares mayor a cero, siembra un evento de entrada con cantidad, TC y fecha correctos", () => {
+    const inicial: UsdInitialBalanceRow = { usdCents: 40_000, rate: "1000", date: "2026-01-05" }
+    const events = buildUsdPositionEvents(inicial, [], [])
+    expect(events).toEqual([
+      { date: "2026-01-05", usdCents: 40_000, rate: 1000, direction: "in" },
+    ])
+  })
+
+  it("con saldo inicial en cero, no siembra ningún evento", () => {
+    const events = buildUsdPositionEvents(sinSaldoInicial, [], [])
+    expect(events).toEqual([])
+  })
+
+  it("un cambio anterior a la fecha del saldo inicial no entra", () => {
+    const inicial: UsdInitialBalanceRow = { usdCents: 0, rate: "0", date: "2026-02-01" }
+    const anterior: UsdExchangeRow = {
+      date: "2026-01-31",
+      usdCents: 10_000,
+      rate: "1000",
+      direction: "buy",
+    }
+    expect(buildUsdPositionEvents(inicial, [anterior], [])).toEqual([])
+  })
+
+  it("un cambio en la misma fecha del saldo inicial sí entra (el borde incluye)", () => {
+    const inicial: UsdInitialBalanceRow = { usdCents: 0, rate: "0", date: "2026-02-01" }
+    const mismaFecha: UsdExchangeRow = {
+      date: "2026-02-01",
+      usdCents: 10_000,
+      rate: "1000",
+      direction: "buy",
+    }
+    expect(buildUsdPositionEvents(inicial, [mismaFecha], [])).toEqual([
+      { date: "2026-02-01", usdCents: 10_000, rate: 1000, direction: "in" },
+    ])
+  })
+
+  it("una cuota pagada anterior a la fecha del saldo inicial no entra, y en la misma fecha sí", () => {
+    const inicial: UsdInitialBalanceRow = { usdCents: 0, rate: "0", date: "2026-03-10" }
+    const anterior: UsdPaidInstallmentRow = {
+      date: "2026-03-09",
+      usdCents: 5_000,
+      rate: "1200",
+      kind: "income",
+    }
+    const mismaFecha: UsdPaidInstallmentRow = {
+      date: "2026-03-10",
+      usdCents: 5_000,
+      rate: "1200",
+      kind: "income",
+    }
+    expect(buildUsdPositionEvents(inicial, [], [anterior])).toEqual([])
+    expect(buildUsdPositionEvents(inicial, [], [mismaFecha])).toEqual([
+      { date: "2026-03-10", usdCents: 5_000, rate: 1200, direction: "in" },
+    ])
+  })
+
+  it("una compra de divisa produce una entrada y una venta produce una salida", () => {
+    const inicial: UsdInitialBalanceRow = { usdCents: 0, rate: "0", date: "2026-01-01" }
+    const compra: UsdExchangeRow = {
+      date: "2026-02-01",
+      usdCents: 10_000,
+      rate: "1000",
+      direction: "buy",
+    }
+    const venta: UsdExchangeRow = {
+      date: "2026-02-02",
+      usdCents: 5_000,
+      rate: "1500",
+      direction: "sell",
+    }
+    const events = buildUsdPositionEvents(inicial, [compra, venta], [])
+    expect(events).toEqual([
+      { date: "2026-02-01", usdCents: 10_000, rate: 1000, direction: "in" },
+      { date: "2026-02-02", usdCents: 5_000, rate: 1500, direction: "out" },
+    ])
+  })
+
+  it("una cuota cobrada en USD produce una entrada y una pagada en USD produce una salida", () => {
+    const inicial: UsdInitialBalanceRow = { usdCents: 0, rate: "0", date: "2026-01-01" }
+    const cobrada: UsdPaidInstallmentRow = {
+      date: "2026-02-01",
+      usdCents: 3_000,
+      rate: "1100",
+      kind: "income",
+    }
+    const pagada: UsdPaidInstallmentRow = {
+      date: "2026-02-02",
+      usdCents: 2_000,
+      rate: "1300",
+      kind: "expense",
+    }
+    const events = buildUsdPositionEvents(inicial, [], [cobrada, pagada])
+    expect(events).toEqual([
+      { date: "2026-02-01", usdCents: 3_000, rate: 1100, direction: "in" },
+      { date: "2026-02-02", usdCents: 2_000, rate: 1300, direction: "out" },
+    ])
+  })
+
+  it("convierte el numeric que llega como string a número una sola vez y bien", () => {
+    const inicial: UsdInitialBalanceRow = {
+      usdCents: 1_000,
+      rate: "1234.5678",
+      date: "2026-01-01",
+    }
+    const events = buildUsdPositionEvents(inicial, [], [])
+    expect(events[0].rate).toBe(1234.5678)
+    expect(typeof events[0].rate).toBe("number")
+  })
+
+  it("extremo a extremo: US$400 iniciales y una venta de US$100 dan tenencia US$300 y cero sobreventa", () => {
+    // Este es el test que se pone rojo si alguien saca el sembrado del saldo
+    // inicial: sin él, la venta de US$100 se dispararía sobre una posición
+    // vacía y usdPosition() informaría oversoldUsdCents = 10.000 en vez de 0.
+    const inicial: UsdInitialBalanceRow = { usdCents: 40_000, rate: "1000", date: "2026-01-01" }
+    const venta: UsdExchangeRow = {
+      date: "2026-06-01",
+      usdCents: 10_000,
+      rate: "1500",
+      direction: "sell",
+    }
+    const events = buildUsdPositionEvents(inicial, [venta], [])
+    const position = usdPosition(events)
+    expect(position.usdCents).toBe(30_000)
+    expect(position.oversoldUsdCents).toBe(0)
   })
 })

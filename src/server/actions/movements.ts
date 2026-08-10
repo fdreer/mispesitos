@@ -8,7 +8,7 @@ import { z } from "zod"
 import { withUser } from "@/db/client"
 import { installment, movement } from "@/db/schema"
 import { todayInAr } from "@/lib/dates"
-import { movementSchema } from "@/lib/schemas"
+import { exchangeSchema, movementSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { requireUser } from "@/server/session"
 
@@ -90,6 +90,56 @@ export async function createMovement(
 
   revalidatePath("/dashboard")
   revalidatePath(input.kind === "income" ? "/ingresos" : "/egresos")
+  return success()
+}
+
+/**
+ * Compra o venta de dólares. Un cambio NO genera cuotas: es instantáneo y
+ * mueve las dos monedas de una. `categoryId` va `null` a propósito — la FK de
+ * `movement` es compuesta `(user_id, category_id) → category (user_id, id)`
+ * con `MATCH SIMPLE`, así que una columna nula de la FK pasa sin problema.
+ */
+export async function createExchange(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser()
+
+  const parsed = exchangeSchema.safeParse({
+    direction: formData.get("direction"),
+    date: formData.get("date"),
+    usdCents: formData.get("usdCents") ?? "",
+    rate: formData.get("rate") ?? "",
+  })
+
+  if (!parsed.success) {
+    const flat = z.flattenError(parsed.error)
+    return failure(flat.formErrors[0] ?? "Revisá los datos.", flat.fieldErrors)
+  }
+
+  const input = parsed.data
+
+  try {
+    await withUser(user.id, (tx) =>
+      tx.insert(movement).values({
+        id: randomUUID(),
+        userId: user.id,
+        kind: "exchange",
+        description: input.direction === "buy" ? "Compra de dólares" : "Venta de dólares",
+        categoryId: null,
+        date: input.date,
+        currency: "USD",
+        amountCents: input.usdCents,
+        rate: String(input.rate),
+        direction: input.direction,
+      }),
+    )
+  } catch (error) {
+    console.error("createExchange", error)
+    return failure("No pudimos registrar la operación.")
+  }
+
+  revalidatePath("/", "layout")
   return success()
 }
 

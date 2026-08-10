@@ -49,9 +49,15 @@ export function usdPosition(events: PositionEvent[]): UsdPosition {
   // ponytail: dos salidas del mismo día se desempatan por monto y después por
   // TC. Es una elección arbitraria — con la posición en descubierto el orden sí
   // cambia el resultado, y a nivel día no hay forma de saber cuál pasó primero.
-  // Arbitraria pero fija: el número no baila entre recargas. El techo se levanta
-  // cuando los eventos traigan la secuencia real de la base (id o created_at):
-  // ahí ese campo pasa a ser el tercer criterio y esto se puede borrar.
+  // Arbitraria pero fija: el número no baila entre recargas.
+  //
+  // Task 15 evaluó agregar acá un campo de secuencia (id o created_at) como
+  // tercer criterio y lo descartó: sólo los cambios de divisa tienen
+  // `created_at` en la base, las cuotas pagadas no tienen ninguna marca de
+  // orden. Un desempate que sólo funciona para la mitad de los eventos sería
+  // peor que este, que es arbitrario pero se aplica igual a todos y queda
+  // documentado. El desempate que sí importa —las entradas antes que las
+  // salidas en la misma fecha— ya está resuelto arriba.
   const ordered = [...events].sort(
     (a, b) =>
       a.date.localeCompare(b.date) ||
@@ -93,4 +99,99 @@ export function usdPosition(events: PositionEvent[]): UsdPosition {
     realizedArsCents,
     oversoldUsdCents,
   }
+}
+
+/**
+ * Fila cruda de `user_settings`, tal como la necesita el sembrado de la
+ * posición inicial. `rate` llega como el `numeric` de la base, es decir
+ * string — Drizzle no lo convierte solo.
+ */
+export type UsdInitialBalanceRow = {
+  usdCents: number
+  rate: string
+  date: IsoDate
+}
+
+/** Fila cruda de un movimiento `exchange`. `rate` es el `numeric` de la base. */
+export type UsdExchangeRow = {
+  date: IsoDate
+  usdCents: number
+  rate: string
+  direction: "buy" | "sell"
+}
+
+/** Fila cruda de una cuota pagada de un movimiento en USD. Idem `rate`. */
+export type UsdPaidInstallmentRow = {
+  date: IsoDate
+  usdCents: number
+  rate: string
+  kind: "income" | "expense"
+}
+
+/**
+ * Arma la lista de `PositionEvent` que consume `usdPosition`, a partir del
+ * saldo inicial en dólares, los cambios de divisa y las cuotas pagadas en
+ * USD. Es la parte PURA de `listUsdPositionEvents` (@/server/queries).
+ *
+ * Dos reglas que el plan original no traía:
+ *
+ * 1. Siembra el saldo inicial como un evento de entrada, sólo si hay dólares
+ *    (`usdCents > 0`) — sembrar un evento de cero no aporta nada y ensucia el
+ *    desempate por monto de `usdPosition`. Sin esto, alguien que declaró
+ *    saldo inicial en dólares ve esos dólares en el dashboard pero CERO en
+ *    /cambios, con la alerta de sobreventa encendida para siempre apenas
+ *    gasta el primer dólar (`oversoldUsdCents` nunca baja).
+ * 2. Filtra cambios y cuotas por `date >= initialBalance.date`.
+ *    `computeBalances` (@/lib/balance) ya hace este mismo corte con
+ *    `initialDate`; sin este filtro, un movimiento cargado con fecha
+ *    anterior al saldo inicial quedaría contado acá y excluido allá, y las
+ *    dos pantallas dejarían de coincidir para ese usuario.
+ *
+ * La conversión del `numeric` (string) a number pasa una sola vez por fila,
+ * acá adentro — nadie más la repite.
+ */
+export function buildUsdPositionEvents(
+  initialBalance: UsdInitialBalanceRow,
+  exchanges: UsdExchangeRow[],
+  paidUsdInstallments: UsdPaidInstallmentRow[],
+): PositionEvent[] {
+  const events: PositionEvent[] = []
+
+  // La Task 11 exige TC > 0 cuando hay dólares iniciales (ver el `.refine` de
+  // `settingsSchema` en @/lib/schemas), así que la app nunca puede guardar
+  // una fila con dólares y TC en cero. Si por fuera de la app apareciera una
+  // fila así, esta función sembraría igual un evento de entrada con
+  // `rate: 0`: `usdPosition` sumaría esa cantidad sin aportar costo,
+  // arrastrando el promedio hacia abajo en silencio. No hay camino
+  // especulativo para eso acá — el guardia vive en el esquema, no acá.
+  if (initialBalance.usdCents > 0) {
+    events.push({
+      date: initialBalance.date,
+      usdCents: initialBalance.usdCents,
+      rate: Number(initialBalance.rate),
+      direction: "in",
+    })
+  }
+
+  for (const exchange of exchanges) {
+    if (exchange.date < initialBalance.date) continue
+    events.push({
+      date: exchange.date,
+      usdCents: exchange.usdCents,
+      rate: Number(exchange.rate),
+      direction: exchange.direction === "buy" ? "in" : "out",
+    })
+  }
+
+  for (const row of paidUsdInstallments) {
+    if (row.date < initialBalance.date) continue
+    events.push({
+      date: row.date,
+      usdCents: row.usdCents,
+      rate: Number(row.rate),
+      direction: row.kind === "income" ? "in" : "out",
+    })
+  }
+
+  return events
 }

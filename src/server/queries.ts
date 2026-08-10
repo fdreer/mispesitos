@@ -4,6 +4,7 @@ import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm"
 
 import { withUser } from "@/db/client"
 import { category, installment, movement, userSettings } from "@/db/schema"
+import { buildUsdPositionEvents, type PositionEvent } from "@/lib/position"
 
 export type Settings = typeof userSettings.$inferSelect
 
@@ -142,4 +143,86 @@ export async function listExchanges(userId: string) {
       .where(and(eq(movement.userId, userId), eq(movement.kind, "exchange")))
       .orderBy(asc(movement.date)),
   )
+}
+
+/**
+ * Todo lo que toca la tenencia de dólares: el saldo inicial, los cambios y
+ * las cuotas pagadas en USD. Sección 5.5 del spec — toda salida realiza
+ * resultado, se venda o se gaste.
+ *
+ * Filtra cambios y cuotas por `date >= initialBalanceDate` en la propia
+ * consulta (no trae todo y filtra en memoria): evita traerse historia vieja
+ * irrelevante para la posición. El armado de eventos en sí —sembrar el saldo
+ * inicial, repetir ese mismo corte de fecha como garantía propia, y
+ * convertir el `numeric` de la base a number— es la parte pura
+ * `buildUsdPositionEvents` (@/lib/position), separada acá justamente para
+ * poder probarla sin tocar la base.
+ */
+export async function listUsdPositionEvents(userId: string): Promise<PositionEvent[]> {
+  return withUser(userId, async (tx) => {
+    const [settings] = await tx
+      .select({
+        usdCents: userSettings.initialBalanceUsdCents,
+        rate: userSettings.initialBalanceUsdRate,
+        date: userSettings.initialBalanceDate,
+      })
+      .from(userSettings)
+      .where(eq(userSettings.userId, userId))
+      .limit(1)
+
+    // requireSettings() exige onboarding completo antes de llegar acá: en la
+    // práctica esta fila siempre existe. Sin ella no hay saldo inicial que
+    // sembrar ni piso de fecha que aplicar.
+    if (!settings) return []
+
+    const exchanges = await tx
+      .select({
+        date: movement.date,
+        usdCents: movement.amountCents,
+        rate: movement.rate,
+        direction: movement.direction,
+      })
+      .from(movement)
+      .where(
+        and(
+          eq(movement.userId, userId),
+          eq(movement.kind, "exchange"),
+          gte(movement.date, settings.date),
+        ),
+      )
+
+    const usdInstallments = await tx
+      .select({
+        date: installment.paidDate,
+        usdCents: installment.amountCents,
+        rate: movement.rate,
+        kind: movement.kind,
+      })
+      .from(installment)
+      .innerJoin(movement, eq(installment.movementId, movement.id))
+      .where(
+        and(
+          eq(installment.userId, userId),
+          eq(installment.paid, true),
+          eq(movement.currency, "USD"),
+          gte(installment.paidDate, settings.date),
+        ),
+      )
+
+    return buildUsdPositionEvents(
+      settings,
+      exchanges.map((e) => ({
+        date: e.date,
+        usdCents: e.usdCents,
+        rate: e.rate,
+        direction: e.direction as "buy" | "sell",
+      })),
+      usdInstallments.map((i) => ({
+        date: i.date!,
+        usdCents: i.usdCents,
+        rate: i.rate,
+        kind: i.kind as "income" | "expense",
+      })),
+    )
+  })
 }
