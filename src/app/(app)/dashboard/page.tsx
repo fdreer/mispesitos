@@ -1,9 +1,20 @@
 import { BalanceCards } from "@/components/dashboard/balance-cards"
 import { CategoryPie, MonthlyBars, ProjectionChart } from "@/components/dashboard/charts"
 import { Upcoming } from "@/components/dashboard/upcoming"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { computeBalances } from "@/lib/balance"
-import { monthlyTotals, projectBalance, spendByCategory } from "@/lib/dashboard"
+import {
+  monthlyTotals,
+  projectBalance,
+  projectionStartArsCents,
+  spendByCategory,
+} from "@/lib/dashboard"
 import { addMonthsClamped, monthKey, todayInAr } from "@/lib/dates"
 import { convertToArs } from "@/lib/money"
 import {
@@ -89,16 +100,25 @@ export default async function DashboardPage() {
   // todas con `paid = true`.
   const monthPaid = paid.filter((p) => monthKey(p.paidDate!) === thisMonth)
 
-  const projection = projectBalance(
-    balances.arsCents,
-    pending.map((p) => ({
-      dueDate: p.dueDate,
-      arsCents: toArs(p.amountCents, p.currency, p.rate),
-      kind: assertInstallmentMovementKind(p.kind),
-    })),
-    HORIZON_MONTHS,
-    today,
-  )
+  // La proyección arranca del saldo CONSOLIDADO, no del saldo en pesos: lo que
+  // se le aplica son cuotas ya convertidas a pesos, así que el punto de partida
+  // tiene que estar en esa misma escala. Puede ser null si hay dólares en el
+  // saldo y la cotización de hoy no está disponible.
+  const projectionStart = projectionStartArsCents(balances, todayRate)
+
+  const projection =
+    projectionStart === null
+      ? null
+      : projectBalance(
+          projectionStart,
+          pending.map((p) => ({
+            dueDate: p.dueDate,
+            arsCents: toArs(p.amountCents, p.currency, p.rate),
+            kind: assertInstallmentMovementKind(p.kind),
+          })),
+          HORIZON_MONTHS,
+          today,
+        )
 
   // Vencimientos: lo atrasado más lo que vence dentro de un mes.
   //
@@ -174,11 +194,23 @@ export default async function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
-              Saldo proyectado ({HORIZON_MONTHS} meses)
+              Saldo proyectado al cierre de cada mes ({HORIZON_MONTHS} meses)
             </CardTitle>
+            <CardDescription className="text-xs">
+              Arranca de tu saldo de hoy consolidado en pesos y le va aplicando las cuotas
+              pendientes por su vencimiento. El primer punto ya tiene descontado lo que vence
+              este mes y lo que está atrasado: no es tu saldo de hoy.
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <ProjectionChart data={projection} />
+            {projection === null ? (
+              <p className="text-muted-foreground py-8 text-center text-sm">
+                Hoy no pudimos traer la cotización del dólar, así que no podemos consolidar tu
+                saldo en pesos para arrancar la proyección. Probá de nuevo en un rato.
+              </p>
+            ) : (
+              <ProjectionChart data={projection} />
+            )}
           </CardContent>
         </Card>
 
