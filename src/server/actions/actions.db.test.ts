@@ -6,7 +6,6 @@ import { revalidatePath } from "next/cache"
 
 import { db, sqlClient, withUser } from "@/db/client"
 import { category, installment, movement, user, userSettings } from "@/db/schema"
-import { todayInAr } from "@/lib/dates"
 import { DEFAULT_CATEGORIES } from "@/lib/default-categories"
 import { archiveCategory, createCategory } from "@/server/actions/categories"
 import {
@@ -60,6 +59,27 @@ const USUARIO_NUEVO = "actions-test-nuevo"
  * `createCategory` no le dice "nombre repetido" a cualquier cosa que salga mal.
  */
 const USUARIO_FANTASMA = "actions-test-fantasma"
+
+/**
+ * Un id de sesión que Postgres NO puede leer, y la palanca de los tres `catch`
+ * que no se pueden ejercitar con el fantasma.
+ *
+ * `withUser()` manda el id a la base adentro del claim `{"sub": ...}`, donde el
+ * caracter NUL viaja escapado como `\u0000`: `set_config` lo guarda sin
+ * chistar, pero la policy —que hace `::json ->> 'sub'` para saber de quién es
+ * cada fila— revienta al convertirlo a texto ("unsupported Unicode escape
+ * sequence"). Es la misma clase de falla REAL que la fecha "0000-01-01": forma
+ * válida, la base la rechaza. No hay ningún doble.
+ *
+ * Hace falta porque `deleteMovement`, `setInstallmentPaid` y `archiveCategory`
+ * no insertan nada: con un usuario que no existe, su UPDATE/DELETE no falla,
+ * simplemente no toca ninguna fila y salen por la rama de "no encontramos",
+ * que es otro camino. Ésta es la forma de que la escritura falle de verdad.
+ *
+ * NO se agrega a `USUARIOS_A_LIMPIAR`: no escribe nada (no puede) y limpiarlo
+ * haría reventar la limpieza por el mismo motivo.
+ */
+const USUARIO_QUE_LA_BASE_NO_PUEDE_LEER = "actions-test-\u0000"
 
 const USUARIOS_SEMBRADOS = [USUARIO_A, USUARIO_B, USUARIO_NUEVO]
 /** El fantasma nunca llega a escribir nada, pero se limpia igual por las dudas. */
@@ -923,6 +943,33 @@ describe("createExchange", () => {
       expect(rutasRevalidadas()).toEqual([])
     },
   )
+
+  /**
+   * El `catch` de `createExchange`, con una falla REAL y no simulada:
+   * "0000-01-01" pasa `isValidIsoDate` —tiene la forma correcta y en el
+   * calendario proléptico de JavaScript es un día— pero Postgres no tiene año 0
+   * y rechaza el valor con 22008. Es la misma palanca que usa el test de la
+   * transacción de `createMovement`.
+   *
+   * Lo que se verifica no es "falló": es QUÉ le llega al usuario. Un cambio de
+   * divisa que no entra y no dice nada deja a alguien creyendo que compró
+   * dólares que no compró.
+   */
+  it("si la base rechaza la escritura, lo dice y no deja el cambio a medias", async () => {
+    comoUsuario(USUARIO_A)
+    const antes = (await cambiosDe(USUARIO_A)).length
+
+    const { resultado, etiquetas } = await conErroresDeConsola(() =>
+      createExchange(null, formulario({ ...CAMBIO_VALIDO, date: "0000-01-01" })),
+    )
+
+    expect(rechazo(resultado).message).toBe("No pudimos registrar la operación.")
+    // La etiqueta confirma que salió por el catch de la escritura y no por Zod,
+    // que no registra nada.
+    expect(etiquetas).toEqual(["createExchange"])
+    expect(await cambiosDe(USUARIO_A)).toHaveLength(antes)
+    expect(rutasRevalidadas()).toEqual([])
+  })
 })
 
 // --------------------------------------------------------------------------
@@ -983,6 +1030,29 @@ describe("deleteMovement", () => {
     expect(await movimientosPorDescripcion(USUARIO_B, "Gasto de B")).toHaveLength(1)
     expect(await cuotasDe(USUARIO_B, MOV_B)).toHaveLength(1)
   })
+
+  /**
+   * El `catch` de `deleteMovement`. La falla es real (ver
+   * `USUARIO_QUE_LA_BASE_NO_PUEDE_LEER`) y lo que importa es que el mensaje sea
+   * OTRO: "no pudimos borrarlo" y "ese movimiento no existe" son dos cosas
+   * distintas, y confundirlas deja al usuario apretando un botón que nunca va a
+   * funcionar creyendo que ya lo borró.
+   */
+  it("si la base rechaza el borrado, el mensaje no es el de un movimiento que no existe", async () => {
+    comoUsuario(USUARIO_QUE_LA_BASE_NO_PUEDE_LEER)
+
+    const { resultado, etiquetas } = await conErroresDeConsola(() =>
+      deleteMovement(randomUUID()),
+    )
+
+    const { message } = rechazo(resultado)
+    expect(message).toBe("No pudimos borrar el movimiento.")
+    expect(message).not.toBe("Ese movimiento no existe.")
+    // La etiqueta confirma que salió por el catch de la escritura y no por la
+    // validación del id, que no registra nada.
+    expect(etiquetas).toEqual(["deleteMovement"])
+    expect(rutasRevalidadas()).toEqual([])
+  })
 })
 
 // --------------------------------------------------------------------------
@@ -1010,18 +1080,49 @@ describe("setInstallmentPaid", () => {
     cuotaDeA = cuotas[0].id
   })
 
-  it("marcarla pagada le pone la fecha de hoy en Argentina", async () => {
+  /**
+   * NO BORRAR NI RELAJAR, Y NO VOLVER A COMPARAR CONTRA `todayInAr()`.
+   *
+   * Este test comparaba `cuota.paidDate` con `todayInAr()`, o sea con la MISMA
+   * función que escribe el valor: pasaba igual con la implementación rota.
+   * Cambiar `setInstallmentPaid` a `new Date().toISOString().slice(0, 10)`
+   * —el corrimiento por zona horaria que `todayInAr` existe para evitar— sólo
+   * se habría notado corriendo la suite entre las 21:00 y las 24:00 de
+   * Argentina, que es cuando el reloj UTC ya está en el día siguiente.
+   *
+   * Además era el único punto de la suite que dependía del reloj real: a la
+   * medianoche, el UPDATE y la aserción caían de lados distintos del día.
+   *
+   * Las dos cosas se arreglan igual: se congela el reloj en un instante que
+   * DISTINGUE las dos implementaciones y la fecha esperada va como literal.
+   */
+  it("marcarla pagada le pone la fecha de hoy en Argentina, no la de UTC", async () => {
     comoUsuario(USUARIO_A)
 
-    const resultado = await setInstallmentPaid(cuotaDeA, true)
+    // 01:00 UTC del 10 son las 22:00 del 9 en Buenos Aires: el día argentino y
+    // el día UTC son distintos. Sólo `Date` queda falso — los timers de verdad
+    // los sigue necesitando el driver de Postgres.
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date("2026-08-10T01:00:00Z"))
 
-    expect(resultado).toEqual({ ok: true })
-    const [cuota] = await cuotaPorId(USUARIO_A, cuotaDeA)
-    expect(cuota.paid).toBe(true)
-    // `todayInAr()`, no `new Date()`: a la madrugada argentina el reloj UTC ya
-    // está en el día siguiente.
-    expect(cuota.paidDate).toBe(todayInAr())
-    expect(rutasRevalidadas()).toEqual([["/", "layout"]])
+    try {
+      // El instante elegido efectivamente distingue las dos implementaciones:
+      // sin esto, el test podría estar congelando un momento del día en que
+      // las dos dan lo mismo y no probaría nada.
+      expect(new Date().toISOString().slice(0, 10)).toBe("2026-08-10")
+
+      const resultado = await setInstallmentPaid(cuotaDeA, true)
+
+      expect(resultado).toEqual({ ok: true })
+      const [cuota] = await cuotaPorId(USUARIO_A, cuotaDeA)
+      expect(cuota.paid).toBe(true)
+      // Literal, y el día ARGENTINO: con `new Date().toISOString()` acá diría
+      // "2026-08-10" y este test se pondría rojo, que es todo el punto.
+      expect(cuota.paidDate).toBe("2026-08-09")
+      expect(rutasRevalidadas()).toEqual([["/", "layout"]])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("marcarla dos veces seguidas deja el mismo estado", async () => {
@@ -1073,6 +1174,26 @@ describe("setInstallmentPaid", () => {
     const [cuotaDeB] = await cuotaPorId(USUARIO_B, INS_B)
     expect(cuotaDeB.paid).toBe(false)
     expect(cuotaDeB.paidDate).toBeNull()
+  })
+
+  /**
+   * El `catch` de `setInstallmentPaid`. Igual que en `deleteMovement`, lo que
+   * se prueba es que la falla de la base NO se confunda con "no encontramos esa
+   * cuota": el usuario que ve el segundo mensaje deja de intentar, y el que ve
+   * el primero prueba de nuevo. Son consejos opuestos.
+   */
+  it("si la base rechaza el UPDATE, el mensaje no es el de una cuota que no aparece", async () => {
+    comoUsuario(USUARIO_QUE_LA_BASE_NO_PUEDE_LEER)
+
+    const { resultado, etiquetas } = await conErroresDeConsola(() =>
+      setInstallmentPaid(randomUUID(), true),
+    )
+
+    const { message } = rechazo(resultado)
+    expect(message).toBe("No pudimos actualizar la cuota.")
+    expect(message).not.toBe("No encontramos esa cuota.")
+    expect(etiquetas).toEqual(["setInstallmentPaid"])
+    expect(rutasRevalidadas()).toEqual([])
   })
 })
 
@@ -1263,6 +1384,25 @@ describe("archiveCategory", () => {
     const [categoriaDeB] = await categoriaLlamada(USUARIO_B, "Comida")
     expect(categoriaDeB.archived).toBe(false)
   })
+
+  /**
+   * El `catch` de `archiveCategory`, el último de los cinco que no ejercitaba
+   * nadie. Misma palanca y mismo punto: una falla de la base no puede salir
+   * disfrazada de "esa categoría no existe".
+   */
+  it("si la base rechaza el archivado, el mensaje no es el de una categoría que no aparece", async () => {
+    comoUsuario(USUARIO_QUE_LA_BASE_NO_PUEDE_LEER)
+
+    const { resultado, etiquetas } = await conErroresDeConsola(() =>
+      archiveCategory(randomUUID()),
+    )
+
+    const { message } = rechazo(resultado)
+    expect(message).toBe("No pudimos archivar la categoría.")
+    expect(message).not.toBe("No encontramos esa categoría.")
+    expect(etiquetas).toEqual(["archiveCategory"])
+    expect(rutasRevalidadas()).toEqual([])
+  })
 })
 
 // --------------------------------------------------------------------------
@@ -1441,4 +1581,31 @@ describe("saveSettings", () => {
       expect(rutasRevalidadas()).toEqual([])
     },
   )
+
+  /**
+   * El `catch` de `saveSettings`, con la misma palanca que ya usa
+   * `createCategory`: el usuario fantasma no existe en `user`, así que la FK
+   * `user_settings_user_id_user_id_fk` rechaza el INSERT con 23503. La policy
+   * de RLS lo deja pasar (el user_id coincide con el claim), o sea que el error
+   * llega por donde llegaría cualquier otro problema de la base.
+   *
+   * Y verifica lo que sólo se puede verificar acá: la acción escribe DOS cosas
+   * —los ajustes y la precarga de categorías— y las dos están en la misma
+   * transacción. Si fallara la primera, la segunda no puede haber quedado.
+   */
+  it("si la base rechaza la escritura, avisa y no deja ni los ajustes ni las categorías precargadas", async () => {
+    comoUsuario(USUARIO_FANTASMA)
+
+    const { resultado, etiquetas } = await conErroresDeConsola(() =>
+      saveSettings(null, formulario(AJUSTES_VALIDOS)),
+    )
+
+    expect(rechazo(resultado).message).toBe("No pudimos guardar los ajustes. Probá de nuevo.")
+    expect(etiquetas).toEqual(["saveSettings"])
+    expect(await estadoDeOnboarding(USUARIO_FANTASMA)).toEqual({
+      ajustes: [],
+      cantidadDeCategorias: 0,
+    })
+    expect(rutasRevalidadas()).toEqual([])
+  })
 })
