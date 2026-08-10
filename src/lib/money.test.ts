@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest"
-import { roundCents, convertToArs, formatMoney, parseAmountToCents } from "@/lib/money"
+import {
+  roundCents,
+  convertToArs,
+  formatMoney,
+  parseAmountToCents,
+  parseDecimalInput,
+} from "@/lib/money"
 
 describe("roundCents", () => {
   it("redondea al entero más cercano", () => {
@@ -98,5 +104,73 @@ describe("parseAmountToCents", () => {
     expect(parseAmountToCents("0.5")).toBe(50)
     // Cuatro dígitos después del punto no son miles: son 12,3456 pesos.
     expect(parseAmountToCents("12.3456")).toBe(1_235)
+  })
+
+  it("con los dos separadores, el último es el decimal", () => {
+    // "1,234.56" es lo que sale de copiar y pegar de una página en inglés o de
+    // un resumen en dólares. Son $1.234,56, no $1,23.
+    expect(parseAmountToCents("1,234.56")).toBe(123_456)
+    expect(parseAmountToCents("1,234,567.89")).toBe(123_456_789)
+    // Y el formato de acá sigue leyéndose igual.
+    expect(parseAmountToCents("1.234,56")).toBe(123_456)
+    expect(parseAmountToCents("1.234.567,89")).toBe(123_456_789)
+  })
+
+  it("rechaza mezclas de puntos y comas que no son ningún formato, en vez de inventar un importe", () => {
+    // Son errores de tipeo. Devolver null hace que el formulario pida
+    // corregirlo; adivinar guardaría un importe que el usuario nunca escribió.
+    expect(parseAmountToCents("1.234,56.78")).toBeNull()
+    expect(parseAmountToCents("1,234.567.89")).toBeNull()
+    expect(parseAmountToCents("1,50.5")).toBeNull()
+    expect(parseAmountToCents("1.5,50")).toBeNull()
+  })
+
+  it("acepta hasta el máximo entero seguro y rechaza el centavo siguiente", () => {
+    // El borde de los dos lados: 9.007.199.254.740.991 centavos entran,
+    // uno más ya no se puede representar sin perder centavos.
+    expect(parseAmountToCents("90071992547409.91")).toBe(Number.MAX_SAFE_INTEGER)
+    expect(parseAmountToCents("90071992547409.92")).toBeNull()
+  })
+
+  it("rechaza separadores de miles que no agrupan de a tres", () => {
+    expect(parseAmountToCents("1.23.456")).toBeNull()
+    expect(parseAmountToCents("12,34,567")).toBeNull()
+  })
+
+  it("rechaza espacios y símbolos adentro del número", () => {
+    // El espacio de miles y el signo pesos se pegan de cualquier lado.
+    expect(parseAmountToCents("1 500")).toBeNull()
+    expect(parseAmountToCents("1 500")).toBeNull()
+    expect(parseAmountToCents("$1500")).toBeNull()
+    expect(parseAmountToCents("1500,-")).toBeNull()
+    expect(parseAmountToCents("１５００")).toBeNull()
+  })
+})
+
+describe("parseDecimalInput", () => {
+  it("lee el mismo decimal escrito en formato argentino, inglés o plano", () => {
+    expect(parseDecimalInput("1.234,56")).toBe(1234.56)
+    expect(parseDecimalInput("1,234.56")).toBe(1234.56)
+    expect(parseDecimalInput("1234.56")).toBe(1234.56)
+  })
+
+  it("un tipo de cambio escrito como se escribe acá vale lo que dice", () => {
+    // El caso que importa: "1.450" son mil cuatrocientos cincuenta pesos por
+    // dólar. Leerlo como 1,45 valúa cien dólares en un peso con cuarenta y cinco.
+    expect(parseDecimalInput("1.450")).toBe(1450)
+    expect(parseDecimalInput("1.450,50")).toBe(1450.5)
+    expect(parseDecimalInput("1450,50")).toBe(1450.5)
+  })
+
+  it("no arrastra el redondeo al centavo: devuelve el decimal tal cual", () => {
+    expect(parseDecimalInput("1234,5678")).toBe(1234.5678)
+  })
+
+  it("rechaza lo que Number() aceptaría pero nadie tipea", () => {
+    expect(parseDecimalInput("1e3")).toBeNull()
+    expect(parseDecimalInput("0x1F")).toBeNull()
+    expect(parseDecimalInput("Infinity")).toBeNull()
+    expect(parseDecimalInput("")).toBeNull()
+    expect(parseDecimalInput("   ")).toBeNull()
   })
 })
