@@ -6,7 +6,7 @@ afterEach(() => {
 })
 
 function stubFetch(impl: (url: string) => Promise<Response> | Response) {
-  const spy = vi.fn((input: RequestInfo | URL) => impl(String(input)))
+  const spy = vi.fn((...args: Parameters<typeof fetch>) => impl(String(args[0])))
   vi.stubGlobal("fetch", spy)
   return spy
 }
@@ -74,7 +74,6 @@ describe("fetchSuggestedRate", () => {
 
     await fetchSuggestedRate("blue")
 
-    const init = spy.mock.calls[0][1] as RequestInit
-    expect(init.signal).toBeInstanceOf(AbortSignal)
+    expect(spy.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal)
   })
 })
