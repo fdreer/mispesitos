@@ -3,6 +3,13 @@ import { and, eq, inArray } from "drizzle-orm"
 
 import { db, sqlClient, withUser } from "@/db/client"
 import { category, installment, movement, user, userSettings } from "@/db/schema"
+import { computeBalances } from "@/lib/balance"
+import {
+  assertCurrency,
+  assertExchangeDirection,
+  assertInstallmentMovementKind,
+} from "@/lib/movement-asserts"
+import { usdPosition } from "@/lib/position"
 import {
   getSettings,
   listCategories,
@@ -1076,5 +1083,128 @@ describe("aislamiento por usuario", () => {
     )
 
     expect(propias).toHaveLength(3)
+  })
+})
+
+/**
+ * EL CRUCE DE LAS DOS RUTAS. El corte "contar sólo desde initialBalanceDate"
+ * está escrito SEIS veces: dos en `computeBalances` (@/lib/balance), dos en
+ * `buildUsdPositionEvents` (@/lib/position) y dos en SQL, los `gte` de
+ * `listUsdPositionEvents` de este mismo archivo.
+ *
+ * Cada mitad tenía su cobertura y ninguna cruzaba a la otra:
+ * `src/lib/position.test.ts` ata las dos puras entre sí sin tocar la base, y
+ * los tests de arriba prueban el SQL contra literales escritos a mano. Con eso,
+ * cambiar un `gte` de SQL por `gt` deja las DOS suites en verde y al usuario
+ * con /cambios y el dashboard diciendo cosas distintas sobre los mismos
+ * dólares.
+ *
+ * Este bloque es el que se entera: siembra una sola vez (la siembra de A, que
+ * ya tiene TRES filas exactamente en `SALDO_INICIAL_A` y dos anteriores) y hace
+ * salir el número por los dos caminos completos, cada uno con sus consultas de
+ * verdad:
+ *
+ *   posición: listUsdPositionEvents -> usdPosition
+ *   saldo:    getSettings + listPaidInstallments + listExchanges -> computeBalances
+ *
+ * El mapeo del lado del saldo es el MISMO que hace el dashboard, asserts
+ * incluidos: si acá se escribiera a mano, el test probaría una ruta que la app
+ * no usa.
+ *
+ * NO BORRAR NI RELAJAR. Si se pone en rojo, las dos pantallas están mostrando
+ * números distintos.
+ */
+describe("la posición y el saldo salen del mismo dato por dos rutas distintas", () => {
+  async function porLasDosRutas(userId: string) {
+    const [eventos, settings, pagadas, cambios] = await Promise.all([
+      listUsdPositionEvents(userId),
+      getSettings(userId),
+      listPaidInstallments(userId),
+      listExchanges(userId),
+    ])
+
+    const position = usdPosition(eventos)
+
+    // Igual que src/app/(app)/dashboard/page.tsx, asserts incluidos.
+    const balances = computeBalances(
+      {
+        initialArsCents: settings!.initialBalanceArsCents,
+        initialUsdCents: settings!.initialBalanceUsdCents,
+        initialDate: settings!.initialBalanceDate,
+      },
+      pagadas.map((p) => ({
+        paidDate: p.paidDate!,
+        currency: assertCurrency(p.currency),
+        kind: assertInstallmentMovementKind(p.kind),
+        amountCents: p.amountCents,
+      })),
+      cambios.map((c) => ({
+        date: c.date,
+        direction: assertExchangeDirection(c.direction),
+        usdCents: c.amountCents,
+        rate: Number(c.rate),
+      })),
+    )
+
+    return { position, balances }
+  }
+
+  it("los dólares que dice /cambios y los que dice el dashboard son los mismos", async () => {
+    const { position, balances } = await porLasDosRutas(USUARIO_A)
+
+    // La misma igualdad que el invariante puro de src/lib/position.test.ts,
+    // pero con las dos rutas COMPLETAS: SQL incluido de un lado y las
+    // consultas sin filtro de fecha del otro.
+    expect(position.oversoldUsdCents).toBe(0)
+    expect(position.usdCents - position.oversoldUsdCents).toBe(balances.usdCents)
+
+    // Y el literal, además de la igualdad: dos rutas rotas de la misma manera
+    // también coincidirían. US$100 de saldo inicial + US$50 comprados el día
+    // del saldo inicial + US$200 cobrados ese mismo día - US$120 pagados el
+    // 2026-04-05 - US$30 vendidos el 2026-05-20.
+    expect(balances.usdCents).toBe(200_00)
+  })
+
+  /**
+   * La misma igualdad para el otro usuario, cuyo saldo inicial es de OTRA
+   * fecha (2026-01-01) y cuyas filas son todas posteriores. Sin esta mitad,
+   * un corte de fecha que ignorara la configuración del usuario y usara una
+   * constante pasaría el caso de arriba.
+   */
+  it("y también para un usuario con otra fecha de saldo inicial", async () => {
+    const { position, balances } = await porLasDosRutas(USUARIO_B)
+
+    expect(position.usdCents - position.oversoldUsdCents).toBe(balances.usdCents)
+    // US$500 de saldo inicial + US$444 comprados + US$777 cobrados.
+    expect(balances.usdCents).toBe(1721_00)
+  })
+
+  /**
+   * EL BORDE, que es lo que hace que este cruce valga la pena, y cuánto pesa.
+   *
+   * Las dos filas cargadas EXACTAMENTE en `SALDO_INICIAL_A` —la compra de
+   * US$50 y la cuota cobrada de US$200— tienen que contar de los dos lados. El
+   * test de arriba ya se rompe si no, pero acá queda escrito el tamaño del
+   * desastre: sacarlas de la posición y dejarlas en el saldo —o sea, cambiar un
+   * `gte` de SQL por `gt`— deja las dos pantallas separadas por US$250, y
+   * encima prende la alerta de sobreventa.
+   */
+  it("sacar del cálculo las filas del día exacto separa las dos pantallas por US$250", async () => {
+    const { balances } = await porLasDosRutas(USUARIO_A)
+    const eventos = await listUsdPositionEvents(USUARIO_A)
+
+    // Los eventos del día exacto que vienen de una fila cargada (el saldo
+    // inicial en sí también cae ese día, pero no lo filtra ningún `gte`).
+    const delBorde = eventos.filter((e) => e.date === SALDO_INICIAL_A && e.usdCents !== 100_00)
+    expect(delBorde.map((e) => e.usdCents).sort((a, b) => a - b)).toEqual([50_00, 200_00])
+
+    // Exactamente lo que devolvería listUsdPositionEvents con `gt`.
+    const conGt = usdPosition(eventos.filter((e) => !delBorde.includes(e)))
+
+    expect(conGt.usdCents - conGt.oversoldUsdCents).not.toBe(balances.usdCents)
+    expect(balances.usdCents - (conGt.usdCents - conGt.oversoldUsdCents)).toBe(250_00)
+    // Y no es sólo un número más chico: sin esos dólares, /cambios avisaría de
+    // una sobreventa que nunca pasó.
+    expect(conGt.oversoldUsdCents).toBeGreaterThan(0)
   })
 })
