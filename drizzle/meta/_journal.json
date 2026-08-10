@@ -50,6 +50,13 @@
       "when": 1786336714175,
       "tag": "0006_refuerzo_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786338546584,
+      "tag": "0007_search_path_app_user_id",
+      "breakpoints": true
     }
   ]
 }

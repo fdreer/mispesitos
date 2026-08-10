@@ -12,14 +12,21 @@ const USER_B = "rls-test-user-b"
  * distintas. Antes la cobertura de comportamiento era sólo sobre `category`: un
  * error en una sola de las otras tres no lo agarraba nada. Cada caso describe
  * cómo sembrar, leer, escribir a nombre ajeno y limpiar una tabla, y los tests
- * de aislamiento se corren parametrizados sobre las cuatro.
+ * de aislamiento —adentro y afuera de withUser()— se corren parametrizados
+ * sobre las cuatro.
  *
  * El orden del array es el de siembra (respeta las FK); la limpieza va al revés.
+ *
+ * `leer` acepta cualquier cosa con `.select()`, no sólo un Tx: los tests de
+ * adentro de withUser() le pasan un Tx real, y el test "fuera de withUser" le
+ * pasa `db` directamente, sin transacción ni SET LOCAL ROLE.
  */
+type Consultable = Pick<typeof db, "select">
+
 type CasoTabla = {
   nombre: string
   sembrar: (tx: Tx, userId: string) => Promise<unknown>
-  leer: (tx: Tx) => Promise<{ userId: string }[]>
+  leer: (tx: Consultable) => Promise<{ userId: string }[]>
   /** Un INSERT válido salvo por el user_id, que es el de otro usuario. */
   insertarAjena: (tx: Tx) => Promise<unknown>
   borrar: (tx: Tx) => Promise<unknown>
@@ -162,18 +169,40 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  // Las filas de la app se borran por withUser (afuera no son visibles) y en el
-  // orden inverso al de siembra: `movement -> category` es ON DELETE RESTRICT,
-  // así que la categoría no se puede ir antes que el movimiento que la usa.
-  for (const id of [USER_A, USER_B]) {
-    await withUser(id, async (tx) => {
-      for (const tabla of [...tablas].reverse()) await tabla.borrar(tx)
-    })
-  }
+  // Limpieza a prueba de fallas: un guard que rechaza, un error de red
+  // transitorio o una violación de RESTRICT en cualquiera de los cuatro
+  // withUser() de abajo no puede impedir que se borre `user` ni que se cierre
+  // el cliente. Ya pasó: un fallo acá dejó `rls-test-user-a` colgado en la
+  // base real y hubo que borrarlo a mano.
+  try {
+    // Las filas de la app se borran por withUser (afuera no son visibles) y en
+    // el orden inverso al de siembra: `movement -> category` es ON DELETE
+    // RESTRICT, así que la categoría no se puede ir antes que el movimiento
+    // que la usa. Va en su propio try: si esto falla, no puede tragarse el
+    // borrado de `user` ni el cierre del cliente de abajo.
+    try {
+      for (const id of [USER_A, USER_B]) {
+        await withUser(id, async (tx) => {
+          for (const tabla of [...tablas].reverse()) await tabla.borrar(tx)
+        })
+      }
+    } catch (error) {
+      // No se traga en silencio: queda visible en la salida, pero no corta la
+      // limpieza que sigue.
+      console.error(
+        "afterAll: no se pudieron borrar por withUser() las filas de prueba de las " +
+          "tablas de la app. Puede haber quedado basura colgada en la base real:",
+        error,
+      )
+    }
 
-  await db.delete(user).where(eq(user.id, USER_A))
-  await db.delete(user).where(eq(user.id, USER_B))
-  await sqlClient.end()
+    await db.delete(user).where(eq(user.id, USER_A))
+    await db.delete(user).where(eq(user.id, USER_B))
+  } finally {
+    // Pase lo que pase arriba, hay que cerrar el socket: si no, Vitest se
+    // queja de handles colgados y la salida de tests deja de estar limpia.
+    await sqlClient.end()
+  }
 })
 
 describe("RLS", () => {
@@ -300,6 +329,16 @@ describe("RLS", () => {
 
     expect(fila.categoryId).toBeNull()
     expect(fila.userId).toBe(USER_A)
+
+    // Limpieza in situ: esta fila no forma parte de la siembra de beforeAll,
+    // y "movement: un usuario sólo ve sus propias filas" espera exactamente 1
+    // fila para USER_A. Sin este borrado, el test de arriba sólo pasa porque
+    // Vitest respeta el orden de declaración (este test está después); una
+    // corrida interrumpida después de acá dejaría `mov-exchange` colgado y
+    // pondría en rojo la siguiente corrida por una razón ajena al código.
+    await withUser(USER_A, (tx) =>
+      tx.delete(movement).where(eq(movement.id, "mov-exchange")),
+    )
   })
 
   // NO BORRAR NI RELAJAR.
@@ -346,23 +385,34 @@ describe("RLS", () => {
   // por completo. El arreglo es volver a apuntarla a `app_user`, nunca bajar la
   // expectativa: en rojo, este test está diciendo que cualquier consulta sin
   // WHERE devuelve datos de todos los usuarios.
-  it("fuera de withUser, la conexión de la app no ve filas de las tablas de la app", async () => {
-    // Hay dos categorías sembradas, una de A y una de B, y ninguna es visible.
-    const rows = await db.select().from(category)
+  //
+  // Parametrizado sobre las cuatro tablas, igual que los tests de aislamiento
+  // de adentro de withUser(): antes esto sólo corría sobre `category`, y una
+  // policy permisiva de más en cualquiera de las otras tres tablas sueltas no
+  // la agarraba nada.
+  it.each(tablas)(
+    "fuera de withUser, la conexión de la app no ve filas de $nombre",
+    async (tabla) => {
+      // Hay filas sembradas de A y de B en cada tabla, y ninguna es visible.
+      const filas = await tabla.leer(db)
 
-    expect(rows).toHaveLength(0)
-  })
+      expect(filas).toHaveLength(0)
+    },
+  )
 
   // El detector automático del caso de arriba: withUser() se niega a correr si el
-  // rol de conexión tiene BYPASSRLS, en vez de andar bien y aislar nada. Acá se
-  // verifica el hecho que la verificación consulta; que la verificación existe y
-  // deja pasar lo prueba cualquier otro test, porque todos usan withUser().
-  it("el rol de conexión de la app no tiene BYPASSRLS", async () => {
+  // rol de conexión tiene BYPASSRLS o es superusuario, en vez de andar bien y
+  // aislar nada. Acá se verifica el hecho que la verificación consulta; que la
+  // verificación existe y deja pasar lo prueba cualquier otro test, porque
+  // todos usan withUser(). La decisión en sí (qué hacer con rolbypassrls y
+  // rolsuper) tiene su propia cobertura con dobles en src/lib/rlsGuard.test.ts.
+  it("el rol de conexión de la app no tiene BYPASSRLS y no es superusuario", async () => {
     const rows = await db.execute(
-      sql`SELECT current_user::text AS rol, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+      sql`SELECT current_user::text AS rol, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user`,
     )
-    const [fila] = [...rows] as { rol: string; rolbypassrls: boolean }[]
+    const [fila] = [...rows] as { rol: string; rolbypassrls: boolean; rolsuper: boolean }[]
 
     expect(fila.rolbypassrls).toBe(false)
+    expect(fila.rolsuper).toBe(false)
   })
 })

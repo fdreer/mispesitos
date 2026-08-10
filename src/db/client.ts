@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 
+import { verificarRolNoSalteaRls, type EjecutorConsultaRol } from "@/lib/rlsGuard"
 import * as schema from "@/db/schema"
 
 /**
@@ -35,7 +36,16 @@ export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
  * Si el rol de conexión tiene BYPASSRLS, las policies no se evalúan y el
  * aislamiento entre usuarios desaparece SIN UN SOLO ERROR: la app anda igual de
  * bien y una consulta que se olvidó de filtrar devuelve datos de todos. Ese modo
- * de falla silencioso es la razón de esta verificación.
+ * de falla silencioso es la razón de esta verificación. También cubre el rol
+ * superusuario (rolsuper): en Supabase no muerde porque su `postgres` no lo es,
+ * pero contra un Postgres local o self-hosted un superusuario saltea RLS igual
+ * que BYPASSRLS.
+ *
+ * La consulta en sí vive acá, que es quien tiene `db`. Qué hacer con lo que
+ * devuelve —rechazar por BYPASSRLS, por rolsuper, o porque no vino ninguna
+ * fila— es una decisión pura que vive en @/lib/rlsGuard, separada para poder
+ * probarla con un doble sin pegarle a la base ni arrastrar el "server-only" de
+ * este archivo a la suite unitaria.
  *
  * Se memoiza la promesa para que sea una consulta por vida del proceso, no una
  * por request. Si falla, se limpia el memo: un error de red no puede dejar el
@@ -44,22 +54,22 @@ export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
  */
 let verificacionDeRol: Promise<void> | undefined
 
-async function consultarRolDeConexion(): Promise<void> {
+const ejecutarConsultaRolReal: EjecutorConsultaRol = async () => {
   const filas = await db.execute(
-    sql`SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+    sql`SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user`,
   )
-  const [fila] = [...filas] as { rolbypassrls: boolean }[]
+  return [...filas] as { rolbypassrls: boolean; rolsuper: boolean }[]
+}
 
-  if (fila?.rolbypassrls) {
-    throw new Error(
-      "El rol con el que la app conecta a la base tiene BYPASSRLS: las policies de " +
-        "RLS no se evalúan, así que cualquier consulta que se olvide de filtrar por " +
-        "usuario devuelve datos de todos los usuarios y nada falla a la vista. " +
-        "DATABASE_URL tiene que ser la cadena del rol de aplicación (`app_user`), no " +
-        "la del dueño (`postgres`). La del dueño va únicamente en " +
-        "MIGRATION_DATABASE_URL, que es la que usan las migraciones.",
-    )
-  }
+/**
+ * El ejecutor es inyectable y con el ejecutor real como default: withUser()
+ * sigue llamando esta función sin argumentos, igual que antes de separar la
+ * verificación en @/lib/rlsGuard.
+ */
+async function consultarRolDeConexion(
+  ejecutarConsulta: EjecutorConsultaRol = ejecutarConsultaRolReal,
+): Promise<void> {
+  await verificarRolNoSalteaRls(ejecutarConsulta)
 }
 
 function verificarRolSinBypassRls(): Promise<void> {
