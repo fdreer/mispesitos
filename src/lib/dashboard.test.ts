@@ -1,8 +1,71 @@
 import { describe, it, expect } from "vitest"
-import { projectBalance, spendByCategory, monthlyTotals } from "@/lib/dashboard"
+import {
+  monthlyTotals,
+  projectBalance,
+  projectionStartArsCents,
+  spendByCategory,
+} from "@/lib/dashboard"
+
+/**
+ * La proyección aplica cuotas YA convertidas a pesos, así que su punto de
+ * partida tiene que estar en esa misma escala. Arrancaba en el saldo en pesos
+ * pelado: para alguien con dólares ahorrados, la curva empezaba por debajo de
+ * su saldo real y después le descontaba deudas en dólares valuadas en pesos.
+ *
+ * NO BORRAR NI RELAJAR: si esto se pone en rojo, lo más probable es que el
+ * punto de partida haya vuelto a ser sólo pesos.
+ */
+describe("projectionStartArsCents", () => {
+  it("consolida los dólares del saldo con la cotización de hoy", () => {
+    expect(
+      projectionStartArsCents({ arsCents: 100_000_00, usdCents: 500_00 }, 1_500),
+    ).toBe(100_000_00 + 750_000_00)
+  })
+
+  it("sin dólares en el saldo, es el saldo en pesos tal cual", () => {
+    expect(projectionStartArsCents({ arsCents: 100_000_00, usdCents: 0 }, 1_500)).toBe(
+      100_000_00,
+    )
+  })
+
+  it("sin dólares en el saldo NO necesita cotización: sigue dando el número exacto", () => {
+    // El caso de la API caída para quien no tiene dólares. No hay nada que
+    // consolidar, así que no hay motivo para dejarlo sin gráfico.
+    expect(projectionStartArsCents({ arsCents: 100_000_00, usdCents: 0 }, null)).toBe(
+      100_000_00,
+    )
+  })
+
+  it("con dólares y sin cotización devuelve null en vez de mentir", () => {
+    // dolarapi puede fallar o tardar (sección 5.6 del spec). Devolver el saldo
+    // en pesos acá sería exactamente el bug de origen: una curva que arranca
+    // por debajo del saldo real. Quien llama decide qué mostrar; lo que no
+    // puede es recibir un número que no es.
+    expect(projectionStartArsCents({ arsCents: 100_000_00, usdCents: 500_00 }, null)).toBeNull()
+  })
+
+  it("un saldo en dólares negativo se consolida igual, restando", () => {
+    // computeBalances puede dejar el saldo en dólares negativo si se gastó de
+    // más: el consolidado tiene que reflejarlo, no clampearlo.
+    expect(projectionStartArsCents({ arsCents: 100_000_00, usdCents: -200_00 }, 1_500)).toBe(
+      100_000_00 - 300_000_00,
+    )
+  })
+
+  it("redondea al centavo, sin fabricar fracciones", () => {
+    // 3,33 dólares a 1.234,5678 pesos. La conversión es la de @/lib/money, que
+    // es la única que multiplica por una cotización en toda la app.
+    expect(projectionStartArsCents({ arsCents: 0, usdCents: 3_33 }, 1_234.5678)).toBe(
+      Math.round(3_33 * 1_234.5678),
+    )
+    expect(Number.isInteger(projectionStartArsCents({ arsCents: 0, usdCents: 3_33 }, 1_234.5678))).toBe(
+      true,
+    )
+  })
+})
 
 describe("projectBalance", () => {
-  it("arranca del saldo de hoy y aplica los pendientes por vencimiento", () => {
+  it("arranca del saldo de partida y aplica los pendientes por vencimiento", () => {
     const result = projectBalance(
       100_000_00,
       [
@@ -42,7 +105,7 @@ describe("projectBalance", () => {
     expect(result[0].arsCents).toBe(6_000_00)
   })
 
-  it("con la lista de pendientes vacía, repite el saldo de hoy en todos los meses", () => {
+  it("con la lista de pendientes vacía, repite el saldo de partida en todos los meses", () => {
     const result = projectBalance(50_000_00, [], 3, "2026-08-09")
 
     expect(result).toEqual([
