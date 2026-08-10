@@ -8,6 +8,13 @@
       "when": 1786330704112,
       "tag": "0000_good_wraith",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786332000000,
+      "tag": "0001_rls_tablas_de_auth",
+      "breakpoints": true
     }
   ]
 }
