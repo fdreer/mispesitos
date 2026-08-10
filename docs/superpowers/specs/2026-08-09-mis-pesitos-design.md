@@ -120,7 +120,10 @@ Set precargado al registrarse — Ingresos: Sueldo, Freelance, Ventas, Intereses
 Egresos: Alquiler, Expensas, Servicios, Supermercado, Transporte, Salud, Educación, Ocio,
 Impuestos, Otros.
 
-### `transaction`
+### `movement`
+
+Se llama `movement` y no `transaction` para no confundirla con las transacciones de base de
+datos, que en esta app se usan en cada lectura por el mecanismo de RLS.
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -145,7 +148,7 @@ como `amount_cents × rate`, así nunca puede quedar inconsistente con el TC.
 | Columna | Tipo | Notas |
 |---|---|---|
 | id | text PK | |
-| transaction_id | text FK | cascade |
+| movement_id | text FK | cascade |
 | user_id | text FK | duplicado para que RLS aplique sin join |
 | number | integer | 1..n |
 | amount_cents | bigint | |
@@ -388,7 +391,7 @@ Se documentan en `.env.example`. `.env.local` nunca se commitea.
   entera sin él, sólo se pierde la sugerencia de cotización.
 - **Saldo global sin cuentas** significa que la app no puede decir cuánta plata hay en el banco
   contra cuánta en la mano. Es una decisión tomada a conciencia; si más adelante hace falta,
-  agregar cuentas implica una tabla nueva y una columna en `transaction`.
+  agregar cuentas implica una tabla nueva y una columna en `movement`.
 
 ## 12. Decisiones descartadas
 
