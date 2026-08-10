@@ -8,6 +8,7 @@ import { z } from "zod"
 import { withUser } from "@/db/client"
 import { installment, movement } from "@/db/schema"
 import { todayInAr } from "@/lib/dates"
+import { BASE_PATHS } from "@/lib/movement-routes"
 import { exchangeSchema, movementSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { requireUser } from "@/server/session"
@@ -89,7 +90,10 @@ export async function createMovement(
   }
 
   revalidatePath("/dashboard")
-  revalidatePath(input.kind === "income" ? "/ingresos" : "/egresos")
+  // Del mapa compartido, no armada acá: `BASE_PATHS` existe para que la ruta
+  // de cada tipo esté escrita una sola vez. Repetirla acá dejaba la acción
+  // revalidando la ruta vieja el día que el mapa cambie, sin que nada falle.
+  revalidatePath(BASE_PATHS[input.kind])
   return success()
 }
 
