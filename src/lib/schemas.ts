@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { isValidIsoDate } from "@/lib/dates"
 import { installmentsSumMatches } from "@/lib/installments"
 import { parseAmountToCents, parseDecimalInput } from "@/lib/money"
 
@@ -16,9 +17,13 @@ export const amountCents = z
   })
   .refine((cents) => cents >= 0, { message: "El importe no puede ser negativo." })
 
-export const isoDate = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Elegí una fecha válida.")
+/**
+ * Fecha de negocio. El formato solo no alcanza: "2026-02-30" lo cumple y no es
+ * un día. Sin este chequeo el 30 de febrero llegaba hasta el INSERT, donde la
+ * columna `date` lo rechaza, y el usuario veía "No pudimos guardar el
+ * movimiento" en vez de "Elegí una fecha válida" en el campo de la fecha.
+ */
+export const isoDate = z.string().refine(isValidIsoDate, "Elegí una fecha válida.")
 
 export const ratePreference = z.enum(["oficial", "blue", "mep"])
 

@@ -233,6 +233,35 @@ describe("movementSchema", () => {
     expect(fieldError(result, "date")).toBeDefined()
   })
 
+  it("rechaza una fecha que tiene la forma correcta pero no existe", () => {
+    // El 30 de febrero pasaba la validación de formato y llegaba hasta el
+    // INSERT, donde la columna `date` lo rechaza: el usuario veía el error
+    // genérico de "no pudimos guardar" y ninguna pista de cuál era el campo.
+    for (const fecha of ["2026-02-30", "2026-02-29", "2026-13-01", "2026-08-00"]) {
+      const result = movementSchema.safeParse({ ...validMovement, date: fecha })
+      expect(result.success).toBe(false)
+      expect(fieldError(result, "date")).toBeDefined()
+    }
+  })
+
+  it("acepta el 29 de febrero de un año bisiesto", () => {
+    const result = movementSchema.safeParse({
+      ...validMovement,
+      date: "2028-02-29",
+      installments: [{ amountCents: 150_000, dueDate: "2028-02-29" }],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it("rechaza un vencimiento que no existe, apuntando a la cuota", () => {
+    const result = movementSchema.safeParse({
+      ...validMovement,
+      installments: [{ amountCents: 150_000, dueDate: "2026-04-31" }],
+    })
+    expect(result.success).toBe(false)
+    expect(fieldError(result, "installments.0.dueDate")).toBeDefined()
+  })
+
   it("rechaza una fecha de vencimiento con formato inválido", () => {
     const result = movementSchema.safeParse({
       ...validMovement,
