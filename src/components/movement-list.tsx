@@ -49,10 +49,15 @@ export function MovementList({ movements, categories, today }: Props) {
                   <span className="tabular-nums">
                     {formatMoney(m.amountCents, m.currency as "ARS" | "USD")}
                   </span>
-                  <DeleteMovementButton id={m.id} description={m.description} />
                 </div>
               </summary>
               <InstallmentRows rows={m.installments} currency={m.currency as "ARS" | "USD"} />
+              {/* El botón va fuera del <summary>: un <summary> no puede tener
+                  descendientes interactivos, y anidarlo obligaba a un
+                  preventDefault para que el click no togglee el detalle. */}
+              <div className="mt-2 flex justify-end">
+                <DeleteMovementButton id={m.id} description={m.description} />
+              </div>
             </details>
           </li>
         )
