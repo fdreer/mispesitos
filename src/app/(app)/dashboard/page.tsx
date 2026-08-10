@@ -1,6 +1,177 @@
-import { requireUser } from "@/server/session"
+import { BalanceCards } from "@/components/dashboard/balance-cards"
+import { CategoryPie, MonthlyBars, ProjectionChart } from "@/components/dashboard/charts"
+import { Upcoming } from "@/components/dashboard/upcoming"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { computeBalances } from "@/lib/balance"
+import { monthlyTotals, projectBalance, spendByCategory } from "@/lib/dashboard"
+import { addMonthsClamped, monthKey, todayInAr } from "@/lib/dates"
+import { convertToArs } from "@/lib/money"
+import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
+import {
+  listCategories,
+  listExchanges,
+  listMovements,
+  listPaidInstallments,
+  listPendingInstallments,
+} from "@/server/queries"
+import { requireSettings } from "@/server/session"
+
+const HORIZON_MONTHS = 6
+const HISTORY_MONTHS = 12
 
 export default async function DashboardPage() {
-  const user = await requireUser()
-  return <p>Hola, {user.name}.</p>
+  const { user, settings } = await requireSettings()
+  const today = todayInAr()
+
+  const [paid, exchanges, pending, movements, expenseCategories, rate] = await Promise.all([
+    listPaidInstallments(user.id),
+    listExchanges(user.id),
+    listPendingInstallments(user.id),
+    listMovements(user.id),
+    // "expense" + archivadas incluidas: la torta de egresos por categoría
+    // tiene que poder resolver el nombre de un movimiento viejo cuya
+    // categoría ya se archivó, igual que MovementList (Task 16) para
+    // /egresos. listCategories() sin este segundo argumento sólo trae las
+    // activas y esos movimientos caerían en "Sin categoría".
+    listCategories(user.id, "expense", true),
+    fetchSuggestedRate(settings.preferredRate as RatePreference),
+  ])
+
+  const balances = computeBalances(
+    {
+      initialArsCents: settings.initialBalanceArsCents,
+      initialUsdCents: settings.initialBalanceUsdCents,
+      initialDate: settings.initialBalanceDate,
+    },
+    paid.map((p) => ({
+      paidDate: p.paidDate!,
+      currency: p.currency as "ARS" | "USD",
+      kind: p.kind as "income" | "expense",
+      amountCents: p.amountCents,
+    })),
+    exchanges.map((e) => ({
+      date: e.date,
+      direction: e.direction as "buy" | "sell",
+      usdCents: e.amountCents,
+      rate: Number(e.rate),
+    })),
+  )
+
+  // El consolidado valúa la tenencia en dólares al TC de VENTA: lo que se
+  // recibiría si se vendieran hoy, el lado conservador. No es el mismo TC que
+  // usan los formularios de ingresos/egresos (referenceRate): ahí se
+  // precarga la cotización de una operación puntual, acá se está valuando un
+  // saldo ya existente.
+  const todayRate = rate?.sellRate ?? null
+  const consolidated =
+    todayRate === null ? null : balances.arsCents + convertToArs(balances.usdCents, todayRate)
+
+  // Todo lo que no sea ARS se consolida con el rate del propio movimiento.
+  const toArs = (cents: number, currency: string, movementRate: string) =>
+    currency === "ARS" ? cents : convertToArs(cents, Number(movementRate))
+
+  const thisMonth = monthKey(today)
+  const monthPaid = paid.filter((p) => monthKey(p.paidDate!) === thisMonth)
+
+  const projection = projectBalance(
+    balances.arsCents,
+    pending.map((p) => ({
+      dueDate: p.dueDate,
+      arsCents: toArs(p.amountCents, p.currency, p.rate),
+      kind: p.kind as "income" | "expense",
+    })),
+    HORIZON_MONTHS,
+    today,
+  )
+
+  // Vencimientos: lo atrasado más lo que vence dentro de un mes.
+  const limit = addMonthsClamped(today, 1)
+  const upcoming = pending
+    .filter((p) => p.dueDate <= limit)
+    .slice(0, 20)
+    .map((p) => ({
+      id: p.id,
+      number: p.number,
+      dueDate: p.dueDate,
+      amountCents: p.amountCents,
+      description: p.description,
+      currency: p.currency as "ARS" | "USD",
+      kind: p.kind as "income" | "expense",
+    }))
+
+  const expenseMovements = movements.filter((m) => m.kind === "expense")
+
+  const pie = spendByCategory(
+    expenseMovements
+      .filter((m) => monthKey(m.date) === thisMonth)
+      .map((m) => ({
+        categoryId: m.categoryId,
+        arsCents: toArs(m.amountCents, m.currency, m.rate),
+      })),
+    expenseCategories,
+  )
+
+  const bars = monthlyTotals(
+    movements
+      .filter((m) => m.kind !== "exchange")
+      .map((m) => ({
+        date: m.date,
+        kind: m.kind as "income" | "expense",
+        arsCents: toArs(m.amountCents, m.currency, m.rate),
+      })),
+    HISTORY_MONTHS,
+    today,
+  )
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-semibold">Dashboard</h1>
+
+      <BalanceCards
+        arsCents={balances.arsCents}
+        usdCents={balances.usdCents}
+        consolidatedArsCents={consolidated}
+        rate={todayRate}
+        monthIncomeArsCents={monthPaid
+          .filter((p) => p.kind === "income")
+          .reduce((a, p) => a + toArs(p.amountCents, p.currency, p.rate), 0)}
+        monthExpenseArsCents={monthPaid
+          .filter((p) => p.kind === "expense")
+          .reduce((a, p) => a + toArs(p.amountCents, p.currency, p.rate), 0)}
+      />
+
+      <Upcoming items={upcoming} today={today} />
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              Saldo proyectado ({HORIZON_MONTHS} meses)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ProjectionChart data={projection} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Egresos del mes por categoría</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <CategoryPie data={pie} />
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Últimos {HISTORY_MONTHS} meses</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <MonthlyBars data={bars} />
+        </CardContent>
+      </Card>
+    </div>
+  )
 }

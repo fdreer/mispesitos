@@ -1,0 +1,90 @@
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { formatMoney } from "@/lib/money"
+
+type Props = {
+  arsCents: number
+  usdCents: number
+  consolidatedArsCents: number | null
+  rate: number | null
+  monthIncomeArsCents: number
+  monthExpenseArsCents: number
+}
+
+export function BalanceCards({
+  arsCents,
+  usdCents,
+  consolidatedArsCents,
+  rate,
+  monthIncomeArsCents,
+  monthExpenseArsCents,
+}: Props) {
+  const diff = monthIncomeArsCents - monthExpenseArsCents
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Saldo en pesos</CardTitle>
+        </CardHeader>
+        <CardContent className="text-2xl tabular-nums">
+          {formatMoney(arsCents, "ARS")}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Saldo en dólares</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-2xl tabular-nums">{formatMoney(usdCents, "USD")}</p>
+          {/*
+           * A propósito distinto de la "Tenencia" de /cambios (usdPosition):
+           * este saldo sale de computeBalances y puede quedar negativo si se
+           * gastó de más, mientras que la tenencia se clampea en cero y
+           * acumula la diferencia como sobreventa. /cambios ya explica la
+           * relación entre los dos números; esta leyenda sólo evita que verlos
+           * distintos parezca un error de la app.
+           */}
+          <p className="text-muted-foreground text-xs">
+            Puede quedar negativo. No es la tenencia de Cambios.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Total consolidado</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-2xl tabular-nums">
+            {consolidatedArsCents === null ? "—" : formatMoney(consolidatedArsCents, "ARS")}
+          </p>
+          <p className="text-muted-foreground text-xs">
+            {rate ? `dólar a ${rate.toFixed(2)}` : "sin cotización de hoy"}
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Este mes</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p
+            className={
+              diff >= 0
+                ? "text-2xl tabular-nums text-emerald-600"
+                : "text-destructive text-2xl tabular-nums"
+            }
+          >
+            {formatMoney(diff, "ARS")}
+          </p>
+          <p className="text-muted-foreground text-xs">
+            {formatMoney(monthIncomeArsCents, "ARS")} entraron ·{" "}
+            {formatMoney(monthExpenseArsCents, "ARS")} salieron
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
