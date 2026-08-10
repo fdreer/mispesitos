@@ -37,12 +37,21 @@ No unificarlas: de esa separación depende la segunda capa de autorización de l
 
 **Por qué importa:** en Supabase el rol `postgres` tiene el atributo `BYPASSRLS`,
 que le gana incluso a `FORCE ROW LEVEL SECURITY`. Si al desplegar `DATABASE_URL`
-queda apuntando al rol dueño en vez de a `app_user`, la app sigue andando
-normalmente — pero el aislamiento entre usuarios desaparece: cualquier consulta
-que se olvide de pasar por `withUser()` devuelve filas de todos los usuarios en
-vez de cero. Hay un guard (`src/db/rls.test.ts`, corrido por `pnpm test:db`) que
-lo detecta, pero recién en la primera consulta a la base. Verificá esta variable
-antes de desplegar, no confíes en que el guard te avise a tiempo.
+queda apuntando al rol dueño en vez de a `app_user`, el aislamiento entre usuarios
+desaparece: cualquier consulta que se olvide de pasar por `withUser()` devuelve
+filas de todos los usuarios en vez de cero, y nada falla a la vista.
+
+Contra eso hay un guard **en la app, no en los tests**: `src/db/client.ts` consulta
+`pg_roles` y `src/lib/rls-guard.ts` decide, y si el rol conecta con `BYPASSRLS` (o
+como superusuario) tira una excepción. Corre una vez por proceso, en el primer
+`withUser()`, y a partir de ahí no pasa ninguna consulta: la app no arranca a
+medias, deja de funcionar. O sea que no vas a desplegar en silencio con la cadena
+equivocada — pero te vas a enterar recién con el primer request, así que verificá
+la variable antes.
+
+Aparte, y por otro camino, `pnpm test:db` corre `src/db/rls.db.test.ts`, que es el
+test de integración del aislamiento en sí: verifica contra la base real que un
+usuario no ve las filas de otro.
 
 ### Puesta en marcha de `app_user` (paso manual, una sola vez)
 
