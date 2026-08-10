@@ -52,7 +52,7 @@ export function InstallmentRows({
               <Button
                 type="button"
                 size="sm"
-                variant={row.paid ? "secondary" : "default"}
+                variant={row.paid ? "secondary" : "outline"}
                 disabled={pending}
                 onClick={() => handleToggle(row)}
               >
