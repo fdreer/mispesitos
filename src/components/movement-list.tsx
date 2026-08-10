@@ -1,8 +1,9 @@
 import { Badge } from "@/components/ui/badge"
 import { DeleteMovementButton } from "@/components/delete-movement-button"
 import { InstallmentRows } from "@/components/installment-rows"
-import { isOverdue, type IsoDate } from "@/lib/dates"
+import { type IsoDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
+import { summarizeMovementStatus } from "@/lib/movement-status"
 import type { Category, MovementWithInstallments } from "@/server/queries"
 
 type Props = {
@@ -25,8 +26,12 @@ export function MovementList({ movements, categories, today }: Props) {
   return (
     <ul className="divide-y">
       {movements.map((m) => {
-        const pendientes = m.installments.filter((i) => !i.paid)
-        const vencidas = pendientes.filter((i) => isOverdue(i.dueDate, today))
+        // El mismo cálculo que usa el filtro de estado de esta pantalla: el
+        // badge y el filtro no pueden discrepar sobre qué está vencido.
+        const { status, pendingCount, overdueCount } = summarizeMovementStatus(
+          m.installments,
+          today,
+        )
 
         return (
           <li key={m.id} className="py-3">
@@ -40,11 +45,11 @@ export function MovementList({ movements, categories, today }: Props) {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  {vencidas.length > 0 && (
-                    <Badge variant="destructive">{vencidas.length} vencida(s)</Badge>
+                  {status === "overdue" && (
+                    <Badge variant="destructive">{overdueCount} vencida(s)</Badge>
                   )}
-                  {vencidas.length === 0 && pendientes.length > 0 && (
-                    <Badge variant="secondary">{pendientes.length} pendiente(s)</Badge>
+                  {status === "pending" && (
+                    <Badge variant="secondary">{pendingCount} pendiente(s)</Badge>
                   )}
                   <span className="tabular-nums">
                     {formatMoney(m.amountCents, m.currency as "ARS" | "USD")}
