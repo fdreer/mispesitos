@@ -2,6 +2,8 @@ export type Currency = "ARS" | "USD"
 
 /**
  * Redondeo al centavo. Medio hacia arriba, según la sección 5.0 del spec.
+ * Nota: "hacia arriba" es hacia +Infinito, no "lejos de cero" — en negativos,
+ * -10.5 redondea a -10 (no a -11). Es el comportamiento de Math.round y no cambia.
  * Es el único redondeo de plata de toda la app.
  */
 export function roundCents(value: number): number {
@@ -42,6 +44,12 @@ export function parseAmountToCents(input: string): number | null {
   const trimmed = input.trim()
   if (trimmed === "") return null
 
+  // Antes de tocar Number(): un importe tipeado solo tiene signo, dígitos,
+  // puntos y comas. Esto rechaza de raíz cualquier otro literal numérico que
+  // Number() sí entendería (hex "0x1F", exponencial "1e3", binario "0b101",
+  // "Infinity", "NaN", etc.) — nada de eso es algo que un usuario tipee acá.
+  if (!/^[+-]?[\d.,]+$/.test(trimmed)) return null
+
   // Si tiene coma, la coma es el separador decimal y los puntos son de miles.
   const normalized = trimmed.includes(",")
     ? trimmed.replace(/\./g, "").replace(",", ".")
@@ -50,5 +58,8 @@ export function parseAmountToCents(input: string): number | null {
   const value = Number(normalized)
   if (!Number.isFinite(value)) return null
 
-  return roundCents(value * 100)
+  const cents = roundCents(value * 100)
+  if (!Number.isSafeInteger(cents)) return null
+
+  return cents
 }

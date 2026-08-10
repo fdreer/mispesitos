@@ -10,6 +10,10 @@ describe("roundCents", () => {
   it("redondea el medio hacia arriba", () => {
     expect(roundCents(10.5)).toBe(11)
   })
+
+  it("en negativos redondea el medio hacia +Infinito, no lejos de cero", () => {
+    expect(roundCents(-10.5)).toBe(-10)
+  })
 })
 
 describe("convertToArs", () => {
@@ -58,5 +62,28 @@ describe("parseAmountToCents", () => {
   it("rechaza texto no numérico", () => {
     expect(parseAmountToCents("abc")).toBeNull()
     expect(parseAmountToCents("")).toBeNull()
+  })
+
+  it("rechaza literales numéricos de JS que no son un importe tipeado (hex, exponencial, binario)", () => {
+    expect(parseAmountToCents("0x1F")).toBeNull()
+    expect(parseAmountToCents("1e3")).toBeNull()
+    expect(parseAmountToCents("0b101")).toBeNull()
+  })
+
+  it("rechaza valores que superan el rango seguro de enteros", () => {
+    expect(parseAmountToCents("99999999999999999")).toBeNull()
+  })
+
+  it("acepta signo negativo (el rechazo de negativos queda para Zod .positive() en la Server Action)", () => {
+    expect(parseAmountToCents("-1500")).toBe(-150_000)
+  })
+
+  it("sigue aceptando los formatos reales que tipean usuarios argentinos", () => {
+    expect(parseAmountToCents("1.234,56")).toBe(123_456)
+    expect(parseAmountToCents("1234.56")).toBe(123_456)
+    expect(parseAmountToCents("1500")).toBe(150_000)
+    expect(parseAmountToCents("1.500")).not.toBeNull()
+    expect(parseAmountToCents(" 250 ")).toBe(25_000)
+    expect(parseAmountToCents("0,01")).toBe(1)
   })
 })
