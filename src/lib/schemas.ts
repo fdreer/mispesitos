@@ -51,3 +51,41 @@ export const settingsSchema = z
       path: ["initialBalanceUsdRate"],
     },
   )
+
+export const movementKind = z.enum(["income", "expense", "exchange"])
+export const currency = z.enum(["ARS", "USD"])
+
+/**
+ * Una cuota tal como llega del formulario.
+ * A diferencia del importe total, la cuota YA viaja en centavos: la genera
+ * `buildInstallments` del lado del cliente, que trabaja en centavos.
+ */
+export const installmentInput = z.object({
+  amountCents: z.coerce.number().int().nonnegative(),
+  dueDate: isoDate,
+})
+
+export const movementSchema = z
+  .object({
+    kind: z.enum(["income", "expense"]),
+    description: z.string().trim().min(1, "Poné una descripción.").max(200),
+    categoryId: z.string().min(1, "Elegí una categoría."),
+    date: isoDate,
+    currency: currency,
+    amountCents: amountCents,
+    rate: z.coerce.number().positive("El tipo de cambio tiene que ser mayor a cero."),
+    installments: z.array(installmentInput).min(1, "Tiene que haber al menos una cuota."),
+  })
+  .refine((m) => m.currency === "USD" || m.rate === 1, {
+    message: "Un movimiento en pesos siempre lleva tipo de cambio 1.",
+    path: ["rate"],
+  })
+  .refine(
+    (m) => m.installments.reduce((a, i) => a + i.amountCents, 0) === m.amountCents,
+    {
+      message: "La suma de las cuotas no coincide con el importe total.",
+      path: ["installments"],
+    },
+  )
+
+export type MovementInput = z.infer<typeof movementSchema>

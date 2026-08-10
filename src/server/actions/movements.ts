@@ -1,0 +1,116 @@
+"use server"
+
+import { randomUUID } from "node:crypto"
+import { revalidatePath } from "next/cache"
+import { and, eq } from "drizzle-orm"
+import { z } from "zod"
+
+import { withUser } from "@/db/client"
+import { installment, movement } from "@/db/schema"
+import { movementSchema } from "@/lib/schemas"
+import { failure, success, type ActionResult } from "@/server/actions/result"
+import { requireUser } from "@/server/session"
+
+/**
+ * Las cuotas viajan en el FormData como campos repetidos, en el mismo orden:
+ * installmentAmount[] e installmentDueDate[].
+ */
+function readInstallments(formData: FormData) {
+  const amounts = formData.getAll("installmentAmount").map(String)
+  const dates = formData.getAll("installmentDueDate").map(String)
+  return amounts.map((amountCents, i) => ({ amountCents, dueDate: dates[i] ?? "" }))
+}
+
+export async function createMovement(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser()
+
+  const parsed = movementSchema.safeParse({
+    kind: formData.get("kind"),
+    description: formData.get("description"),
+    categoryId: formData.get("categoryId"),
+    date: formData.get("date"),
+    currency: formData.get("currency"),
+    amountCents: formData.get("amountCents") ?? "",
+    rate: formData.get("rate") ?? "1",
+    installments: readInstallments(formData),
+  })
+
+  if (!parsed.success) {
+    const flat = z.flattenError(parsed.error)
+    return failure(flat.formErrors[0] ?? "Revisá los datos.", flat.fieldErrors)
+  }
+
+  const input = parsed.data
+  const movementId = randomUUID()
+
+  try {
+    await withUser(user.id, async (tx) => {
+      await tx.insert(movement).values({
+        id: movementId,
+        userId: user.id,
+        kind: input.kind,
+        description: input.description,
+        categoryId: input.categoryId,
+        date: input.date,
+        currency: input.currency,
+        amountCents: input.amountCents,
+        rate: String(input.rate),
+        direction: null,
+      })
+
+      await tx.insert(installment).values(
+        input.installments.map((cuota, index) => ({
+          id: randomUUID(),
+          movementId,
+          userId: user.id,
+          number: index + 1,
+          amountCents: cuota.amountCents,
+          dueDate: cuota.dueDate,
+          paid: false,
+          paidDate: null,
+        })),
+      )
+    })
+  } catch (error) {
+    console.error("createMovement", error)
+    return failure("No pudimos guardar el movimiento. Probá de nuevo.")
+  }
+
+  revalidatePath("/dashboard")
+  revalidatePath(input.kind === "income" ? "/ingresos" : "/egresos")
+  return success()
+}
+
+/**
+ * Los ids de movimiento los genera `randomUUID()`: validar que lo que llega
+ * es un UUID es el borde de confianza mínimo para una Server Action, incluso
+ * cuando el único otro filtro (userId) ya lo cierra la RLS de la base.
+ */
+const deleteMovementIdSchema = z.uuid("Ese movimiento no existe.")
+
+export async function deleteMovement(id: string): Promise<ActionResult> {
+  const user = await requireUser()
+
+  const parsed = deleteMovementIdSchema.safeParse(id)
+  if (!parsed.success) {
+    return failure("Ese movimiento no existe.")
+  }
+
+  try {
+    // Las cuotas caen solas por el ON DELETE CASCADE.
+    await withUser(user.id, (tx) =>
+      tx
+        .delete(movement)
+        .where(and(eq(movement.id, parsed.data), eq(movement.userId, user.id))),
+    )
+  } catch (error) {
+    console.error("deleteMovement", error)
+    return failure("No pudimos borrar el movimiento.")
+  }
+
+  revalidatePath("/", "layout")
+  return success()
+}
