@@ -216,7 +216,14 @@ export default async function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Egresos del mes por categoría</CardTitle>
+            <CardTitle className="text-base">
+              Gastos que cargaste este mes, por categoría
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Cuenta el importe total de cada gasto en el mes de su fecha, aunque lo pagues en
+              cuotas más adelante. Un televisor de $1.200.000 en 12 cuotas entra entero acá, y
+              de a una cuota en &ldquo;Cobrado y pagado este mes&rdquo;.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <CategoryPie data={pie} />
@@ -226,7 +233,13 @@ export default async function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Últimos {HISTORY_MONTHS} meses</CardTitle>
+          <CardTitle className="text-base">
+            Lo que cargaste en los últimos {HISTORY_MONTHS} meses
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Con el mismo criterio que la torta: el importe total de cada movimiento en el mes
+            de su fecha, no lo que se pagó o se cobró cada mes.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <MonthlyBars data={bars} />

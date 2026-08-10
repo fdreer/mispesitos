@@ -48,7 +48,11 @@ export function ProjectionChart({
 
 export function CategoryPie({ data }: { data: { name: string; arsCents: number }[] }) {
   if (data.length === 0) {
-    return <p className="text-muted-foreground py-8 text-center text-sm">Sin egresos este mes.</p>
+    return (
+      <p className="text-muted-foreground py-8 text-center text-sm">
+        No cargaste gastos con fecha de este mes.
+      </p>
+    )
   }
 
   return (

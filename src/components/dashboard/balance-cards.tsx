@@ -67,7 +67,16 @@ export function BalanceCards({
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Este mes</CardTitle>
+          {/*
+           * El título dice qué mide, porque en esta pantalla conviven dos
+           * definiciones distintas de "el mes": acá es CAJA —lo que entró y
+           * salió de verdad, cuota por cuota, el día que se pagó— y en la torta
+           * y las barras de abajo es el importe total del movimiento en el mes
+           * de su fecha. Un televisor en 12 cuotas cargado este mes vale
+           * $1.200.000 allá y $100.000 acá: los dos números están bien, miden
+           * cosas distintas, y hasta ahora nada en la pantalla lo decía.
+           */}
+          <CardTitle className="text-sm font-medium">Cobrado y pagado este mes</CardTitle>
         </CardHeader>
         <CardContent>
           <p
@@ -80,8 +89,12 @@ export function BalanceCards({
             {formatMoney(diff, "ARS")}
           </p>
           <p className="text-muted-foreground text-xs">
-            {formatMoney(monthIncomeArsCents, "ARS")} entraron ·{" "}
-            {formatMoney(monthExpenseArsCents, "ARS")} salieron
+            {formatMoney(monthIncomeArsCents, "ARS")} cobrados ·{" "}
+            {formatMoney(monthExpenseArsCents, "ARS")} pagados
+          </p>
+          <p className="text-muted-foreground text-xs">
+            Cuenta cada cuota en el mes en que la marcaste pagada, no en el mes en que cargaste
+            el movimiento.
           </p>
         </CardContent>
       </Card>
