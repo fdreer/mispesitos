@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 
-import { verificarRolNoSalteaRls, type EjecutorConsultaRol } from "@/lib/rlsGuard"
+import { verificarRolNoSalteaRls, type EjecutorConsultaRol } from "@/lib/rls-guard"
 import * as schema from "@/db/schema"
 
 /**
@@ -43,7 +43,7 @@ export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
  *
  * La consulta en sí vive acá, que es quien tiene `db`. Qué hacer con lo que
  * devuelve —rechazar por BYPASSRLS, por rolsuper, o porque no vino ninguna
- * fila— es una decisión pura que vive en @/lib/rlsGuard, separada para poder
+ * fila— es una decisión pura que vive en @/lib/rls-guard, separada para poder
  * probarla con un doble sin pegarle a la base ni arrastrar el "server-only" de
  * este archivo a la suite unitaria.
  *
@@ -64,7 +64,7 @@ const ejecutarConsultaRolReal: EjecutorConsultaRol = async () => {
 /**
  * El ejecutor es inyectable y con el ejecutor real como default: withUser()
  * sigue llamando esta función sin argumentos, igual que antes de separar la
- * verificación en @/lib/rlsGuard.
+ * verificación en @/lib/rls-guard.
  */
 async function consultarRolDeConexion(
   ejecutarConsulta: EjecutorConsultaRol = ejecutarConsultaRolReal,

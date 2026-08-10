@@ -405,7 +405,7 @@ describe("RLS", () => {
   // aislar nada. Acá se verifica el hecho que la verificación consulta; que la
   // verificación existe y deja pasar lo prueba cualquier otro test, porque
   // todos usan withUser(). La decisión en sí (qué hacer con rolbypassrls y
-  // rolsuper) tiene su propia cobertura con dobles en src/lib/rlsGuard.test.ts.
+  // rolsuper) tiene su propia cobertura con dobles en src/lib/rls-guard.test.ts.
   it("el rol de conexión de la app no tiene BYPASSRLS y no es superusuario", async () => {
     const rows = await db.execute(
       sql`SELECT current_user::text AS rol, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user`,

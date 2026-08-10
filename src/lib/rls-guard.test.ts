@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { verificarRolNoSalteaRls, type EjecutorConsultaRol } from "@/lib/rlsGuard"
+import { verificarRolNoSalteaRls, type EjecutorConsultaRol } from "@/lib/rls-guard"
 
 describe("verificarRolNoSalteaRls", () => {
   it("rechaza un rol con BYPASSRLS", async () => {
