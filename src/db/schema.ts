@@ -3,12 +3,14 @@ import {
   bigint,
   boolean,
   date,
+  foreignKey,
   index,
   integer,
   numeric,
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
 } from "drizzle-orm/pg-core"
 
@@ -57,6 +59,10 @@ export const category = pgTable(
       .on(t.userId, t.name, t.kind)
       .where(sql`archived = false`),
     index("category_user_idx").on(t.userId),
+    // Redundante como unicidad (id ya es PK), pero es el destino obligatorio de
+    // la FK compuesta de `movement`: Postgres exige que las columnas
+    // referenciadas tengan una restricción única. Ver migración 0006.
+    unique("category_user_id_id_unique").on(t.userId, t.id),
   ],
 )
 
@@ -70,10 +76,12 @@ export const movement = pgTable(
     /** "income" | "expense" | "exchange" */
     kind: text("kind").notNull(),
     description: text("description").notNull(),
-    /** Obligatorio salvo en exchange, donde siempre es null. */
-    categoryId: text("category_id").references(() => category.id, {
-      onDelete: "restrict",
-    }),
+    /**
+     * Obligatorio salvo en exchange, donde siempre es null. La FK NO es sobre
+     * esta columna sola: es compuesta con user_id, para que la base impida
+     * apuntar a una categoría de otro usuario. Ver migración 0006.
+     */
+    categoryId: text("category_id"),
     date: date("date").notNull(),
     /** "ARS" | "USD". En exchange siempre "USD". */
     currency: text("currency").notNull(),
@@ -85,16 +93,38 @@ export const movement = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("movement_user_date_idx").on(t.userId, t.date)],
+  (t) => [
+    index("movement_user_date_idx").on(t.userId, t.date),
+    // Destino de la FK compuesta de `installment`. Ver migración 0006.
+    unique("movement_user_id_id_unique").on(t.userId, t.id),
+    /**
+     * FK compuesta, no sobre category_id sola: los triggers de integridad
+     * referencial corren como dueño (BYPASSRLS) y ven TODAS las filas, así que
+     * una FK de una columna deja apuntar a categorías ajenas. Con user_id
+     * adentro, la categoría referenciada tiene que ser del mismo usuario.
+     *
+     * MATCH SIMPLE (el default) no exige nada cuando alguna columna de la FK es
+     * NULL: por eso los movimientos de tipo exchange siguen entrando con
+     * category_id nulo.
+     */
+    foreignKey({
+      columns: [t.userId, t.categoryId],
+      foreignColumns: [category.userId, category.id],
+      name: "movement_user_id_category_id_category_user_id_id_fk",
+    }).onDelete("restrict"),
+  ],
 )
 
 export const installment = pgTable(
   "installment",
   {
     id: text("id").primaryKey(),
-    movementId: text("movement_id")
-      .notNull()
-      .references(() => movement.id, { onDelete: "cascade" }),
+    /**
+     * La FK NO es sobre esta columna sola: es compuesta con user_id, para que
+     * la base impida colgar una cuota de un movimiento ajeno y para que
+     * installment.user_id tenga que coincidir con movement.user_id.
+     */
+    movementId: text("movement_id").notNull(),
     // user_id duplicado a propósito: permite que la policy de RLS aplique sin join.
     userId: text("user_id")
       .notNull()
@@ -108,5 +138,11 @@ export const installment = pgTable(
   (t) => [
     index("installment_user_due_idx").on(t.userId, t.dueDate),
     index("installment_movement_idx").on(t.movementId),
+    // Ver el comentario de la FK compuesta de `movement`. Misma razón.
+    foreignKey({
+      columns: [t.userId, t.movementId],
+      foreignColumns: [movement.userId, movement.id],
+      name: "installment_user_id_movement_id_movement_user_id_id_fk",
+    }).onDelete("cascade"),
   ],
 )
