@@ -120,4 +120,21 @@ describe("usdPosition", () => {
     expect(p.realizedArsCents).toBe(0)
     expect(p.oversoldUsdCents).toBe(10_000)
   })
+
+  it("en el mismo día procesa primero la compra, venga como venga del array", () => {
+    // Comprar y vender 100 dólares el mismo día: se puede, y realiza $50.000.
+    // Si la venta se procesara primero, informaría sobreventa y cero resultado.
+    const compraPrimero = usdPosition([
+      buy("2026-06-10", 100, 1000),
+      sell("2026-06-10", 100, 1500),
+    ])
+    const ventaPrimero = usdPosition([
+      sell("2026-06-10", 100, 1500),
+      buy("2026-06-10", 100, 1000),
+    ])
+
+    expect(compraPrimero).toEqual(ventaPrimero)
+    expect(compraPrimero.realizedArsCents).toBe(5_000_000)
+    expect(compraPrimero.oversoldUsdCents).toBe(0)
+  })
 })

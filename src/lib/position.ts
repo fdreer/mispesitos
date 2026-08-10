@@ -41,7 +41,15 @@ export function usdPosition(events: PositionEvent[]): UsdPosition {
   let realizedArsCents = 0
   let oversoldUsdCents = 0
 
-  const ordered = [...events].sort((a, b) => a.date.localeCompare(b.date))
+  // Dentro del mismo día se procesan primero las entradas: sólo se puede
+  // disponer de lo que ya se tiene. Sin este desempate el resultado dependería
+  // del orden en que la base devolvió las filas, y la diferencia de cambio que
+  // ve el usuario cambiaría sola.
+  const ordered = [...events].sort(
+    (a, b) =>
+      a.date.localeCompare(b.date) ||
+      (a.direction === b.direction ? 0 : a.direction === "in" ? -1 : 1),
+  )
 
   for (const event of ordered) {
     if (event.direction === "in") {
