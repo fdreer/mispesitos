@@ -65,6 +65,16 @@ describe("settingsSchema", () => {
     expect(fieldError(result, "initialBalanceDate")).toBeDefined()
   })
 
+  it("lee el TC del saldo inicial escrito como se escribe acá", () => {
+    // "1.450" son mil cuatrocientos cincuenta pesos por dólar. Leerlo como
+    // 1,45 valuaría los dólares del saldo inicial en casi nada y arrastraría
+    // el TC promedio de toda la posición.
+    const result = settingsSchema.safeParse({ ...valid, initialBalanceUsdRate: "1.450" })
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.initialBalanceUsdRate).toBe(1450)
+  })
+
   it("rechaza una preferencia de dólar que no está en la lista", () => {
     const result = settingsSchema.safeParse({ ...valid, preferredRate: "turista" })
     expect(result.success).toBe(false)
@@ -135,6 +145,44 @@ describe("movementSchema", () => {
       installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
     })
     expect(result.success).toBe(true)
+  })
+
+  it("lee el TC de un movimiento con el mismo formato que el importe", () => {
+    // El campo de TC y el del importe son dos cajas de texto pegadas, en el
+    // mismo formulario. Si "1.450" vale 1450 en una y 1,45 en la otra, el
+    // movimiento en dólares queda valuado en la milésima parte y nada avisa.
+    const usd = {
+      ...validMovement,
+      currency: "USD",
+      amountCents: "100",
+      installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
+    }
+
+    for (const [tipeado, esperado] of [
+      ["1.450", 1450],
+      ["1.450,50", 1450.5],
+      ["1450,50", 1450.5],
+      ["1450.50", 1450.5],
+    ] as const) {
+      const result = movementSchema.safeParse({ ...usd, rate: tipeado })
+      expect(result.success).toBe(true)
+      if (result.success) expect(result.data.rate).toBe(esperado)
+    }
+  })
+
+  it("rechaza como TC los literales que Number() entiende pero nadie tipea", () => {
+    const usd = {
+      ...validMovement,
+      currency: "USD",
+      amountCents: "100",
+      installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
+    }
+
+    for (const tipeado of ["1e3", "0x10", "Infinity", "mil"]) {
+      const result = movementSchema.safeParse({ ...usd, rate: tipeado })
+      expect(result.success).toBe(false)
+      expect(fieldError(result, "rate")).toBeDefined()
+    }
   })
 
   it("rechaza un movimiento en dólares con TC cero", () => {

@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { installmentsSumMatches } from "@/lib/installments"
-import { parseAmountToCents } from "@/lib/money"
+import { parseAmountToCents, parseDecimalInput } from "@/lib/money"
 
 /** Importe tipeado por el usuario, convertido a centavos enteros. */
 export const amountCents = z
@@ -23,13 +23,26 @@ export const isoDate = z
 export const ratePreference = z.enum(["oficial", "blue", "mep"])
 
 /**
- * Tipo de cambio: pesos por dólar. NO es un importe en centavos —es un
- * decimal común, como el `rate` de un movimiento— por eso usa z.coerce.number()
- * y no amountCents/parseAmountToCents.
+ * Tipo de cambio: pesos por dólar. NO es un importe en centavos —es un decimal
+ * común, así que no pasa por amountCents— pero lo tipea la misma persona, en el
+ * mismo teclado y en un campo de texto pegado al del importe, así que se lee
+ * con el mismo parser.
+ *
+ * Con `z.coerce.number()`, que por debajo es `Number()`, "1.450" se leía como
+ * 1,45 pesos por dólar y "1.450,50" no se leía en absoluto.
  */
-export const exchangeRate = z.coerce
-  .number({ error: "Escribí un tipo de cambio válido." })
-  .nonnegative({ message: "El tipo de cambio no puede ser negativo." })
+const typedRate = z.string().transform((value, ctx) => {
+  const parsed = parseDecimalInput(value)
+  if (parsed === null) {
+    ctx.addIssue({ code: "custom", message: "Escribí un tipo de cambio válido." })
+    return z.NEVER
+  }
+  return parsed
+})
+
+export const exchangeRate = typedRate.refine((rate) => rate >= 0, {
+  message: "El tipo de cambio no puede ser negativo.",
+})
 
 /**
  * Tipo de cambio de un movimiento o de un cambio de divisa que sí ocurrió:
@@ -37,9 +50,9 @@ export const exchangeRate = z.coerce
  * permite cero porque ahí el TC acompaña un saldo inicial que puede no tener
  * dólares.
  */
-export const positiveRate = z.coerce
-  .number()
-  .positive("El tipo de cambio tiene que ser mayor a cero.")
+export const positiveRate = typedRate.refine((rate) => rate > 0, {
+  message: "El tipo de cambio tiene que ser mayor a cero.",
+})
 
 export const settingsSchema = z
   .object({
