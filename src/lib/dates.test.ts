@@ -1,9 +1,22 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { todayInAr, addMonthsClamped, monthKey, isOverdue } from "@/lib/dates"
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe("todayInAr", () => {
   it("devuelve una fecha en formato YYYY-MM-DD", () => {
     expect(todayInAr()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it("usa el día de Buenos Aires, no el de UTC", () => {
+    // 01:30 UTC del 10 son las 22:30 del 9 en Buenos Aires (UTC-3).
+    // Una implementación que lea UTC o la hora local del servidor devuelve el 10.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-08-10T01:30:00Z"))
+
+    expect(todayInAr()).toBe("2026-08-09")
   })
 })
 
