@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import type { z } from "zod"
 
 import { buildInstallments } from "@/lib/installments"
 import { movementSchema, settingsSchema } from "@/lib/schemas"
@@ -11,9 +12,8 @@ const valid = {
   preferredRate: "blue",
 }
 
-function fieldError(result: ReturnType<typeof settingsSchema.safeParse>, field: string) {
-  if (result.success) return undefined
-  return result.error.issues.find((issue) => issue.path.join(".") === field)
+function fieldError(result: { success: boolean; error?: z.ZodError }, field: string) {
+  return result.error?.issues.find((issue) => issue.path.join(".") === field)
 }
 
 describe("settingsSchema", () => {
@@ -83,14 +83,6 @@ const validMovement = {
   installments: [{ amountCents: 150000, dueDate: "2026-08-10" }],
 }
 
-function movementFieldError(
-  result: ReturnType<typeof movementSchema.safeParse>,
-  field: string,
-) {
-  if (result.success) return undefined
-  return result.error.issues.find((issue) => issue.path.join(".") === field)
-}
-
 describe("movementSchema", () => {
   it("acepta un movimiento de contado en pesos válido", () => {
     const result = movementSchema.safeParse(validMovement)
@@ -103,7 +95,7 @@ describe("movementSchema", () => {
       installments: [{ amountCents: 149_999, dueDate: "2026-08-10" }],
     })
     expect(result.success).toBe(false)
-    expect(movementFieldError(result, "installments")).toBeDefined()
+    expect(fieldError(result, "installments")).toBeDefined()
   })
 
   it("rechaza cuando la suma de las cuotas da más que el total, aunque sea por un centavo", () => {
@@ -112,7 +104,7 @@ describe("movementSchema", () => {
       installments: [{ amountCents: 150_001, dueDate: "2026-08-10" }],
     })
     expect(result.success).toBe(false)
-    expect(movementFieldError(result, "installments")).toBeDefined()
+    expect(fieldError(result, "installments")).toBeDefined()
   })
 
   it("acepta un movimiento en cuotas cuya suma cierra, incluido el reparto con resto", () => {
@@ -131,7 +123,7 @@ describe("movementSchema", () => {
   it("rechaza un movimiento en pesos con un tipo de cambio distinto de 1", () => {
     const result = movementSchema.safeParse({ ...validMovement, rate: "2" })
     expect(result.success).toBe(false)
-    expect(movementFieldError(result, "rate")).toBeDefined()
+    expect(fieldError(result, "rate")).toBeDefined()
   })
 
   it("acepta un movimiento en dólares con tipo de cambio mayor a cero", () => {
@@ -154,7 +146,7 @@ describe("movementSchema", () => {
       installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
     })
     expect(result.success).toBe(false)
-    expect(movementFieldError(result, "rate")).toBeDefined()
+    expect(fieldError(result, "rate")).toBeDefined()
   })
 
   it("rechaza un movimiento en dólares con TC negativo", () => {
@@ -166,31 +158,31 @@ describe("movementSchema", () => {
       installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
     })
     expect(result.success).toBe(false)
-    expect(movementFieldError(result, "rate")).toBeDefined()
+    expect(fieldError(result, "rate")).toBeDefined()
   })
 
   it("rechaza un movimiento sin cuotas", () => {
     const result = movementSchema.safeParse({ ...validMovement, installments: [] })
     expect(result.success).toBe(false)
-    expect(movementFieldError(result, "installments")).toBeDefined()
+    expect(fieldError(result, "installments")).toBeDefined()
   })
 
   it("rechaza un movimiento sin descripción", () => {
     const result = movementSchema.safeParse({ ...validMovement, description: "" })
     expect(result.success).toBe(false)
-    expect(movementFieldError(result, "description")).toBeDefined()
+    expect(fieldError(result, "description")).toBeDefined()
   })
 
   it("rechaza un movimiento sin categoría", () => {
     const result = movementSchema.safeParse({ ...validMovement, categoryId: "" })
     expect(result.success).toBe(false)
-    expect(movementFieldError(result, "categoryId")).toBeDefined()
+    expect(fieldError(result, "categoryId")).toBeDefined()
   })
 
   it("rechaza una fecha del movimiento con formato inválido", () => {
     const result = movementSchema.safeParse({ ...validMovement, date: "10/08/2026" })
     expect(result.success).toBe(false)
-    expect(movementFieldError(result, "date")).toBeDefined()
+    expect(fieldError(result, "date")).toBeDefined()
   })
 
   it("rechaza una fecha de vencimiento con formato inválido", () => {
@@ -199,6 +191,6 @@ describe("movementSchema", () => {
       installments: [{ amountCents: 150_000, dueDate: "10/08/2026" }],
     })
     expect(result.success).toBe(false)
-    expect(movementFieldError(result, "installments.0.dueDate")).toBeDefined()
+    expect(fieldError(result, "installments.0.dueDate")).toBeDefined()
   })
 })

@@ -13,12 +13,15 @@ import { requireUser } from "@/server/session"
 
 /**
  * Las cuotas viajan en el FormData como campos repetidos, en el mismo orden:
- * installmentAmount[] e installmentDueDate[].
+ * installmentAmount[] e installmentDueDate[]. El emparejamiento es posicional,
+ * así que si las dos listas no vienen del mismo largo no hay forma de saber qué
+ * importe corresponde a qué vencimiento: se rechaza en vez de adivinar.
  */
-function readInstallments(formData: FormData) {
+function readInstallments(formData: FormData): { amountCents: string; dueDate: string }[] | null {
   const amounts = formData.getAll("installmentAmount").map(String)
   const dates = formData.getAll("installmentDueDate").map(String)
-  return amounts.map((amountCents, i) => ({ amountCents, dueDate: dates[i] ?? "" }))
+  if (amounts.length !== dates.length) return null
+  return amounts.map((amountCents, i) => ({ amountCents, dueDate: dates[i] }))
 }
 
 export async function createMovement(
@@ -26,6 +29,11 @@ export async function createMovement(
   formData: FormData,
 ): Promise<ActionResult> {
   const user = await requireUser()
+
+  const installments = readInstallments(formData)
+  if (installments === null) {
+    return failure("El plan de cuotas llegó incompleto. Recargá la página y probá de nuevo.")
+  }
 
   const parsed = movementSchema.safeParse({
     kind: formData.get("kind"),
@@ -35,7 +43,7 @@ export async function createMovement(
     currency: formData.get("currency"),
     amountCents: formData.get("amountCents") ?? "",
     rate: formData.get("rate") ?? "1",
-    installments: readInstallments(formData),
+    installments,
   })
 
   if (!parsed.success) {

@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { installmentsSumMatches } from "@/lib/installments"
 import { parseAmountToCents } from "@/lib/money"
 
 /** Importe tipeado por el usuario, convertido a centavos enteros. */
@@ -52,7 +53,6 @@ export const settingsSchema = z
     },
   )
 
-export const movementKind = z.enum(["income", "expense", "exchange"])
 export const currency = z.enum(["ARS", "USD"])
 
 /**
@@ -80,8 +80,10 @@ export const movementSchema = z
     message: "Un movimiento en pesos siempre lleva tipo de cambio 1.",
     path: ["rate"],
   })
+  // La invariante vive en @/lib/installments, que es donde se reparte el total.
+  // Reimplementarla acá la dejaría en dos lugares que pueden divergir en silencio.
   .refine(
-    (m) => m.installments.reduce((a, i) => a + i.amountCents, 0) === m.amountCents,
+    (m) => installmentsSumMatches(m.amountCents, m.installments.map((i) => i.amountCents)),
     {
       message: "La suma de las cuotas no coincide con el importe total.",
       path: ["installments"],
