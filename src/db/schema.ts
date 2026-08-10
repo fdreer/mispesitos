@@ -61,8 +61,12 @@ export const category = pgTable(
     index("category_user_idx").on(t.userId),
     // Redundante como unicidad (id ya es PK), pero es el destino obligatorio de
     // la FK compuesta de `movement`: Postgres exige que las columnas
-    // referenciadas tengan una restricción única. Ver migración 0006.
-    unique("category_user_id_id_unique").on(t.userId, t.id),
+    // referenciadas tengan una restricción única. Ver migraciones 0006 y 0008.
+    //
+    // `kind` entró en el juego en la 0008: al viajar dentro de la misma FK, la
+    // categoría referenciada no sólo tiene que ser del mismo usuario, también
+    // tiene que ser del mismo tipo que el movimiento.
+    unique("category_user_id_kind_id_unique").on(t.userId, t.kind, t.id),
   ],
 )
 
@@ -73,13 +77,18 @@ export const movement = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    /** "income" | "expense" | "exchange" */
+    /**
+     * "income" | "expense" | "exchange".
+     * Viaja adentro de la FK compuesta hacia `category`: ver el comentario de
+     * la FK, más abajo.
+     */
     kind: text("kind").notNull(),
     description: text("description").notNull(),
     /**
      * Obligatorio salvo en exchange, donde siempre es null. La FK NO es sobre
-     * esta columna sola: es compuesta con user_id, para que la base impida
-     * apuntar a una categoría de otro usuario. Ver migración 0006.
+     * esta columna sola: es compuesta con user_id y kind, para que la base
+     * impida apuntar a una categoría de otro usuario o de otro tipo. Ver
+     * migraciones 0006 y 0008.
      */
     categoryId: text("category_id"),
     date: date("date").notNull(),
@@ -98,19 +107,27 @@ export const movement = pgTable(
     // Destino de la FK compuesta de `installment`. Ver migración 0006.
     unique("movement_user_id_id_unique").on(t.userId, t.id),
     /**
-     * FK compuesta, no sobre category_id sola: los triggers de integridad
-     * referencial corren como dueño (BYPASSRLS) y ven TODAS las filas, así que
-     * una FK de una columna deja apuntar a categorías ajenas. Con user_id
-     * adentro, la categoría referenciada tiene que ser del mismo usuario.
+     * FK compuesta, no sobre category_id sola. Lleva DOS columnas de contexto
+     * adentro, cada una cerrando un agujero distinto:
+     *
+     * - `user_id` (migración 0006): los triggers de integridad referencial
+     *   corren como dueño (BYPASSRLS) y ven TODAS las filas, así que una FK de
+     *   una columna deja apuntar a categorías ajenas.
+     * - `kind` (migración 0008): sin él se podía guardar un ingreso con una
+     *   categoría de egresos. Desde la interfaz no pasaba porque el desplegable
+     *   viene filtrado, pero el borde de confianza es la base y no el
+     *   formulario; el efecto era un ingreso adentro de la torta de egresos del
+     *   dashboard.
      *
      * MATCH SIMPLE (el default) no exige nada cuando alguna columna de la FK es
      * NULL: por eso los movimientos de tipo exchange siguen entrando con
-     * category_id nulo.
+     * category_id nulo, aunque su `kind` ("exchange") no sea un tipo de
+     * categoría que exista.
      */
     foreignKey({
-      columns: [t.userId, t.categoryId],
-      foreignColumns: [category.userId, category.id],
-      name: "movement_user_id_category_id_category_user_id_id_fk",
+      columns: [t.userId, t.kind, t.categoryId],
+      foreignColumns: [category.userId, category.kind, category.id],
+      name: "movement_user_id_kind_category_id_category_user_id_kind_id_fk",
     }).onDelete("restrict"),
   ],
 )
