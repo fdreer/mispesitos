@@ -82,8 +82,21 @@ describe("parseAmountToCents", () => {
     expect(parseAmountToCents("1.234,56")).toBe(123_456)
     expect(parseAmountToCents("1234.56")).toBe(123_456)
     expect(parseAmountToCents("1500")).toBe(150_000)
-    expect(parseAmountToCents("1.500")).not.toBeNull()
+    expect(parseAmountToCents("1.500")).toBe(150_000)
     expect(parseAmountToCents(" 250 ")).toBe(25_000)
     expect(parseAmountToCents("0,01")).toBe(1)
+  })
+
+  it("sin coma, un punto seguido de tres dígitos es separador de miles", () => {
+    expect(parseAmountToCents("1.500")).toBe(150_000)
+    expect(parseAmountToCents("1.234.567")).toBe(123_456_700)
+    expect(parseAmountToCents("-2.000")).toBe(-200_000)
+  })
+
+  it("sin coma, un punto que no separa miles sigue siendo decimal", () => {
+    expect(parseAmountToCents("1234.56")).toBe(123_456)
+    expect(parseAmountToCents("0.5")).toBe(50)
+    // Cuatro dígitos después del punto no son miles: son 12,3456 pesos.
+    expect(parseAmountToCents("12.3456")).toBe(1_235)
   })
 })

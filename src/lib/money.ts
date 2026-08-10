@@ -51,9 +51,14 @@ export function parseAmountToCents(input: string): number | null {
   if (!/^[+-]?[\d.,]+$/.test(trimmed)) return null
 
   // Si tiene coma, la coma es el separador decimal y los puntos son de miles.
+  // Sin coma, un punto es ambiguo: "1234.56" es decimal pero "1.500" es el
+  // formato argentino de mil quinientos. Se desambigua por la cantidad de
+  // dígitos que le siguen — tres significa separador de miles.
   const normalized = trimmed.includes(",")
     ? trimmed.replace(/\./g, "").replace(",", ".")
-    : trimmed
+    : /^[+-]?\d{1,3}(\.\d{3})+$/.test(trimmed)
+      ? trimmed.replace(/\./g, "")
+      : trimmed
 
   const value = Number(normalized)
   if (!Number.isFinite(value)) return null
