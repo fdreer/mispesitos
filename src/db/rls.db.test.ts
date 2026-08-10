@@ -453,6 +453,94 @@ describe("RLS", () => {
 
   // NO BORRAR NI RELAJAR.
   //
+  // La CHECK de la migración 0009. El spec declara desde siempre que el saldo
+  // se calcula por `paid_date` y que la fecha es obligatoria cuando la cuota
+  // está pagada, pero hasta la 0009 no lo hacía cumplir NADIE: era una regla
+  // sostenida sólo por el código que escribe.
+  //
+  // Una fila `paid = true, paid_date = NULL` no es un dato incompleto: es una
+  // fila que cada pantalla lee distinto. /cambios la excluye en silencio
+  // (compara la fecha, y NULL no compara), computeBalances la cuenta igual
+  // (sólo mira `paid`), y el dashboard revienta con ella en `monthKey(null)`.
+  //
+  // Si esto se pone en rojo, lo más probable es que la constraint se haya
+  // caído de la base o del schema. El arreglo es volver a ponerla: en rojo,
+  // este test está diciendo que los tres `!` de TypeScript que afirman que
+  // esta fila no existe vuelven a no tener nada atrás.
+  it("no se puede marcar una cuota como pagada sin fecha de pago", async () => {
+    const motivo = await motivoDelRechazo(
+      withUser(USER_A, (tx) =>
+        tx.insert(installment).values({
+          id: "ins-pagada-sin-fecha",
+          userId: USER_A,
+          movementId: `mov-${USER_A}`,
+          number: 2,
+          amountCents: 100_00,
+          dueDate: "2026-02-05",
+          paid: true,
+          paidDate: null,
+        }),
+      ),
+    )
+
+    // Atado al NOMBRE de la constraint, como los tests de las FK: es la única
+    // forma de distinguir este rechazo de un timeout o un error de sintaxis.
+    expect(motivo).toMatch(
+      /violates check constraint "installment_paid_date_required_when_paid"/,
+    )
+  })
+
+  // El mismo UPDATE que hace `setInstallmentPaid`, pero a medias: marcar
+  // pagada sin poner la fecha. Va aparte del INSERT porque es el camino por el
+  // que la fila mala aparecería de verdad —la cuota nace impaga y se marca
+  // después—, y porque una CHECK mal escrita puede frenar el INSERT y dejar
+  // pasar el UPDATE.
+  it("tampoco se puede marcar pagada una cuota que ya existe sin ponerle la fecha", async () => {
+    const motivo = await motivoDelRechazo(
+      withUser(USER_A, (tx) =>
+        tx
+          .update(installment)
+          .set({ paid: true })
+          .where(eq(installment.id, `ins-${USER_A}`)),
+      ),
+    )
+
+    expect(motivo).toMatch(
+      /violates check constraint "installment_paid_date_required_when_paid"/,
+    )
+  })
+
+  // La contracara, y la que le da sentido a las dos de arriba: sin esto, una
+  // CHECK rota que rechazara TODA escritura sobre `installment` las pasaría
+  // igual. Verifica los dos pares válidos —pagada con fecha, impaga sin
+  // fecha— que son exactamente los que escribe `setInstallmentPaid`.
+  it("los pares válidos entran: pagada con fecha, e impaga sin fecha", async () => {
+    const [pagada] = await withUser(USER_A, (tx) =>
+      tx
+        .update(installment)
+        .set({ paid: true, paidDate: "2026-02-06" })
+        .where(eq(installment.id, `ins-${USER_A}`))
+        .returning(),
+    )
+
+    expect(pagada.paid).toBe(true)
+    expect(pagada.paidDate).toBe("2026-02-06")
+
+    // Y desmarcarla vuelve a dejar las dos columnas coherentes.
+    const [impaga] = await withUser(USER_A, (tx) =>
+      tx
+        .update(installment)
+        .set({ paid: false, paidDate: null })
+        .where(eq(installment.id, `ins-${USER_A}`))
+        .returning(),
+    )
+
+    expect(impaga.paid).toBe(false)
+    expect(impaga.paidDate).toBeNull()
+  })
+
+  // NO BORRAR NI RELAJAR.
+  //
   // Los tests de arriba consultan desde adentro de withUser(), que hace
   // SET LOCAL ROLE authenticated. Ahí las policies aplican con FORCE o sin él,
   // así que pasarían igual si las tablas sólo tuvieran ENABLE: no dicen nada
