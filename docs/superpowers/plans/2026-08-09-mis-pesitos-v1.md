@@ -1,5 +1,29 @@
 # Mis Pesitos v1 — Implementation Plan
 
+> **Estado: ejecutado y cerrado.** Las 18 tareas están implementadas, revisadas y
+> commiteadas en `feat/v1`. Este documento es **histórico**: es el plan que se
+> siguió, no una descripción de lo que quedó en el código.
+>
+> Para lo que la app hace hoy, ver el [README](../../../README.md).
+> Para lo que falta, [`docs/PENDIENTES.md`](../../PENDIENTES.md).
+>
+> **El plan tenía errores que se corrigieron durante la ejecución.** Los más caros,
+> por si alguien lo usa como referencia:
+> - El código de `listUsdPositionEvents` (Task 15) no sembraba el saldo inicial en
+>   dólares ni filtraba por la fecha del saldo inicial: `/cambios` mostraba US$ 0
+>   mientras el dashboard mostraba los dólares del onboarding, con una alerta de
+>   sobreventa permanente y falsa.
+> - El formulario de movimientos (Task 13) tenía **dos** campos `rate`, uno oculto y
+>   uno visible: el tipo de cambio que el usuario tipeaba se descartaba en silencio.
+> - Las pantallas de ingresos y egresos usaban lados opuestos del spread, lo que
+>   fabricaba diferencia de cambio que era sólo el margen de la casa de cambio.
+> - `ENABLE ROW LEVEL SECURITY` + `FORCE` no alcanzaba: el rol `postgres` de Supabase
+>   tiene `BYPASSRLS`, que le gana a `FORCE`. La app conecta con un rol dedicado.
+> - Varias acciones descartaban su `ActionResult` con `void`, así que los errores no
+>   se veían nunca, y varias no validaban con Zod pese a la constraint global.
+> - Los conteos de tests que aparecen en los pasos están mal en casi todas las
+>   tareas. El criterio siempre fue "todo verde", nunca un número.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Construir una app web multiusuario de finanzas personales donde cada persona registra ingresos y egresos (con cuotas), compra y vende dólares, y ve su saldo, sus deudas y su flujo proyectado en un dashboard.

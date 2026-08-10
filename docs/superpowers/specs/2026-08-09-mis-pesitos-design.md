@@ -1,7 +1,26 @@
 # Mis Pesitos — Diseño v1
 
 **Fecha:** 2026-08-09
-**Estado:** aprobado, listo para plan de implementación
+**Estado:** **implementado**. Documento histórico: describe la intención de diseño,
+no necesariamente lo que quedó en el código.
+
+> Para lo que la app hace hoy, ver el [README](../../../README.md).
+> Para lo que falta, [`docs/PENDIENTES.md`](../../PENDIENTES.md).
+>
+> **Dónde la implementación se apartó de este documento, a propósito:**
+> - **§3 (versiones):** `eslint` quedó en 9.39.5 y no en 10.8.1 — el plugin de React
+>   que trae `eslint-config-next` usa una API que ESLint 10 eliminó, y `pnpm lint`
+>   no corría. `typescript` quedó en 5.9.3, fallback que el propio plan preveía.
+>   Y el paquete `shadcn` sí es dependencia de producción: `globals.css` importa
+>   `shadcn/tailwind.css`, así que sacarlo rompe el build.
+> - **§4 (`paid_date` obligatorio si `paid`):** ahora lo hace cumplir una `CHECK` en
+>   la base, no sólo la convención.
+> - **§5.5 (sobreventa):** el spec dice que el resultado se calcula con el TC
+>   promedio vigente; la implementación realiza resultado **sólo sobre la parte
+>   respaldada**. La versión literal fabricaría una ganancia de la nada cuando la
+>   posición está en cero.
+> - **§7 (filtros de listas):** se construyó sólo el de estado. Los otros cuatro
+>   existen en la capa de consultas, sin interfaz.
 
 ## 1. Objetivo
 
