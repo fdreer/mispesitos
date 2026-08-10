@@ -28,6 +28,19 @@ export const isoDate = z.string().refine(isValidIsoDate, "Elegí una fecha váli
 export const ratePreference = z.enum(["oficial", "blue", "mep"])
 
 /**
+ * Lo que entra en `numeric(12,4)`, el tipo de las DOS columnas donde termina un
+ * tipo de cambio: `movement.rate` y `user_settings.initial_balance_usd_rate`.
+ * Doce dígitos en total, cuatro después de la coma, así que 99.999.999,9999 es
+ * el número más grande y más preciso que la columna guarda.
+ *
+ * La cota la da la columna, no una regla de negocio inventada: si se toca la
+ * precisión de las columnas hay que tocar esto —y el literal del mensaje de
+ * abajo, que es el mismo número escrito para que lo lea una persona—, y al revés.
+ */
+const RATE_MAX = 99_999_999.9999
+const RATE_SCALE = 4
+
+/**
  * Tipo de cambio: pesos por dólar. NO es un importe en centavos —es un decimal
  * común, así que no pasa por amountCents— pero lo tipea la misma persona, en el
  * mismo teclado y en un campo de texto pegado al del importe, así que se lee
@@ -35,15 +48,42 @@ export const ratePreference = z.enum(["oficial", "blue", "mep"])
  *
  * Con `z.coerce.number()`, que por debajo es `Number()`, "1.450" se leía como
  * 1,45 pesos por dólar y "1.450,50" no se leía en absoluto.
+ *
+ * Las dos cotas de abajo viven acá, en la pieza compartida, para que las hereden
+ * tanto `exchangeRate` como `positiveRate`: las dos escriben en columnas
+ * `numeric(12,4)` y sólo se diferencian en si admiten cero.
  */
-const typedRate = z.string().transform((value, ctx) => {
-  const parsed = parseDecimalInput(value)
-  if (parsed === null) {
-    ctx.addIssue({ code: "custom", message: "Escribí un tipo de cambio válido." })
-    return z.NEVER
-  }
-  return parsed
-})
+const typedRate = z
+  .string()
+  .transform((value, ctx) => {
+    const parsed = parseDecimalInput(value)
+    if (parsed === null) {
+      ctx.addIssue({ code: "custom", message: "Escribí un tipo de cambio válido." })
+      return z.NEVER
+    }
+    return parsed
+  })
+  /**
+   * Sin esta cota, un TC de 9 dígitos desbordaba `numeric(12,4)`: Postgres
+   * rechazaba el INSERT y el usuario veía el mensaje genérico de "no pudimos
+   * guardar", sin ninguna pista de cuál era el campo.
+   */
+  .refine((rate) => Math.abs(rate) <= RATE_MAX, {
+    message: "El tipo de cambio no puede pasar de 99.999.999,9999.",
+  })
+  /**
+   * Y sin ésta, un TC con más decimales de los que la columna guarda entraba sin
+   * error: Postgres lo redondeaba EN SILENCIO y quedaba guardado un número
+   * distinto del que la persona escribió ("1450,75259" se volvía 1450,7526).
+   *
+   * El redondeo del producto —y no la comparación directa contra el valor
+   * escalado— es a propósito: `1450.7891 * 10000` da 14507891.000000002 en
+   * coma flotante, así que un `Number.isInteger()` pelado rechazaría un TC de
+   * cuatro decimales perfectamente válido.
+   */
+  .refine((rate) => Math.round(rate * 10 ** RATE_SCALE) / 10 ** RATE_SCALE === rate, {
+    message: "El tipo de cambio admite hasta cuatro decimales.",
+  })
 
 export const exchangeRate = typedRate.refine((rate) => rate >= 0, {
   message: "El tipo de cambio no puede ser negativo.",
