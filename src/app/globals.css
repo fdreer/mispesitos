@@ -151,6 +151,13 @@
 :root {
     --background: #08090a; /* Void */
     /*
+     * Sin esto, los widgets nativos del navegador quedan en modo claro sobre
+     * un lienzo casi negro: los selectores de fecha, el spinner de "Cuotas",
+     * el popup del <select> de categoría, el resaltado de autocompletado de
+     * Chrome en login/registro y la scrollbar de la página.
+     */
+    color-scheme: dark;
+    /*
      * Mist, no blanco. En shadcn este token pinta el cuerpo del texto, y Linear
      * separa cuerpo (#d0d6e0) de título (#ffffff). El blanco se aplica explícito
      * con `text-paper` en los títulos que lo piden.

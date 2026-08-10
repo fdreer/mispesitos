@@ -29,15 +29,19 @@ export function ExchangeForm({ buyRate, sellRate }: Props) {
       <div className="flex gap-2">
         <Button
           type="button"
-          variant={direction === "buy" ? "secondary" : "outline"}
+          variant="outline"
+          aria-pressed={direction === "buy"}
           onClick={() => setDirection("buy")}
+          className={direction === "buy" ? "bg-accent text-paper" : "text-fog"}
         >
           Comprar dólares
         </Button>
         <Button
           type="button"
-          variant={direction === "sell" ? "secondary" : "outline"}
+          variant="outline"
+          aria-pressed={direction === "sell"}
           onClick={() => setDirection("sell")}
+          className={direction === "sell" ? "bg-accent text-paper" : "text-fog"}
         >
           Vender dólares
         </Button>

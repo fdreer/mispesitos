@@ -111,7 +111,7 @@ export function MovementForm({ kind, categories, suggestedRate }: Props) {
             id="categoryId"
             name="categoryId"
             required
-            className="border-input h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+            className="border-input h-8 w-full rounded-lg border bg-white/[0.02] px-2.5 text-sm"
           >
             {categories.map((c) => (
               <option key={c.id} value={c.id}>

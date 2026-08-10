@@ -51,7 +51,7 @@ export function CategoryManager({
       <form action={action} className="flex gap-2">
         <input type="hidden" name="kind" value={kind} />
         <Input name="name" placeholder="Nombre de la categoría" required maxLength={60} />
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" variant="outline" disabled={pending}>
           Agregar
         </Button>
       </form>

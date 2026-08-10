@@ -31,8 +31,8 @@ export function StatusFilter({ basePath, current }: Props) {
           className={cn(
             "rounded-md px-3 py-1.5 text-sm",
             current === opt.value
-              ? "bg-secondary font-medium"
-              : "text-muted-foreground hover:text-foreground",
+              ? "bg-accent text-paper"
+              : "text-fog hover:text-paper",
           )}
         >
           {opt.label}

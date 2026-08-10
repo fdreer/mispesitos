@@ -45,6 +45,7 @@ export function AppNav() {
           <Link
             key={link.href}
             href={link.href}
+            aria-current={active ? "page" : undefined}
             // La barra activa va como borde inferior de 2px sobre el mismo
             // hairline de la nav, no como un bloque aparte: así no corre el
             // texto un pixel al cambiar de sección.
