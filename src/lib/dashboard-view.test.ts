@@ -257,4 +257,30 @@ describe("buildDashboardView", () => {
     expect(view.upcoming).toHaveLength(20)
     expect(view.upcoming.some((u) => u.id === "ins-far")).toBe(false)
   })
+
+  it("arma los vencimientos aunque el movimiento no esté en la lista de movimientos", () => {
+    // El caso que habilita el corte de fecha de la página: un plan viejo con
+    // cuotas que todavía vencen. Su movimiento quedó fuera de los últimos 12
+    // meses, y el enlace de la cuota tiene que seguir saliendo bien.
+    const view = buildDashboardView({
+      ...BASE,
+      movements: [],
+      pending: [
+        {
+          id: "ins-1",
+          number: 30,
+          dueDate: "2026-08-20",
+          amountCents: 10_000,
+          movementId: "mov-viejo",
+          description: "Plan de 2023",
+          currency: "ARS",
+          rate: "1",
+          kind: "expense",
+        },
+      ],
+    })
+
+    expect(view.upcoming).toHaveLength(1)
+    expect(view.upcoming[0].status).toBe("pending")
+  })
 })

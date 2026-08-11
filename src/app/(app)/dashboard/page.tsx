@@ -9,7 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { buildDashboardView } from "@/lib/dashboard-view"
-import { todayInAr } from "@/lib/dates"
+import { addMonthsClamped, monthKey, todayInAr } from "@/lib/dates"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import {
   listCategories,
@@ -27,11 +27,25 @@ export default async function DashboardPage() {
   const { user, settings } = await requireSettings()
   const today = todayInAr()
 
+  /*
+   * La torta mira el mes en curso y las barras los últimos HISTORY_MONTHS, así
+   * que traer la historia entera es traer filas que nadie mira: sin este piso,
+   * cada carga del dashboard se lleva todos los movimientos de la cuenta y
+   * todas sus cuotas.
+   *
+   * Los vencimientos NO dependen de esta lista: su estado sale de las cuotas
+   * pendientes (ver el comentario de `overdueMovements` en
+   * @/lib/dashboard-view), que vienen completas. Un plan de hace tres años con
+   * cuotas que todavía vencen sigue apareciendo en "Vencimientos" y sigue
+   * enlazando bien, aunque su movimiento quede afuera de acá.
+   */
+  const historyFrom = `${monthKey(addMonthsClamped(today, -(HISTORY_MONTHS - 1)))}-01`
+
   const [paid, exchanges, pending, movements, expenseCategories, rate] = await Promise.all([
     listPaidInstallments(user.id),
     listExchanges(user.id),
     listPendingInstallments(user.id),
-    listMovements(user.id),
+    listMovements(user.id, { from: historyFrom }),
     // "expense" + archivadas incluidas: la torta de egresos por categoría
     // tiene que poder resolver el nombre de un movimiento viejo cuya
     // categoría ya se archivó.
