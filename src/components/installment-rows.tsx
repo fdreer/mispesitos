@@ -45,14 +45,20 @@ export function InstallmentRows({
     setError(null)
     setEnVuelo((prev) => new Set(prev).add(row.id))
     startTransition(async () => {
-      const result = await setInstallmentPaid(row.id, !row.paid)
-      setEnVuelo((prev) => {
-        const next = new Set(prev)
-        next.delete(row.id)
-        return next
-      })
-      if (!result.ok) {
-        setError({ id: row.id, message: result.message })
+      try {
+        const result = await setInstallmentPaid(row.id, !row.paid)
+        if (!result.ok) {
+          setError({ id: row.id, message: result.message })
+        }
+      } finally {
+        // Si la promesa se rechaza (caída de conexión, falla de red a mitad
+        // de pedido) en vez de resolver con { ok: false }, esto igual tiene
+        // que correr: si no, la fila queda muerta hasta que se recargue la página.
+        setEnVuelo((prev) => {
+          const next = new Set(prev)
+          next.delete(row.id)
+          return next
+        })
       }
     })
   }
