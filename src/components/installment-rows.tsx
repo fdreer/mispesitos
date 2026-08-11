@@ -32,17 +32,25 @@ export function InstallmentRows({
   today: IsoDate
 }) {
   const [, startTransition] = useTransition()
-  // El id en vuelo, no un booleano de la lista entera: con un flag compartido,
-  // marcar una cuota dejaba muertos los botones de las otras 19.
-  const [enVuelo, setEnVuelo] = useState<string | null>(null)
+  // Un Set de ids en vuelo, no un booleano de la lista entera ni un único id:
+  // con un flag compartido, marcar una cuota dejaba muertos los botones de
+  // las otras 19. Con un solo id, tocar la fila B mientras A todavía está en
+  // vuelo pisaba el valor y reactivaba el botón de A a mitad de su propio
+  // pedido. Cada fila entra y sale del Set por su cuenta, así que empezar
+  // una nunca reactiva a otra.
+  const [enVuelo, setEnVuelo] = useState<Set<string>>(new Set())
   const [error, setError] = useState<{ id: string; message: string } | null>(null)
 
   function handleToggle(row: Row) {
     setError(null)
-    setEnVuelo(row.id)
+    setEnVuelo((prev) => new Set(prev).add(row.id))
     startTransition(async () => {
       const result = await setInstallmentPaid(row.id, !row.paid)
-      setEnVuelo(null)
+      setEnVuelo((prev) => {
+        const next = new Set(prev)
+        next.delete(row.id)
+        return next
+      })
       if (!result.ok) {
         setError({ id: row.id, message: result.message })
       }
@@ -66,7 +74,7 @@ export function InstallmentRows({
                 type="button"
                 size="sm"
                 variant={row.paid ? "secondary" : "outline"}
-                disabled={enVuelo === row.id}
+                disabled={enVuelo.has(row.id)}
                 onClick={() => handleToggle(row)}
               >
                 {row.paid ? "Pagada" : "Marcar pagada"}
