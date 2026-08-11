@@ -415,12 +415,17 @@ cuenta con más de 20 movimientos; la de prueba tiene cero:
 1. **La paginación, entera.** `MovementPagination` devuelve `null` con una sola
    página, así que todavía no dibujó un solo píxel en un navegador de verdad.
    Sin verificar: que aparezca debajo de la tabla, que clickear un número sea
-   una transición de cliente y no una recarga completa (que es justamente por
-   lo que se descartó el `pagination` de shadcn), que la ventana de 5 se corra
-   bien en los bordes, y que los filtros sobrevivan al cambio de página.
-2. **Dos filtros seguidos.** Cargar Desde y enseguida Hasta, y Categoría y
-   enseguida Estado. Es la carrera que arregló `queryRef`; el mock de `push`
-   nunca re-renderiza, así que la prueba real es esta.
+   una transición de cliente y no una recarga completa (por eso el `<a>` del
+   `PaginationLink` de shadcn pasó a ser un `next/link`), que la ventana de 5 se
+   corra bien en los bordes, y que los filtros sobrevivan al cambio de página.
+2. **Dos filtros seguidos.** Categoría y enseguida Estado, sin esperar a que
+   cargue. Es la carrera que arregló `queryRef`; el mock de `push` nunca
+   re-renderiza, así que la prueba real es esta.
+2bis. **El calendario, entero.** Abrir el popover, armar un rango de dos clicks
+   y cerrarlo: tiene que navegar una sola vez, con los dos días. Abrirlo y
+   cerrarlo sin tocar nada no tiene que navegar. Un solo día y cerrar deja un
+   filtro abierto ("desde", sin tope). Y el desplegable de año tiene que ofrecer
+   años futuros: hay cuotas hasta 120 meses adelante.
 3. **El atenuado de `useTransition`.** `pending` nunca es `true` en ningún test.
    Ojo con un atenuado que dure ~3s en vez de unos cientos de ms: eso es
    `fetchSuggestedRate` revalidando dolarapi dentro del mismo render.

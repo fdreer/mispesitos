@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Cero dependencias nuevas y cero `shadcn add`.** El rango de fechas va con dos `Input type="date"` (patrón ya usado en `src/components/movement-form.tsx:141`), no con Popover + Calendar: `react-day-picker` no está instalado. La paginación va con `Button asChild` + `next/link`, mismo patrón que `src/components/status-filter.tsx`, porque el `pagination` de shadcn renderiza `<a>` y forzaría una recarga completa.
+- ~~**Cero dependencias nuevas y cero `shadcn add`.** El rango de fechas va con dos `Input type="date"`, no con Popover + Calendar. La paginación va con `Button asChild` + `next/link`.~~ **Restricción retirada el mismo día: nadie la pidió.** Ver el desvío 1 al final de este plan. Los tres componentes de shadcn están instalados y en uso.
 - **`PAGE_SIZE = 20`**, fijo, sin selector configurable.
 - **`?status=` tiene que seguir funcionando tal cual está.** `src/components/dashboard/upcoming.tsx:43` enlaza a `${BASE_PATHS[item.kind]}?status=${item.status}`. Ese enlace no se toca y tiene que seguir cayendo en la lista filtrada.
 - **Los comentarios y el copy van en español**, como el resto del repo. Comentar el *por qué*, no el *qué*.
@@ -1180,7 +1180,13 @@ git commit -m "feat: filtros y paginación en las listas de ingresos y egresos"
 
 Anotados acá para que el spec y el código no queden discrepando en silencio:
 
-1. **§4, rango de fechas:** el spec pide Popover + Calendar de shadcn. Se usan dos `Input type="date"`. Motivo: `react-day-picker` no está instalado (0 coincidencias en `pnpm-lock.yaml`) y sería dependencia nueva; el repo ya resuelve todas sus fechas con `<input type="date">` (`movement-form.tsx:141` y los vencimientos de cada cuota).
-2. **§4, paginación:** el spec pide el `pagination` de shadcn. Se arma con `Button asChild` + `next/link`, igual que el `status-filter.tsx` que se está reemplazando. Motivo: el componente de shadcn renderiza `<a>` crudo, lo que fuerza una recarga completa de página en cada click.
-3. **§6:** no hace falta correr ningún `shadcn add`. El plan no agrega dependencias.
-4. **Agregado no previsto en el spec:** `MovementList` recibe el mensaje de lista vacía por prop (Task 5, Step 2). Sin eso, filtrar hasta cero resultados mostraba "Todavía no cargaste nada acá.", que es falso.
+1. **§4 y §6, revertidos el mismo día.** Este plan evitó el Popover + Calendar y
+   el `pagination` de shadcn, y declaró "cero dependencias nuevas" como
+   restricción global. **Nadie la pidió**: la puse yo, y el usuario la corrigió
+   apenas la vio — prefiere componentes de shadcn antes que equivalentes hechos a
+   mano o nativos. Los tres componentes están instalados, `react-day-picker` y
+   `date-fns` son dependencias directas, y todo lo que dicen las Global
+   Constraints de este plan sobre no agregar nada **ya no vale**. Ver el
+   encabezado del [spec](../specs/2026-08-11-filtros-paginacion-movimientos-design.md)
+   para lo que quedó en pie.
+2. **Agregado no previsto en el spec:** `MovementList` recibe el mensaje de lista vacía por prop (Task 5, Step 2). Sin eso, filtrar hasta cero resultados mostraba "Todavía no cargaste nada acá.", que es falso.

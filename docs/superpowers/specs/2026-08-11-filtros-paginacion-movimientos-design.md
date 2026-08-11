@@ -5,13 +5,24 @@
 Los desvíos están anotados en la sección "Desvíos" al final del
 [plan](../plans/2026-08-11-filtros-paginacion-movimientos.md).
 
-> **Dos piezas de shadcn que este spec pedía no se usaron.** El §4 pedía Popover +
-> Calendar para el rango de fechas: `react-day-picker` no está instalado y el repo
-> ya resuelve todas sus fechas con `<input type="date">`, así que el rango son dos
-> `Input type="date"`. El mismo §4 pedía el `pagination` de shadcn: renderiza `<a>`
-> crudo, que fuerza una recarga completa en cada click, así que la paginación se
-> armó con `Button asChild` + `next/link`, igual que el `status-filter.tsx` que
-> reemplaza. Neto: el §6 no hace falta, no se instaló nada.
+> **El §4 y el §6 se cumplen tal como estaban escritos.** La primera versión de
+> esta pantalla evitó el Popover + Calendar y el `pagination` de shadcn para no
+> sumar dependencias. Esa restricción no la puso nadie: fue una decisión mía que
+> el usuario corrigió apenas la vio. `react-day-picker` y `date-fns` entraron,
+> los tres componentes están instalados, y el §6 se corrió tal cual.
+>
+> El único cuidado que sí hacía falta con el `pagination` de shadcn era real: su
+> `PaginationLink` renderiza un `<a>` crudo, que fuerza una recarga completa en
+> cada click. Se resolvió como documenta shadcn para App Router — cambiando ese
+> `<a>` por `next/link` en `ui/pagination.tsx`. El próximo `shadcn add pagination`
+> lo revierte en silencio; el archivo lleva un comentario avisando.
+>
+> **El rango de fechas no navega por click.** Se arma dentro del popover y se
+> aplica al cerrarlo, con un solo `go({ from, to })`. Hay estado local ahí —el
+> borrador— y es la única excepción a la regla de abajo: es una selección sin
+> confirmar, no una copia del filtro ya aplicado. Sin eso, el gesto normal de dos
+> clicks perdía el primero, porque el calendario lee `selected` del prop `query`,
+> que sigue viejo durante todo el viaje al servidor.
 >
 > **El §5 decía que `movement-list.tsx` no se tocaba, y se tocó.** Recibe el
 > mensaje de lista vacía por prop: filtrar hasta cero resultados mostraba
