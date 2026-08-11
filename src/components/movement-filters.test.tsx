@@ -125,6 +125,24 @@ describe("MovementFilters", () => {
     expect(push).toHaveBeenCalledTimes(1)
   })
 
+  // Finding 3: "Limpiar" vacía `search`, y ese cambio de estado local
+  // re-armaba el efecto de debounce (guardia `search === query.search`,
+  // ahora falsa) con el `query` de ANTES del click cerrado en el closure. 400ms
+  // después disparaba solo y resucitaba el filtro que "Limpiar" acababa de
+  // borrar. Ningún test anterior lo agarraba porque ninguno avanzaba el reloj
+  // después de clickear Limpiar.
+  it("limpiar no deja un debounce viejo que resucite el filtro borrado", () => {
+    vi.useFakeTimers()
+    montar({ search: "alquiler", status: "overdue", page: "3" })
+
+    fireEvent.click(screen.getByRole("button", { name: "Limpiar" }))
+    vi.advanceTimersByTime(400)
+
+    // Sin la cancelación, acá habría un segundo push a "/egresos?status=overdue".
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(push).toHaveBeenCalledWith("/egresos")
+  })
+
   // Minor: nada ejercía el onValueChange de los Select ni la asociación
   // htmlFor/id de sus Label. getByLabelText sólo encuentra el trigger si esa
   // asociación está bien hecha.

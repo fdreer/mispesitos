@@ -45,42 +45,57 @@ type Props = {
  * filtrada (`?status=`, ver dashboard/upcoming.tsx).
  */
 export function MovementFilters({ basePath, query, categories }: Props) {
-  // Se saca `push` del objeto en vez de dejar `router` como dependencia: el
-  // objeto que devuelve `useRouter()` es un `useMemo` que Next re-crea cada
-  // vez que cambia el router de la app (o sea, en cada navegación nuestra),
-  // aunque `push` en sí sea la misma función. Si el efecto de abajo dependiera
-  // de `router` entero, una navegación de `go()` re-crearía ese objeto,
-  // re-armaría el efecto del buscador aunque `search` no haya cambiado, y
-  // reabriría exactamente la carrera del Finding 2.
+  // Se saca `push` del objeto en vez de usar `router` entero: el objeto que
+  // devuelve `useRouter()` se re-memoiza en cada navegación, pero `push` en sí
+  // es un singleton estable en Next 16 — por eso desestructurarlo alcanza para
+  // tener siempre la función vigente sin acarrear el objeto que la contiene.
   const { push } = useRouter()
   const [search, setSearch] = useState(query.search)
   const [pending, startTransition] = useTransition()
-  // Vive en un ref, no solo en el cleanup del efecto: `go()` y `limpiar()`
-  // necesitan poder cancelarlo desde afuera del efecto (ver Finding 2 más
-  // abajo), y un ref sobrevive entre renders sin disparar uno nuevo.
+  // Vive en un ref: `go()`, `limpiar()` y el propio debounce necesitan poder
+  // cancelarlo o reprogramarlo entre renders sin disparar uno nuevo (un
+  // estado sí lo haría).
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Se actualiza después de cada render (React no deja escribir un ref
+  // DURANTE el render) para que cuando el timeout de más abajo dispare
+  // —potencialmente varios renders después de haberse armado— lea el `query`
+  // vigente en ESE momento, no el que estaba cerrado cuando se programó. Este
+  // efecto no programa nada ni navega: sólo deja una copia al día, así que no
+  // reabre la carrera que se elimina más abajo.
+  const queryRef = useRef(query)
+  useEffect(() => {
+    queryRef.current = query
+  })
 
   // El buscador navega solo, con espera: una navegación por tecla tipeada es
   // una consulta a la base por tecla. Los otros filtros cambian de a un click
-  // y navegan directo.
+  // y navegan directo. El timeout se arma acá, en el propio `onChange`, y no
+  // en un efecto: así sólo lo arma una tecla real, nunca un cambio de estado
+  // que el componente se provocó a sí mismo (que era la causa de fondo de la
+  // carrera anterior).
   //
-  // ponytail: el texto tipeado no se resincroniza si se vuelve con el botón
-  // Atrás. Sincronizarlo pisa lo que se está tipeando mientras la navegación
-  // anterior viaja, que es el caso frecuente; esto es el raro.
-  useEffect(() => {
-    if (search === query.search) return
+  // ponytail: `search` sólo se inicializa desde `query.search` al montar y no
+  // se resincroniza después. Si la URL cambia desde afuera sin desmontar el
+  // componente (típicamente el botón Atrás), el input se queda mostrando el
+  // texto tipeado aunque `query.search` ya sea otro. Es sólo visual: el
+  // timeout de acá abajo lee `queryRef.current` al disparar, así que ninguna
+  // navegación sale con datos viejos por esto.
+  function handleSearchChange(value: string) {
+    setSearch(value)
+    // Cancela el debounce anterior: si no, dos teclas seguidas arman dos
+    // timeouts y navegan dos veces.
+    clearTimeout(searchTimeout.current)
     searchTimeout.current = setTimeout(() => {
       startTransition(() => {
-        push(buildMovementHref(basePath, query, { search }))
+        push(buildMovementHref(basePath, queryRef.current, { search: value }))
       })
     }, DEBOUNCE_MS)
-    return () => clearTimeout(searchTimeout.current)
-  }, [search, query, basePath, push])
+  }
 
   function go(patch: Partial<MovementQuery>) {
-    // Si el buscador todavía tenía el debounce armado, cancelarlo acá: si no,
-    // dispara más tarde cerrado sobre el `query` de ANTES de este cambio (sin
-    // `patch`) y pisa el filtro que la persona recién eligió.
+    // Cancela el debounce del buscador si todavía estaba armado: si no,
+    // puede disparar después de este push y agregar `search` a una URL que
+    // la persona ya cambió con otro filtro, pisándolo.
     clearTimeout(searchTimeout.current)
     startTransition(() => {
       push(buildMovementHref(basePath, query, patch))
@@ -118,7 +133,7 @@ export function MovementFilters({ basePath, query, categories }: Props) {
         <Input
           id="search"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => handleSearchChange(e.target.value)}
           placeholder="Descripción"
           maxLength={200}
         />
