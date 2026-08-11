@@ -2,10 +2,14 @@
 
 import { useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import { CalendarIcon } from "lucide-react"
+import type { DateRange } from "react-day-picker"
 
 import { Button } from "@/components/ui/button"
+import { Calendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -13,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { dateToIso, isoToDate } from "@/lib/dates"
 import { cn } from "@/lib/utils"
 import {
   SEARCH_MAX,
@@ -41,6 +46,31 @@ const STATUS_OPTIONS: { value: MovementStatus | "all"; label: string }[] = [
 
 /** Cuánto se espera a que la persona deje de tipear antes de navegar. */
 const DEBOUNCE_MS = 400
+
+/**
+ * "YYYY-MM-DD" -> "DD/MM/YYYY" para mostrar en el botón del picker. Es sólo
+ * reordenar texto, no pasa por `Date` en ningún momento: no hay zona horaria
+ * de la que cuidarse acá.
+ */
+function formatIsoForDisplay(iso: string): string {
+  const [year, month, day] = iso.split("-")
+  return `${day}/${month}/${year}`
+}
+
+/**
+ * Texto del botón que dispara el calendario. Cubre los cuatro casos que
+ * `MovementQuery` permite: sin rango, sólo piso, sólo techo, o los dos —
+ * "sólo un lado" sigue siendo alcanzable escribiendo la URL a mano o desde un
+ * link externo (el `?status=` del dashboard sigue el mismo patrón), así que
+ * el botón tiene que poder mostrarlo aunque el calendario en sí sólo produzca
+ * rangos completos al hacer click (ver `handleRangeSelect`).
+ */
+function rangoLabel(from: string, to: string): string {
+  if (from && to) return `${formatIsoForDisplay(from)} – ${formatIsoForDisplay(to)}`
+  if (from) return `Desde ${formatIsoForDisplay(from)}`
+  if (to) return `Hasta ${formatIsoForDisplay(to)}`
+  return "Elegir un período"
+}
 
 /**
  * Reconstruye la query que representa un href ya armado por
@@ -156,6 +186,27 @@ export function MovementFilters({ basePath, query, categories }: Props) {
     })
   }
 
+  // `react-day-picker` en modo rango, sin restricciones extra (`min`, etc.),
+  // ya da un rango completo desde el primer click: `{from: día, to: día}`,
+  // no el `{from, to: undefined}` progresivo que uno esperaría de un picker
+  // de dos pasos (se verificó con un test descartable montando el propio
+  // `Calendar` — no es un supuesto). Se evaluó forzar `min={1}` para separar
+  // los dos clicks, pero eso vuelve IMPOSIBLE elegir un solo día como rango
+  // (clickear el mismo día otra vez con `min>0` lo borra en vez de dejarlo
+  // como está): perdía una capacidad que los dos `<input type="date">`
+  // anteriores tenían gratis. Se prefiere quedarse con el default: cada
+  // click entrega SIEMPRE una forma completa u `undefined` (al clickear dos
+  // veces un rango de un solo día), nunca a medias — así que no hace falta
+  // "esperar al segundo click" para decidir si navegar: cada `onSelect` es
+  // ya el estado final de esa interacción y navega una sola vez, con `go()`
+  // recibiendo `from`/`to` en el mismo llamado.
+  function handleRangeSelect(range: DateRange | undefined) {
+    go({
+      from: range?.from ? dateToIso(range.from) : "",
+      to: range?.to ? dateToIso(range.to) : "",
+    })
+  }
+
   function limpiar() {
     // Mismo motivo que en `go()`: los filtros viejos ya no vuelven —la línea
     // de abajo deja `queryRef` en cero—, pero el texto que quedó capturado en
@@ -170,6 +221,18 @@ export function MovementFilters({ basePath, query, categories }: Props) {
       push(basePath)
     })
   }
+
+  // Igual que `query.categoryId`/`query.status` en los Select de abajo: el
+  // calendario se arma directo desde la prop, sin estado local que la
+  // espeje. `isoToDate` no tolera "", así que cada lado se convierte sólo si
+  // hay algo que convertir.
+  const selectedRange: DateRange | undefined =
+    query.from || query.to
+      ? {
+          from: query.from ? isoToDate(query.from) : undefined,
+          to: query.to ? isoToDate(query.to) : undefined,
+        }
+      : undefined
 
   return (
     // Los Select muestran el valor viejo hasta que llegan las props nuevas del
@@ -228,23 +291,41 @@ export function MovementFilters({ basePath, query, categories }: Props) {
       </div>
 
       <div className="space-y-1">
-        <Label htmlFor="filtro-desde">Desde</Label>
-        <Input
-          id="filtro-desde"
-          type="date"
-          value={query.from}
-          onChange={(e) => go({ from: e.target.value })}
-        />
-      </div>
-
-      <div className="space-y-1">
-        <Label htmlFor="filtro-hasta">Hasta</Label>
-        <Input
-          id="filtro-hasta"
-          type="date"
-          value={query.to}
-          onChange={(e) => go({ to: e.target.value })}
-        />
+        <Label htmlFor="filtro-periodo">Período</Label>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              id="filtro-periodo"
+              type="button"
+              variant="outline"
+              className={cn(
+                "w-full justify-start font-normal",
+                !query.from && !query.to && "text-muted-foreground",
+              )}
+            >
+              <CalendarIcon />
+              {rangoLabel(query.from, query.to)}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar mode="range" selected={selectedRange} onSelect={handleRangeSelect} />
+            {/* "Limpiar" ya borra todo el filtrado; esto es aparte porque
+                alguien puede querer sacar sólo el rango de fechas y dejar el
+                resto (buscador, categoría, estado) como está. */}
+            {(query.from || query.to) && (
+              <div className="flex justify-end border-t p-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleRangeSelect(undefined)}
+                >
+                  Borrar rango
+                </Button>
+              </div>
+            )}
+          </PopoverContent>
+        </Popover>
       </div>
 
       {hayFiltrosActivos(query) && (

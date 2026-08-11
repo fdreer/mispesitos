@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import { MovementFilters } from "@/components/movement-filters"
+import { dateToIso } from "@/lib/dates"
 import { parseMovementQuery } from "@/lib/movement-query"
 
 const push = vi.fn()
@@ -12,9 +13,40 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, refresh: () => {} }),
 }))
 
-// Radix (el Select de shadcn) usa dos APIs de puntero que jsdom no implementa.
+// Radix (el Select y el Popover de shadcn) usa dos APIs de puntero que jsdom
+// no implementa. El Popover del calendario de rango no necesitó nada más
+// además de esto — se probó por separado antes de escribir los tests de
+// abajo (ver el reporte de esta tarea).
 Element.prototype.hasPointerCapture ??= () => false
 Element.prototype.scrollIntoView ??= () => {}
+
+/**
+ * Día `day` del mes que el calendario muestra por default (el mes real de
+ * "hoy", porque no le pasamos `defaultMonth`). Se calcula sobre el reloj real
+ * en vez de fijarlo con fake timers: mezclar timers falsos con el
+ * posicionamiento de Radix (que puede depender de rAF) es justamente el tipo
+ * de acoplamiento que estos tests no necesitan para lo que verifican.
+ */
+function dayInCurrentMonth(day: number): Date {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), day)
+}
+
+/**
+ * Botón de un día del calendario, ubicado por su atributo `data-day`
+ * (`CalendarDayButton` en calendar.tsx lo arma con `toLocaleDateString()`) y
+ * no por el número visible: la grilla puede mostrar "días de afuera" del mes
+ * siguiente o anterior con el mismo número que un día real del mes actual
+ * (p. ej. el 5 de este mes y el 5 del que viene, en la misma semana final), y
+ * buscar por texto encontraría el primero que aparezca en el DOM, no
+ * necesariamente el del mes bajo prueba.
+ */
+function getDayButton(date: Date): HTMLElement {
+  const target = date.toLocaleDateString()
+  const found = screen.getAllByRole("button").find((b) => b.getAttribute("data-day") === target)
+  if (!found) throw new Error(`No se encontró el botón del ${target}`)
+  return found
+}
 
 const CATEGORIAS = [
   { id: "cat-1", userId: "u", name: "Supermercado", kind: "expense" as const, archived: false },
@@ -70,27 +102,44 @@ describe("MovementFilters", () => {
     expect(push).not.toHaveBeenCalled()
   })
 
+  // El calendario abre por default en el mes real de "hoy" (no le pasamos
+  // `defaultMonth`), así que el día que se clickea se calcula sobre el mes
+  // vigente en vez de fijarlo con fake timers: eso evitaría depender de que
+  // el posicionamiento de Radix (que puede usar rAF) conviva bien con timers
+  // falsos, algo que no hacía falta comprobar para lo que este test verifica.
   it("elegir una fecha navega con el filtro puesto", () => {
     montar()
 
-    fireEvent.change(screen.getByLabelText("Desde"), { target: { value: "2026-01-01" } })
+    fireEvent.click(screen.getByLabelText("Período"))
+    const day = dayInCurrentMonth(10)
+    fireEvent.click(getDayButton(day))
 
-    expect(push).toHaveBeenCalledWith("/egresos?from=2026-01-01")
+    // Sin restricciones (`min`, etc.) react-day-picker entrega un rango
+    // completo desde el primer click: `{from: día, to: día}`, no el
+    // `{from, to: undefined}` de un picker de dos pasos. Ver el comentario
+    // de `handleRangeSelect` en movement-filters.tsx.
+    const iso = dateToIso(day)
+    expect(push).toHaveBeenCalledWith(`/egresos?from=${iso}&to=${iso}`)
   })
 
   it("cambiar un filtro con página vieja vuelve a la página 1", () => {
     montar({ page: "7", status: "paid" })
 
-    fireEvent.change(screen.getByLabelText("Hasta"), { target: { value: "2026-12-31" } })
+    fireEvent.click(screen.getByLabelText("Período"))
+    const day = dayInCurrentMonth(20)
+    fireEvent.click(getDayButton(day))
 
-    expect(push).toHaveBeenCalledWith("/egresos?status=paid&to=2026-12-31")
+    const iso = dateToIso(day)
+    expect(push).toHaveBeenCalledWith(`/egresos?status=paid&from=${iso}&to=${iso}`)
   })
 
   it("muestra el valor que viene de la URL, no uno vacío", () => {
     montar({ search: "alquiler", from: "2026-03-01" })
 
     expect(screen.getByLabelText<HTMLInputElement>("Buscar").value).toBe("alquiler")
-    expect(screen.getByLabelText<HTMLInputElement>("Desde").value).toBe("2026-03-01")
+    // Sólo `from` puesto (sin `to`) es un estado alcanzable por URL aunque el
+    // calendario no lo produzca clickeando: ver `rangoLabel`.
+    expect(screen.getByLabelText("Período").textContent).toBe("Desde 01/03/2026")
   })
 
   it("los desplegables muestran el filtro puesto sin necesidad de abrirlos", () => {
@@ -134,20 +183,26 @@ describe("MovementFilters", () => {
   // tipear. Si mientras espera la persona cambia otro filtro, `go()` navega
   // ya mismo, pero el timeout seguía armado y disparaba después con el
   // `query` viejo (sin el filtro recién elegido), pisándolo.
+  // Antes disparaba el "otro filtro" desde "Desde". Ahora usa Categoría: abrir
+  // el Popover del calendario bajo fake timers mezclaría timers falsos con el
+  // posicionamiento de Radix sin necesidad — este test no verifica nada
+  // específico del calendario, sólo que CUALQUIER otro filtro cancela el
+  // debounce del buscador.
   it("cambiar otro filtro mientras el buscador espera cancela ese debounce", () => {
     vi.useFakeTimers()
     montar({ status: "paid" })
 
     fireEvent.change(screen.getByLabelText("Buscar"), { target: { value: "kiosco" } })
-    fireEvent.change(screen.getByLabelText("Desde"), { target: { value: "2026-01-01" } })
+    fireEvent.click(screen.getByLabelText("Categoría"))
+    fireEvent.click(screen.getByText("Supermercado"))
 
     expect(push).toHaveBeenCalledTimes(1)
-    expect(push).toHaveBeenCalledWith("/egresos?status=paid&from=2026-01-01")
+    expect(push).toHaveBeenCalledWith("/egresos?categoryId=cat-1&status=paid")
 
     vi.advanceTimersByTime(400)
 
     // Si el debounce no se hubiera cancelado, acá dispararía con el `query`
-    // de antes del cambio de fecha (sin `from`) y lo pisaría.
+    // de antes del cambio de categoría (sin `categoryId`) y lo pisaría.
     expect(push).toHaveBeenCalledTimes(1)
   })
 
@@ -200,6 +255,16 @@ describe("MovementFilters", () => {
   // los mismos valores — así es como React deja las props de un client
   // component cuando su server component padre todavía no volvió a
   // renderizar) antes de disparar el segundo cambio.
+  // El primer cambio usa el calendario y el segundo Categoría (antes eran
+  // Desde y Hasta, los dos inputs de fecha). Repetir el segundo click sobre
+  // el MISMO calendario acá no serviría: su `selected` sale de la prop
+  // `query`, que este test deja fija a propósito para simular el commit que
+  // todavía no llegó, así que react-day-picker vería el mismo rango vacío de
+  // antes y no completaría un rango — recalcularía un click "desde cero" en
+  // vez de extenderlo (ver el reporte de esta tarea). Usar un control
+  // distinto para el segundo cambio evita ese caso aparte y sigue probando
+  // exactamente lo que este test verifica: que `queryRef` acumula un segundo
+  // filtro en vez de pisar al primero.
   it("un segundo filtro durante una navegación pendiente se suma al primero en vez de pisarlo", () => {
     push.mockClear()
     const query = parseMovementQuery({})
@@ -207,15 +272,19 @@ describe("MovementFilters", () => {
       <MovementFilters basePath="/egresos" query={query} categories={CATEGORIAS} />,
     )
 
-    fireEvent.change(screen.getByLabelText("Desde"), { target: { value: "2026-01-01" } })
-    expect(push).toHaveBeenCalledWith("/egresos?from=2026-01-01")
+    fireEvent.click(screen.getByLabelText("Período"))
+    const day = dayInCurrentMonth(10)
+    fireEvent.click(getDayButton(day))
+    const iso = dateToIso(day)
+    expect(push).toHaveBeenCalledWith(`/egresos?from=${iso}&to=${iso}`)
 
     // El commit todavía no llegó: la prop sigue siendo exactamente la misma.
     rerender(<MovementFilters basePath="/egresos" query={query} categories={CATEGORIAS} />)
 
-    fireEvent.change(screen.getByLabelText("Hasta"), { target: { value: "2026-12-31" } })
+    fireEvent.click(screen.getByLabelText("Categoría"))
+    fireEvent.click(screen.getByText("Supermercado"))
 
-    expect(push).toHaveBeenLastCalledWith("/egresos?from=2026-01-01&to=2026-12-31")
+    expect(push).toHaveBeenLastCalledWith(`/egresos?categoryId=cat-1&from=${iso}&to=${iso}`)
   })
 
   // Mismo agujero que el anterior pero del lado del buscador: el debounce
@@ -253,7 +322,50 @@ describe("MovementFilters", () => {
     expect(screen.getByLabelText("Buscar").id).toBe("filtro-buscar")
     expect(screen.getByLabelText("Categoría").id).toBe("filtro-categoria")
     expect(screen.getByLabelText("Estado").id).toBe("filtro-estado")
-    expect(screen.getByLabelText("Desde").id).toBe("filtro-desde")
-    expect(screen.getByLabelText("Hasta").id).toBe("filtro-hasta")
+    expect(screen.getByLabelText("Período").id).toBe("filtro-periodo")
+  })
+
+  // Cobertura nueva: completar un rango de varios días con dos clicks tiene
+  // que terminar en un solo llamado a `push` con `from` y `to` de días
+  // distintos (no el mismo día repetido, que es lo que cubre el primer test
+  // de este archivo). El segundo click necesita que la prop `query` ya
+  // refleje el primero —por eso el `rerender`—: `Calendar` está controlado
+  // por esa prop, y `addToRange` (la función de react-day-picker que decide
+  // qué hacer con cada click) sólo sabe extender el rango si el `selected`
+  // que recibe ya tiene el primer día adentro.
+  it("completar un rango de varios días con dos clicks navega con from y to distintos", () => {
+    const { rerender } = montar()
+
+    fireEvent.click(screen.getByLabelText("Período"))
+    const dayFrom = dayInCurrentMonth(5)
+    fireEvent.click(getDayButton(dayFrom))
+    const from = dateToIso(dayFrom)
+    expect(push).toHaveBeenCalledWith(`/egresos?from=${from}&to=${from}`)
+
+    rerender(
+      <MovementFilters
+        basePath="/egresos"
+        query={parseMovementQuery({ from, to: from })}
+        categories={CATEGORIAS}
+      />,
+    )
+
+    const dayTo = dayInCurrentMonth(20)
+    fireEvent.click(getDayButton(dayTo))
+    const to = dateToIso(dayTo)
+    expect(push).toHaveBeenLastCalledWith(`/egresos?from=${from}&to=${to}`)
+  })
+
+  // Con un rango ya puesto, "Borrar rango" tiene que sacar sólo `from`/`to` y
+  // no tocar el resto: "Limpiar" (que borra todo) sigue estando para el caso
+  // general, esto es para cuando la persona quiere conservar los demás
+  // filtros.
+  it("borrar rango saca sólo las fechas y deja el resto de los filtros", () => {
+    montar({ status: "paid", from: "2026-01-05", to: "2026-01-20" })
+
+    fireEvent.click(screen.getByLabelText("Período"))
+    fireEvent.click(screen.getByRole("button", { name: "Borrar rango" }))
+
+    expect(push).toHaveBeenCalledWith("/egresos?status=paid")
   })
 })

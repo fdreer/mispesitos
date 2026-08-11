@@ -65,6 +65,35 @@ export function addMonthsClamped(date: IsoDate, months: number): IsoDate {
   return `${paddedYear}-${pad(targetMonth + 1)}-${pad(Math.min(day, lastDay))}`
 }
 
+/**
+ * Convierte un IsoDate al Date de calendario LOCAL que espera react-day-picker
+ * (medianoche en la zona del navegador), armado por componentes con
+ * `new Date(year, monthIndex, day)`. Pasarle el string directo a `new
+ * Date(iso)` lo interpretaría como medianoche UTC, que en Buenos Aires
+ * (UTC-3) cae en el día anterior — el calendario resaltaría el 10 para un
+ * "2026-08-11" guardado.
+ */
+export function isoToDate(iso: IsoDate): Date {
+  // Misma postura que `addMonthsClamped`: una función que promete devolver
+  // una fecha real no puede fabricar una a partir de un string que no lo es.
+  if (!isValidIsoDate(iso)) {
+    throw new Error(`La fecha debe ser un día real en formato YYYY-MM-DD, no ${JSON.stringify(iso)}`)
+  }
+
+  const [year, month, day] = iso.split("-").map(Number)
+  return new Date(year, month - 1, day)
+}
+
+/**
+ * Lee un Date por sus componentes LOCALES, no por `toISOString()`: ese lee
+ * UTC, así que un día elegido en el calendario a medianoche local (Buenos
+ * Aires, UTC-3) volvería serializado como el día anterior.
+ */
+export function dateToIso(date: Date): IsoDate {
+  const year = String(date.getFullYear()).padStart(4, "0")
+  return `${year}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
 function utcDate(year: number, month: number, day: number): Date {
   const d = new Date(0)
   d.setUTCFullYear(year, month, day)

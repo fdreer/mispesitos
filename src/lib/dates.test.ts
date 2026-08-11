@@ -1,5 +1,13 @@
-import { describe, it, expect, vi, afterEach } from "vitest"
-import { todayInAr, addMonthsClamped, isValidIsoDate, monthKey, isOverdue } from "@/lib/dates"
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
+import {
+  todayInAr,
+  addMonthsClamped,
+  isValidIsoDate,
+  monthKey,
+  isOverdue,
+  isoToDate,
+  dateToIso,
+} from "@/lib/dates"
 
 afterEach(() => {
   vi.useRealTimers()
@@ -93,6 +101,52 @@ describe("isValidIsoDate", () => {
     expect(isValidIsoDate("2026-8-10")).toBe(false)
     expect(isValidIsoDate("2026-08-10T00:00:00Z")).toBe(false)
     expect(isValidIsoDate("")).toBe(false)
+  })
+})
+
+describe("isoToDate / dateToIso", () => {
+  // El picker de rango (movement-filters.tsx) corre en el navegador de quien
+  // usa la app, no en el servidor: "local" es la zona del navegador. Estos
+  // tests fuerzan la del propio negocio (Buenos Aires, UTC-3) porque es la
+  // que expone el bug — `new Date(iso)` interpreta el string como UTC, y acá
+  // eso cae en el día anterior. Si la máquina que corre el test ya tuviera
+  // esa zona por default el test pasaría igual sin forzarla, pero forzarla
+  // es lo que lo vuelve válido en cualquier CI, sea cual sea su zona.
+  const ORIGINAL_TZ = process.env.TZ
+  beforeEach(() => {
+    process.env.TZ = "America/Argentina/Buenos_Aires"
+  })
+  afterEach(() => {
+    process.env.TZ = ORIGINAL_TZ
+  })
+
+  it("hace un round-trip sin cambiar el día", () => {
+    expect(dateToIso(isoToDate("2026-08-11"))).toBe("2026-08-11")
+    expect(dateToIso(isoToDate("2026-01-01"))).toBe("2026-01-01")
+  })
+
+  it("el día que se elige no se corre: getDate() local coincide con el día del string", () => {
+    // Con `new Date("2026-01-01")` (parseo UTC) esto daría 31 (diciembre)
+    // en vez de 1: medianoche UTC del 1/1 son las 21:00 del 31/12 en Buenos
+    // Aires.
+    const date = isoToDate("2026-01-01")
+    expect(date.getFullYear()).toBe(2026)
+    expect(date.getMonth()).toBe(0)
+    expect(date.getDate()).toBe(1)
+  })
+
+  it("dateToIso lee componentes locales, no UTC", () => {
+    // Un Date armado a medianoche LOCAL con el constructor de componentes.
+    // `.toISOString().slice(0, 10)` leería UTC y devolvería "2025-12-31".
+    const local = new Date(2026, 0, 1)
+    expect(dateToIso(local)).toBe("2026-01-01")
+  })
+
+  it("rechaza una fecha inválida en vez de fabricar un Date roto (misma postura que addMonthsClamped)", () => {
+    expect(() => isoToDate("2026-02-30")).toThrow()
+    expect(() => isoToDate("hoy")).toThrow()
+    expect(() => isoToDate("")).toThrow()
+    expect(() => isoToDate("2026-08-09T00:00:00Z")).toThrow()
   })
 })
 
