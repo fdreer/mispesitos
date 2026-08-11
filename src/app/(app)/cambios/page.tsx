@@ -1,5 +1,6 @@
 import { ExchangeForm } from "@/components/exchange-form"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { todayInAr } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
 import { usdPosition } from "@/lib/position"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
@@ -8,6 +9,7 @@ import { requireSettings } from "@/server/session"
 
 export default async function CambiosPage() {
   const { user, settings } = await requireSettings()
+  const today = todayInAr()
 
   const [events, exchanges, rate] = await Promise.all([
     listUsdPositionEvents(user.id),
@@ -70,7 +72,7 @@ export default async function CambiosPage() {
         </div>
       )}
 
-      <ExchangeForm buyRate={rate?.buyRate ?? null} sellRate={rate?.sellRate ?? null} />
+      <ExchangeForm buyRate={rate?.buyRate ?? null} sellRate={rate?.sellRate ?? null} today={today} />
 
       <ul className="divide-y">
         {exchanges.map((e) => (

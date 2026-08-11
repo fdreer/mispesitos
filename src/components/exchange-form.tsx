@@ -6,12 +6,17 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { todayInAr } from "@/lib/dates"
+import type { IsoDate } from "@/lib/dates"
 import { createExchange } from "@/server/actions/movements"
 
-type Props = { buyRate: number | null; sellRate: number | null }
+type Props = {
+  buyRate: number | null
+  sellRate: number | null
+  /** Hoy según el reloj de Buenos Aires, calculado en el servidor. */
+  today: IsoDate
+}
 
-export function ExchangeForm({ buyRate, sellRate }: Props) {
+export function ExchangeForm({ buyRate, sellRate, today }: Props) {
   const router = useRouter()
   const [state, action, pending] = useActionState(createExchange, null)
   const [direction, setDirection] = useState<"buy" | "sell">("buy")
@@ -60,7 +65,7 @@ export function ExchangeForm({ buyRate, sellRate }: Props) {
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1">
           <Label htmlFor="date">Fecha</Label>
-          <Input id="date" name="date" type="date" defaultValue={todayInAr()} required />
+          <Input id="date" name="date" type="date" defaultValue={today} required />
         </div>
 
         <div className="space-y-1">
