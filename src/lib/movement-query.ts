@@ -11,7 +11,7 @@ export const PAGE_SIZE = 20
  * parseando de vuelta a "all" — la lista de abajo y el desplegable son la
  * misma fuente.
  */
-export const STATUS_VALUES: MovementStatus[] = ["pending", "paid", "overdue"]
+export const STATUS_VALUES: readonly MovementStatus[] = ["pending", "paid", "overdue"]
 
 /** El mismo tope que `movementSchema` le pone a la descripción. */
 export const SEARCH_MAX = 200
@@ -50,7 +50,9 @@ export function parseMovementQuery(raw: RawParams): MovementQuery {
   return {
     search: one(raw.search).trim().slice(0, SEARCH_MAX),
     categoryId: one(raw.categoryId) || "all",
-    status: (STATUS_VALUES as string[]).includes(status) ? (status as MovementStatus) : "all",
+    status: (STATUS_VALUES as readonly string[]).includes(status)
+      ? (status as MovementStatus)
+      : "all",
     from: isValidIsoDate(from) ? from : "",
     to: isValidIsoDate(to) ? to : "",
     page: Number.isInteger(page) && page > 0 ? page : 1,

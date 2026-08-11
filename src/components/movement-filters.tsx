@@ -141,9 +141,11 @@ export function MovementFilters({ basePath, query, categories }: Props) {
   }
 
   function go(patch: Partial<MovementQuery>) {
-    // Cancela el debounce del buscador si todavía estaba armado: si no,
-    // puede disparar después de este push y agregar `search` a una URL que
-    // la persona ya cambió con otro filtro, pisándolo.
+    // Cancela el debounce del buscador si todavía estaba armado. Ya no puede
+    // pisar este filtro —parte de `queryRef.current`, que este push acaba de
+    // actualizar—, pero sí navegaría una segunda vez 400ms después de que la
+    // persona soltó el buscador y agarró otro control. Ese viaje no lo pidió
+    // nadie.
     clearTimeout(searchTimeout.current)
     // Parte de `queryRef.current`, no de la prop `query`: ver el comentario
     // de `queryRef` más arriba (finding 1 de la auditoría).
@@ -155,8 +157,9 @@ export function MovementFilters({ basePath, query, categories }: Props) {
   }
 
   function limpiar() {
-    // Mismo motivo que en `go()`: sin cancelar, el debounce puede disparar
-    // después y resucitar los filtros viejos que "Limpiar" acaba de borrar.
+    // Mismo motivo que en `go()`: los filtros viejos ya no vuelven —la línea
+    // de abajo deja `queryRef` en cero—, pero el texto que quedó capturado en
+    // el timeout sí, y volvería solo 400ms después de vaciar el campo.
     clearTimeout(searchTimeout.current)
     setSearch("")
     // También hay que dejarla en sync acá: si no, un filtro elegido justo

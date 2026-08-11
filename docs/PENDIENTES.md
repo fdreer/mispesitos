@@ -389,3 +389,73 @@ que volver a razonarlos.
   mantener sincronizadas.
 - **La medición de cobertura de la sección 3.4 es una foto.** Los números son
   exactos hoy y van a estar viejos apenas se agregue un test.
+
+---
+
+## 7. Filtros y paginación de ingresos/egresos (2026-08-11)
+
+Ver el [spec](superpowers/specs/2026-08-11-filtros-paginacion-movimientos-design.md)
+y el [plan](superpowers/plans/2026-08-11-filtros-paginacion-movimientos.md).
+
+### 7.1 Lo que quedó sin verificar en el navegador
+
+La pestaña de preview no compone en el entorno del agente: `visibilityState`
+queda en `"hidden"`, `requestAnimationFrame` nunca corre y el contenido detrás
+de Suspense no se revela. Es el mismo problema de §3.4, y forzar el reveal a
+mano (`$RV($RB)`) muestra el HTML pero no corre los layout effects, así que
+todo lo que dependa de clicks, de timers o de Radix queda fuera de alcance.
+
+Lo que sí se comprobó, navegando a URLs reales y leyendo el DOM: la barra de
+filtros se dibuja, las pills viejas de estado no están, los dos mensajes de
+lista vacía salen cuando corresponde, y un `?status=` se parsea bien.
+
+Lo que **nadie miró funcionando**, en orden de riesgo. Todo esto necesita una
+cuenta con más de 20 movimientos; la de prueba tiene cero:
+
+1. **La paginación, entera.** `MovementPagination` devuelve `null` con una sola
+   página, así que todavía no dibujó un solo píxel en un navegador de verdad.
+   Sin verificar: que aparezca debajo de la tabla, que clickear un número sea
+   una transición de cliente y no una recarga completa (que es justamente por
+   lo que se descartó el `pagination` de shadcn), que la ventana de 5 se corra
+   bien en los bordes, y que los filtros sobrevivan al cambio de página.
+2. **Dos filtros seguidos.** Cargar Desde y enseguida Hasta, y Categoría y
+   enseguida Estado. Es la carrera que arregló `queryRef`; el mock de `push`
+   nunca re-renderiza, así que la prueba real es esta.
+3. **El atenuado de `useTransition`.** `pending` nunca es `true` en ningún test.
+   Ojo con un atenuado que dure ~3s en vez de unos cientos de ms: eso es
+   `fetchSuggestedRate` revalidando dolarapi dentro del mismo render.
+4. **El debounce contra el router real.** Tres commits de esta rama son fixes de
+   esa máquina, todos verificados con timers falsos.
+5. **Abrir un Select de Radix y elegir.** En jsdom se simula con dos polyfills
+   de puntero; la interacción real va por eventos de puntero y un portal.
+6. **El diálogo "Nuevo" con la barra de filtros presente.** Clickear el label
+   "Categoría" del formulario y que abra su propio desplegable. Es lo que
+   rompía la colisión de ids, ya arreglada, pero nadie lo vio andar.
+7. **Filtrar hasta cero con la tabla llena**, y **la página que se recorta**
+   (ir a la 3, filtrar hasta menos de 20, y que muestre la última en vez de una
+   tabla en blanco; la URL sigue diciendo `page=3`, y está bien que así sea).
+
+### 7.2 Deuda técnica que la auditoría dejó abierta
+
+- **La vista sin filtros trae todo para mostrar 20.** `listMovements` busca cada
+  movimiento que matchea el WHERE **y todas sus cuotas**, y recién después se
+  cortan 20. Con ~5.000 movimientos eso son ~5.000 filas más sus cuotas para
+  pintar 20. **No es una regresión**: `main` traía exactamente lo mismo y además
+  lo renderizaba entero, así que la rama mejora. Pero el §3.4 del spec justifica
+  el corte en memoria diciendo que el filtrado SQL ya recortó lo que se trae, y
+  eso no vale para la vista sin filtrar, que es donde se cae parado. Cuando
+  `status === "all"` la consulta podría ser `LIMIT`/`OFFSET` más un `count(*)`;
+  sólo la rama con estado necesita traer todo.
+- **`movement-pagination.tsx` tiene el agujero que se le tapó a la barra.** Arma
+  sus enlaces desde la prop `query`, así que clickear una página mientras viaja
+  un cambio de filtro navega a la URL anterior y descarta ese filtro. Es un
+  server component: no puede ver el ref del cliente sin duplicar estado, que es
+  justo lo que el §3.1 no quiere. Ventana chica, pero está.
+- **Qué cuenta como "sin filtro" vive en cuatro lugares.** `buildMovementHref`
+  decide qué omitir de la URL; `movement-screen.tsx` decide qué mandar como
+  `undefined` a `listMovements`; y `hayFiltrosActivos` decide qué cuenta como
+  filtrado. Agregar un sexto filtro —moneda es el candidato obvio— obliga a
+  tocar los tres, y olvidarse de uno no falla: se porta mal en silencio.
+- **La regla de §7.4 del spec no la cumple el paginador.** "Cualquier control
+  nuevo que navegue en vez de mutar estado local" tendría que dar feedback de
+  pendiente. `MovementPagination` no puede: es un server component.
