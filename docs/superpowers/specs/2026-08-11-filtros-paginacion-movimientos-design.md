@@ -1,7 +1,29 @@
 # Filtros y paginación en ingresos/egresos
 
 **Fecha:** 2026-08-11
-**Estado:** propuesto, pendiente de implementación.
+**Estado:** **implementado el 2026-08-11.** El código manda sobre este documento.
+Los desvíos están anotados en la sección "Desvíos" al final del
+[plan](../plans/2026-08-11-filtros-paginacion-movimientos.md).
+
+> **Dos piezas de shadcn que este spec pedía no se usaron.** El §4 pedía Popover +
+> Calendar para el rango de fechas: `react-day-picker` no está instalado y el repo
+> ya resuelve todas sus fechas con `<input type="date">`, así que el rango son dos
+> `Input type="date"`. El mismo §4 pedía el `pagination` de shadcn: renderiza `<a>`
+> crudo, que fuerza una recarga completa en cada click, así que la paginación se
+> armó con `Button asChild` + `next/link`, igual que el `status-filter.tsx` que
+> reemplaza. Neto: el §6 no hace falta, no se instaló nada.
+>
+> **El §5 decía que `movement-list.tsx` no se tocaba, y se tocó.** Recibe el
+> mensaje de lista vacía por prop: filtrar hasta cero resultados mostraba
+> "Todavía no cargaste nada acá", que con la tabla llena es falso.
+>
+> **Una regla que este spec no tenía y el sistema pide.** El §3.1 elige que los
+> filtros vivan sólo en la URL. El costo es que el control muestra el valor viejo
+> hasta que vuelve el round-trip del server. Se resolvió con `useTransition` y la
+> barra atenuada mientras está pendiente: el lag no se elimina, se hace legible.
+> Cualquier control nuevo que navegue en vez de mutar estado local sigue esa regla.
+> Lo que NO se hizo, a propósito, es duplicar el estado en el cliente para tapar
+> el lag: eso rompería el "un solo lugar" del §3.1.
 
 ## 1. Objetivo
 
