@@ -93,6 +93,16 @@ describe("MovementFilters", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Desde").value).toBe("2026-03-01")
   })
 
+  it("los desplegables muestran el filtro puesto sin necesidad de abrirlos", () => {
+    // Radix resuelve el texto del trigger desde los items, que estando cerrado
+    // viven en un DocumentFragment. Si eso se rompe, la barra queda en blanco y
+    // deja de decir por qué está filtrada la tabla.
+    montar({ status: "overdue", categoryId: "cat-2" })
+
+    expect(screen.getByLabelText("Estado").textContent).toBe("Vencido")
+    expect(screen.getByLabelText("Categoría").textContent).toBe("Ocio")
+  })
+
   it("limpiar borra todos los filtros de una", () => {
     montar({ search: "alquiler", status: "overdue", page: "3" })
 
