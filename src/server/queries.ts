@@ -2,7 +2,7 @@ import "server-only"
 
 import { cache } from "react"
 
-import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm"
+import { and, asc, desc, eq, gte, ilike, inArray, lte } from "drizzle-orm"
 
 import { withUser } from "@/db/client"
 import { category, installment, movement, userSettings } from "@/db/schema"
@@ -63,6 +63,17 @@ export type MovementFilters = {
   currency?: "ARS" | "USD"
   from?: string
   to?: string
+  /** Texto libre contra la descripción, sin distinguir mayúsculas. */
+  search?: string
+}
+
+/**
+ * `%` y `_` son comodines de LIKE: sin escaparlos, buscar "50%" traería TODA la
+ * lista en vez de las descripciones que dicen "50%". La barra va primero o se
+ * escaparía a sí misma en los dos reemplazos siguientes.
+ */
+function escapeLike(term: string): string {
+  return term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")
 }
 
 export async function listMovements(
@@ -76,6 +87,9 @@ export async function listMovements(
     if (filters.currency) conditions.push(eq(movement.currency, filters.currency))
     if (filters.from) conditions.push(gte(movement.date, filters.from))
     if (filters.to) conditions.push(lte(movement.date, filters.to))
+    if (filters.search) {
+      conditions.push(ilike(movement.description, `%${escapeLike(filters.search)}%`))
+    }
 
     const movements = await tx
       .select()

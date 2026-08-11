@@ -684,6 +684,33 @@ describe("listMovements", () => {
     expect(ids(movs)).toEqual([MOV.comida])
   })
 
+  it("filtra por descripción sin distinguir mayúsculas", async () => {
+    // Sembrados como "Kiosco de la mañana" / "Kiosco de la tarde": en minúscula
+    // sólo matchean si la consulta usa ilike y no like.
+    expect([...ids(await listMovements(USUARIO_A, { search: "kiosco" }))].sort()).toEqual(
+      [MOV.junioTarde, MOV.junioTemprano].sort(),
+    )
+  })
+
+  it("el filtro de descripción matchea en el medio del texto", async () => {
+    expect([...ids(await listMovements(USUARIO_A, { search: "dólares" }))].sort()).toEqual(
+      [MOV.alquiler, MOV.cambioVenta, MOV.sueldo].sort(),
+    )
+  })
+
+  it("los comodines de LIKE se escapan en vez de traer todo", async () => {
+    // Sin escapar, "%" es "cualquier cosa" y devolvería los nueve movimientos.
+    expect(await listMovements(USUARIO_A, { search: "%" })).toEqual([])
+    expect(await listMovements(USUARIO_A, { search: "_" })).toEqual([])
+  })
+
+  it("el filtro de descripción se combina con los demás", async () => {
+    const movs = await listMovements(USUARIO_A, { search: "kiosco", kind: "expense" })
+
+    expect(ids(movs)).toEqual([MOV.junioTarde, MOV.junioTemprano])
+    expect(await listMovements(USUARIO_A, { search: "kiosco", kind: "income" })).toEqual([])
+  })
+
   it("no trae movimientos de otro usuario", async () => {
     const movs = await listMovements(USUARIO_A)
 
