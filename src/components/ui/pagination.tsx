@@ -1,4 +1,5 @@
 import * as React from "react"
+import Link from "next/link"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -33,10 +34,15 @@ function PaginationItem({ ...props }: React.ComponentProps<"li">) {
   return <li data-slot="pagination-item" {...props} />
 }
 
+// Esto es App Router: un <a> normal recarga la página entera en cada click.
+// El primitivo de shadcn trae <a> a propósito (es agnóstico del router), pero
+// acá conviene <Link> de next/link. Es el swap que la propia doc de shadcn
+// para Next.js recomienda hacer a mano — un `shadcn add pagination` futuro lo
+// va a pisar sin avisar, así que si algo vuelve a ser <a>, es por eso.
 type PaginationLinkProps = {
   isActive?: boolean
 } & Pick<React.ComponentProps<typeof Button>, "size"> &
-  React.ComponentProps<"a">
+  React.ComponentProps<typeof Link>
 
 function PaginationLink({
   className,
@@ -51,7 +57,7 @@ function PaginationLink({
       size={size}
       className={cn(className)}
     >
-      <a
+      <Link
         aria-current={isActive ? "page" : undefined}
         data-slot="pagination-link"
         data-active={isActive}

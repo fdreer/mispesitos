@@ -1,6 +1,11 @@
-import Link from "next/link"
-
-import { Button } from "@/components/ui/button"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
 import { buildMovementHref, type MovementQuery } from "@/lib/movement-query"
 
 /** Cuántos números se muestran alrededor de la página actual. */
@@ -19,6 +24,11 @@ type Props = {
  * Enlaces, no botones: la página vive en la URL igual que los filtros, así que
  * paginar es navegar. Mismo patrón que el resto de la pantalla, y de paso
  * funciona con el botón Atrás y con abrir en una pestaña nueva.
+ *
+ * El primitivo (`ui/pagination.tsx`) es genérico e inglés por diseño — cada
+ * `aria-label`/`text` por default se pisa acá con su versión en español,
+ * porque son props normales que el primitivo reparte con `...props` después
+ * del valor por default.
  */
 export function MovementPagination({ basePath, query, page, totalPages }: Props) {
   if (totalPages <= 1) return null
@@ -30,29 +40,36 @@ export function MovementPagination({ basePath, query, page, totalPages }: Props)
   const pages = Array.from({ length: end - start + 1 }, (_, i) => start + i)
 
   return (
-    <nav aria-label="Paginación" className="flex items-center justify-center gap-1">
-      {page > 1 && (
-        <Button asChild size="sm" variant="ghost">
-          <Link href={buildMovementHref(basePath, query, { page: page - 1 })}>Anterior</Link>
-        </Button>
-      )}
+    <Pagination aria-label="Paginación">
+      <PaginationContent>
+        {page > 1 && (
+          <PaginationItem>
+            <PaginationPrevious
+              href={buildMovementHref(basePath, query, { page: page - 1 })}
+              text="Anterior"
+              aria-label="Ir a la página anterior"
+            />
+          </PaginationItem>
+        )}
 
-      {pages.map((p) => (
-        <Button key={p} asChild size="sm" variant={p === page ? "secondary" : "ghost"}>
-          <Link
-            href={buildMovementHref(basePath, query, { page: p })}
-            aria-current={p === page ? "page" : undefined}
-          >
-            {p}
-          </Link>
-        </Button>
-      ))}
+        {pages.map((p) => (
+          <PaginationItem key={p}>
+            <PaginationLink href={buildMovementHref(basePath, query, { page: p })} isActive={p === page}>
+              {p}
+            </PaginationLink>
+          </PaginationItem>
+        ))}
 
-      {page < totalPages && (
-        <Button asChild size="sm" variant="ghost">
-          <Link href={buildMovementHref(basePath, query, { page: page + 1 })}>Siguiente</Link>
-        </Button>
-      )}
-    </nav>
+        {page < totalPages && (
+          <PaginationItem>
+            <PaginationNext
+              href={buildMovementHref(basePath, query, { page: page + 1 })}
+              text="Siguiente"
+              aria-label="Ir a la página siguiente"
+            />
+          </PaginationItem>
+        )}
+      </PaginationContent>
+    </Pagination>
   )
 }

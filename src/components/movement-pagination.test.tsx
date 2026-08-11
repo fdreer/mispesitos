@@ -40,15 +40,18 @@ describe("MovementPagination", () => {
   })
 
   it("la página 1 no ofrece anterior y la última no ofrece siguiente", () => {
+    // `PaginationPrevious`/`PaginationNext` traen su propio `aria-label` (más
+    // descriptivo que el texto visible, que además se oculta en pantallas
+    // chicas), así que el nombre accesible real es ese, no "Anterior"/"Siguiente".
     montar(1, 3)
-    expect(screen.queryByRole("link", { name: "Anterior" })).toBeNull()
-    expect(screen.getByRole("link", { name: "Siguiente" })).toBeTruthy()
+    expect(screen.queryByRole("link", { name: "Ir a la página anterior" })).toBeNull()
+    expect(screen.getByRole("link", { name: "Ir a la página siguiente" })).toBeTruthy()
 
     cleanup()
 
     montar(3, 3)
-    expect(screen.getByRole("link", { name: "Anterior" })).toBeTruthy()
-    expect(screen.queryByRole("link", { name: "Siguiente" })).toBeNull()
+    expect(screen.getByRole("link", { name: "Ir a la página anterior" })).toBeTruthy()
+    expect(screen.queryByRole("link", { name: "Ir a la página siguiente" })).toBeNull()
   })
 
   it("la página 1 no lleva ?page= en el enlace", () => {
