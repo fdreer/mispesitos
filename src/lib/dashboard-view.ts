@@ -27,9 +27,15 @@ import type { MovementStatus } from "@/lib/movement-status"
  * string. La conversión y los asserts pasan una sola vez, acá adentro.
  */
 
-/** Cuota pagada, del join con su movimiento. */
+/**
+ * Cuota pagada, del join con su movimiento. `paidDate` no es `string | null`
+ * porque `listPaidInstallments` (@/server/queries) ya filtra `paid = true`, y
+ * con `paid = true` la CHECK `installment_paid_date_required_when_paid`
+ * (migración 0009) exige `paid_date` no nulo. El compilador sostiene ahora lo
+ * que antes sostenía sólo un comentario al lado de un `!`.
+ */
 export type PaidRow = {
-  paidDate: string | null
+  paidDate: IsoDate
   amountCents: number
   currency: string
   kind: string
@@ -131,9 +137,7 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
       initialDate: settings.initialBalanceDate,
     },
     input.paid.map((p) => ({
-      // `paid_date` no puede ser nulo con `paid = true`: lo garantiza la CHECK
-      // `installment_paid_date_required_when_paid` (migración 0009), no este `!`.
-      paidDate: p.paidDate!,
+      paidDate: p.paidDate,
       currency: assertCurrency(p.currency),
       kind: assertInstallmentMovementKind(p.kind),
       amountCents: p.amountCents,
@@ -158,7 +162,7 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
   // un saldo inicial fechado a mitad de mes la tarjeta mostraba un cobro que el
   // saldo de al lado no tenía en cuenta.
   const monthPaid = input.paid.filter(
-    (p) => p.paidDate! >= settings.initialBalanceDate && monthKey(p.paidDate!) === thisMonth,
+    (p) => p.paidDate >= settings.initialBalanceDate && monthKey(p.paidDate) === thisMonth,
   )
 
   const projectionStart = projectionStartArsCents(balances, todayRate)
