@@ -189,4 +189,71 @@ describe("MovementFilters", () => {
 
     expect(push).toHaveBeenCalledWith("/egresos?status=paid")
   })
+
+  // Finding 1 (auditoría de rama): `go()` armaba el próximo href desde la
+  // prop `query`, que no se actualiza hasta que el viaje al servidor
+  // commitea. Un segundo cambio de filtro disparado ANTES de ese commit
+  // volvía a partir de la prop vieja y pisaba al primero en vez de sumarse.
+  // El mock de `push` nunca re-renderiza el componente, así que acá hay que
+  // simular el round-trip a mano: montamos, disparamos un cambio, y
+  // re-renderizamos con LA MISMA prop `query` (mismo objeto, no uno nuevo con
+  // los mismos valores — así es como React deja las props de un client
+  // component cuando su server component padre todavía no volvió a
+  // renderizar) antes de disparar el segundo cambio.
+  it("un segundo filtro durante una navegación pendiente se suma al primero en vez de pisarlo", () => {
+    push.mockClear()
+    const query = parseMovementQuery({})
+    const { rerender } = render(
+      <MovementFilters basePath="/egresos" query={query} categories={CATEGORIAS} />,
+    )
+
+    fireEvent.change(screen.getByLabelText("Desde"), { target: { value: "2026-01-01" } })
+    expect(push).toHaveBeenCalledWith("/egresos?from=2026-01-01")
+
+    // El commit todavía no llegó: la prop sigue siendo exactamente la misma.
+    rerender(<MovementFilters basePath="/egresos" query={query} categories={CATEGORIAS} />)
+
+    fireEvent.change(screen.getByLabelText("Hasta"), { target: { value: "2026-12-31" } })
+
+    expect(push).toHaveBeenLastCalledWith("/egresos?from=2026-01-01&to=2026-12-31")
+  })
+
+  // Mismo agujero que el anterior pero del lado del buscador: el debounce
+  // cierra sobre `queryRef.current`, que antes también sólo se actualizaba
+  // cuando llegaba una prop nueva del server.
+  it("el buscador con debounce pendiente también se suma a un filtro empujado antes", () => {
+    vi.useFakeTimers()
+    push.mockClear()
+    const query = parseMovementQuery({})
+    const { rerender } = render(
+      <MovementFilters basePath="/egresos" query={query} categories={CATEGORIAS} />,
+    )
+
+    fireEvent.click(screen.getByLabelText("Categoría"))
+    fireEvent.click(screen.getByText("Supermercado"))
+    expect(push).toHaveBeenCalledWith("/egresos?categoryId=cat-1")
+
+    rerender(<MovementFilters basePath="/egresos" query={query} categories={CATEGORIAS} />)
+
+    fireEvent.change(screen.getByLabelText("Buscar"), { target: { value: "kiosco" } })
+    vi.advanceTimersByTime(400)
+
+    expect(push).toHaveBeenLastCalledWith("/egresos?search=kiosco&categoryId=cat-1")
+  })
+
+  // Finding 2 (auditoría de rama): estos ids coincidían con los de
+  // `movement-form.tsx`, que vive en la misma pantalla dentro de un diálogo
+  // portado al final del <body>. El elemento de acá quedaba primero en el
+  // árbol y siempre ganaba la resolución de `for`, dejando sin nombre
+  // accesible al campo del formulario. Prefijados con "filtro-" para que no
+  // puedan volver a chocar con otro formulario de la pantalla.
+  it("los ids de la barra de filtros están prefijados para no chocar con los del formulario de carga", () => {
+    montar()
+
+    expect(screen.getByLabelText("Buscar").id).toBe("filtro-buscar")
+    expect(screen.getByLabelText("Categoría").id).toBe("filtro-categoria")
+    expect(screen.getByLabelText("Estado").id).toBe("filtro-estado")
+    expect(screen.getByLabelText("Desde").id).toBe("filtro-desde")
+    expect(screen.getByLabelText("Hasta").id).toBe("filtro-hasta")
+  })
 })

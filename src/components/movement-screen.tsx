@@ -5,7 +5,7 @@ import { MovementFormDialog } from "@/components/movement-form-dialog"
 import { MovementList } from "@/components/movement-list"
 import { MovementPagination } from "@/components/movement-pagination"
 import { todayInAr, type IsoDate } from "@/lib/dates"
-import { paginate, parseMovementQuery } from "@/lib/movement-query"
+import { hayFiltrosActivos, paginate, parseMovementQuery } from "@/lib/movement-query"
 import { BASE_PATHS } from "@/lib/movement-routes"
 import { getMovementStatus } from "@/lib/movement-status"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
@@ -90,13 +90,6 @@ export async function MovementScreen({ kind, searchParams }: Props) {
 
   const { items, page, totalPages } = paginate(filtered, query.page)
 
-  const hayFiltros =
-    query.search !== "" ||
-    query.categoryId !== "all" ||
-    query.status !== "all" ||
-    query.from !== "" ||
-    query.to !== ""
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
@@ -131,7 +124,9 @@ export async function MovementScreen({ kind, searchParams }: Props) {
         categories={allCategories}
         today={today}
         emptyMessage={
-          hayFiltros ? "Ningún movimiento entra en el filtro." : "Todavía no cargaste nada acá."
+          hayFiltrosActivos(query)
+            ? "Ningún movimiento entra en el filtro."
+            : "Todavía no cargaste nada acá."
         }
       />
 

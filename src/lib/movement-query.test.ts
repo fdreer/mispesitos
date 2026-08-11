@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import { PAGE_SIZE, buildMovementHref, paginate, parseMovementQuery } from "@/lib/movement-query"
+import {
+  PAGE_SIZE,
+  buildMovementHref,
+  hayFiltrosActivos,
+  paginate,
+  parseMovementQuery,
+} from "@/lib/movement-query"
 
 describe("parseMovementQuery", () => {
   it("una URL pelada da todos los filtros vacíos y la página 1", () => {
@@ -85,6 +91,24 @@ describe("paginate", () => {
     // Pasa siempre: se filtra estando en la página 7 y el resultado tiene 2.
     expect(paginate(items, 99)).toMatchObject({ page: 3 })
     expect(paginate(items, 99).items).toEqual(items.slice(40, 45))
+  })
+})
+
+describe("hayFiltrosActivos", () => {
+  it("una query pelada no tiene filtros activos", () => {
+    expect(hayFiltrosActivos(parseMovementQuery({}))).toBe(false)
+  })
+
+  it("cualquiera de los cinco campos alcanza para contar como filtro activo", () => {
+    expect(hayFiltrosActivos(parseMovementQuery({ search: "kiosco" }))).toBe(true)
+    expect(hayFiltrosActivos(parseMovementQuery({ categoryId: "cat-1" }))).toBe(true)
+    expect(hayFiltrosActivos(parseMovementQuery({ status: "paid" }))).toBe(true)
+    expect(hayFiltrosActivos(parseMovementQuery({ from: "2026-01-01" }))).toBe(true)
+    expect(hayFiltrosActivos(parseMovementQuery({ to: "2026-12-31" }))).toBe(true)
+  })
+
+  it("la página sola no cuenta como filtro activo", () => {
+    expect(hayFiltrosActivos(parseMovementQuery({ page: "3" }))).toBe(false)
   })
 })
 

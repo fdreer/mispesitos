@@ -14,19 +14,47 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { buildMovementHref, type MovementQuery } from "@/lib/movement-query"
+import {
+  SEARCH_MAX,
+  STATUS_VALUES,
+  buildMovementHref,
+  hayFiltrosActivos,
+  parseMovementQuery,
+  type MovementQuery,
+} from "@/lib/movement-query"
 import type { MovementStatus } from "@/lib/movement-status"
 import type { Category } from "@/server/queries"
 
+/** Las etiquetas quedan acá; el conjunto de valores viene de STATUS_VALUES
+ * (movement-query.ts) para que el desplegable no pueda ofrecer un estado que
+ * el parser no entiende — ver finding 4 de la auditoría. */
+const STATUS_LABELS: Record<MovementStatus, string> = {
+  pending: "Pendiente",
+  paid: "Pagado",
+  overdue: "Vencido",
+}
+
 const STATUS_OPTIONS: { value: MovementStatus | "all"; label: string }[] = [
   { value: "all", label: "Todos" },
-  { value: "pending", label: "Pendiente" },
-  { value: "paid", label: "Pagado" },
-  { value: "overdue", label: "Vencido" },
+  ...STATUS_VALUES.map((value) => ({ value, label: STATUS_LABELS[value] })),
 ]
 
 /** Cuánto se espera a que la persona deje de tipear antes de navegar. */
 const DEBOUNCE_MS = 400
+
+/**
+ * Reconstruye la query que representa un href ya armado por
+ * `buildMovementHref`. Se usa para actualizar `queryRef` después de cada
+ * `push`: en vez de reimplementar acá dónde vive cada default o cuándo se
+ * resetea la página (reglas que ya son de `buildMovementHref`), se las pide
+ * de vuelta a `parseMovementQuery` sobre el mismo string que se está por
+ * empujar — así el href que se navega y la query que queda guardada nunca
+ * pueden desalinearse entre sí.
+ */
+function hrefToQuery(href: string): MovementQuery {
+  const qs = href.split("?")[1] ?? ""
+  return parseMovementQuery(Object.fromEntries(new URLSearchParams(qs)))
+}
 
 type Props = {
   /** Ruta de la pantalla actual ("/ingresos" o "/egresos"), sin query. */
@@ -56,16 +84,27 @@ export function MovementFilters({ basePath, query, categories }: Props) {
   // cancelarlo o reprogramarlo entre renders sin disparar uno nuevo (un
   // estado sí lo haría).
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  // Se actualiza después de cada render (React no deja escribir un ref
-  // DURANTE el render) para que cuando el timeout de más abajo dispare
-  // —potencialmente varios renders después de haberse armado— lea el `query`
-  // vigente en ESE momento, no el que estaba cerrado cuando se programó. Este
-  // efecto no programa nada ni navega: sólo deja una copia al día, así que no
-  // reabre la carrera que se elimina más abajo.
+  // Guarda la ÚLTIMA query que efectivamente se empujó con `push`, no la que
+  // llegó por props: la prop se queda mostrando el valor viejo hasta que el
+  // viaje al servidor commitea, así que si `go()` o el debounce armaran el
+  // próximo href desde la prop, un segundo cambio de filtro disparado antes
+  // de ese commit pisaría al primero en vez de sumarse (finding 1 de la
+  // auditoría). `go()`, `handleSearchChange()` y `limpiar()` la actualizan
+  // cada vez que empujan.
+  //
+  // El efecto de acá abajo la vuelve a poner en sync con la prop, pero sólo
+  // cuando la prop CAMBIA (dependencia `[query]`, no "después de cada
+  // render"): así vuelve a reflejar la realidad en cuanto el server manda
+  // props frescas, sea por el commit de una navegación propia, el botón
+  // Atrás o un link externo (el `?status=` del dashboard). Si en cambio
+  // corriera en cada render, el propio cambio de `pending` que dispara
+  // `useTransition` —que pasa ANTES de que la navegación commitee y con la
+  // prop todavía vieja— pisaría el valor recién empujado con esa prop vieja,
+  // reabriendo el mismo bug.
   const queryRef = useRef(query)
   useEffect(() => {
     queryRef.current = query
-  })
+  }, [query])
   // El timeout del debounce es un setTimeout de JS puro: React no sabe que
   // existe, así que si el componente se desmonta antes de que dispare, nadie
   // lo cancela y termina navegando desde una pantalla que ya no está.
@@ -90,8 +129,13 @@ export function MovementFilters({ basePath, query, categories }: Props) {
     // timeouts y navegan dos veces.
     clearTimeout(searchTimeout.current)
     searchTimeout.current = setTimeout(() => {
+      const href = buildMovementHref(basePath, queryRef.current, { search: value })
+      // Se guarda ANTES del push (no importa el orden real, pero así queda
+      // junto a la construcción del mismo href): ver el comentario de
+      // `queryRef` más arriba.
+      queryRef.current = hrefToQuery(href)
       startTransition(() => {
-        push(buildMovementHref(basePath, queryRef.current, { search: value }))
+        push(href)
       })
     }, DEBOUNCE_MS)
   }
@@ -101,8 +145,12 @@ export function MovementFilters({ basePath, query, categories }: Props) {
     // puede disparar después de este push y agregar `search` a una URL que
     // la persona ya cambió con otro filtro, pisándolo.
     clearTimeout(searchTimeout.current)
+    // Parte de `queryRef.current`, no de la prop `query`: ver el comentario
+    // de `queryRef` más arriba (finding 1 de la auditoría).
+    const href = buildMovementHref(basePath, queryRef.current, patch)
+    queryRef.current = hrefToQuery(href)
     startTransition(() => {
-      push(buildMovementHref(basePath, query, patch))
+      push(href)
     })
   }
 
@@ -111,17 +159,14 @@ export function MovementFilters({ basePath, query, categories }: Props) {
     // después y resucitar los filtros viejos que "Limpiar" acaba de borrar.
     clearTimeout(searchTimeout.current)
     setSearch("")
+    // También hay que dejarla en sync acá: si no, un filtro elegido justo
+    // después de "Limpiar" (todavía sin commitear) compondría sobre los
+    // filtros que se acaban de borrar en vez de partir de cero.
+    queryRef.current = hrefToQuery(basePath)
     startTransition(() => {
       push(basePath)
     })
   }
-
-  const hayFiltros =
-    query.search !== "" ||
-    query.categoryId !== "all" ||
-    query.status !== "all" ||
-    query.from !== "" ||
-    query.to !== ""
 
   return (
     // Los Select muestran el valor viejo hasta que llegan las props nuevas del
@@ -133,20 +178,20 @@ export function MovementFilters({ basePath, query, categories }: Props) {
       aria-busy={pending}
     >
       <div className="min-w-56 flex-1 space-y-1">
-        <Label htmlFor="search">Buscar</Label>
+        <Label htmlFor="filtro-buscar">Buscar</Label>
         <Input
-          id="search"
+          id="filtro-buscar"
           value={search}
           onChange={(e) => handleSearchChange(e.target.value)}
           placeholder="Descripción"
-          maxLength={200}
+          maxLength={SEARCH_MAX}
         />
       </div>
 
       <div className="min-w-40 space-y-1">
-        <Label htmlFor="categoryId">Categoría</Label>
+        <Label htmlFor="filtro-categoria">Categoría</Label>
         <Select value={query.categoryId} onValueChange={(v) => go({ categoryId: v })}>
-          <SelectTrigger id="categoryId" className="w-full">
+          <SelectTrigger id="filtro-categoria" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -161,12 +206,12 @@ export function MovementFilters({ basePath, query, categories }: Props) {
       </div>
 
       <div className="min-w-36 space-y-1">
-        <Label htmlFor="status">Estado</Label>
+        <Label htmlFor="filtro-estado">Estado</Label>
         <Select
           value={query.status}
           onValueChange={(v) => go({ status: v as MovementStatus | "all" })}
         >
-          <SelectTrigger id="status" className="w-full">
+          <SelectTrigger id="filtro-estado" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -180,16 +225,26 @@ export function MovementFilters({ basePath, query, categories }: Props) {
       </div>
 
       <div className="space-y-1">
-        <Label htmlFor="from">Desde</Label>
-        <Input id="from" type="date" value={query.from} onChange={(e) => go({ from: e.target.value })} />
+        <Label htmlFor="filtro-desde">Desde</Label>
+        <Input
+          id="filtro-desde"
+          type="date"
+          value={query.from}
+          onChange={(e) => go({ from: e.target.value })}
+        />
       </div>
 
       <div className="space-y-1">
-        <Label htmlFor="to">Hasta</Label>
-        <Input id="to" type="date" value={query.to} onChange={(e) => go({ to: e.target.value })} />
+        <Label htmlFor="filtro-hasta">Hasta</Label>
+        <Input
+          id="filtro-hasta"
+          type="date"
+          value={query.to}
+          onChange={(e) => go({ to: e.target.value })}
+        />
       </div>
 
-      {hayFiltros && (
+      {hayFiltrosActivos(query) && (
         <Button type="button" variant="ghost" onClick={limpiar}>
           Limpiar
         </Button>

@@ -4,10 +4,17 @@ import type { MovementStatus } from "@/lib/movement-status"
 /** Filas por página en las listas de ingresos y egresos. */
 export const PAGE_SIZE = 20
 
-const STATUS_VALUES: MovementStatus[] = ["pending", "paid", "overdue"]
+/**
+ * Exportada porque el desplegable de estado (`movement-filters.tsx`) arma sus
+ * opciones a partir de esta misma lista: si sólo viviera acá adentro, agregar
+ * un estado nuevo sin tocar el dropdown lo dejaría aparecer, elegible, y
+ * parseando de vuelta a "all" — la lista de abajo y el desplegable son la
+ * misma fuente.
+ */
+export const STATUS_VALUES: MovementStatus[] = ["pending", "paid", "overdue"]
 
 /** El mismo tope que `movementSchema` le pone a la descripción. */
-const SEARCH_MAX = 200
+export const SEARCH_MAX = 200
 
 export type MovementQuery = {
   /** Texto libre contra la descripción. "" = sin filtro. */
@@ -48,6 +55,23 @@ export function parseMovementQuery(raw: RawParams): MovementQuery {
     to: isValidIsoDate(to) ? to : "",
     page: Number.isInteger(page) && page > 0 ? page : 1,
   }
+}
+
+/**
+ * Si hay algún filtro puesto (la página no cuenta). `movement-screen.tsx`
+ * la usa para elegir el mensaje de lista vacía y `movement-filters.tsx` para
+ * decidir si ofrece "Limpiar" — antes cada uno la recalculaba por su cuenta
+ * con la misma lista de cinco campos, y agregar un filtro nuevo era editarla
+ * en los dos lugares sin que ninguno avisara si te olvidabas de uno.
+ */
+export function hayFiltrosActivos(query: MovementQuery): boolean {
+  return (
+    query.search !== "" ||
+    query.categoryId !== "all" ||
+    query.status !== "all" ||
+    query.from !== "" ||
+    query.to !== ""
+  )
 }
 
 export type Page<T> = {
