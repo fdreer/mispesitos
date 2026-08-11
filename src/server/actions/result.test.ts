@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { failure, idle, success } from "@/server/actions/result"
+import { failure, success } from "@/server/actions/result"
 
 /**
  * El tipo de resultado común de todas las Server Actions. No pega contra la
@@ -34,11 +34,5 @@ describe("ActionResult", () => {
       message: "Revisá los datos.",
       fieldErrors: errores,
     })
-  })
-
-  it("el estado inicial es null, que no es ni éxito ni rechazo", () => {
-    // `useActionState` arranca en `idle`. Si fuera `{ ok: true }`, cada
-    // formulario mostraría el cartel de guardado apenas se abre la pantalla.
-    expect(idle).toBeNull()
   })
 })

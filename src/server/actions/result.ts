@@ -8,5 +8,3 @@ export const failure = (
   message: string,
   fieldErrors?: Record<string, string[]>,
 ): ActionResult => ({ ok: false, message, fieldErrors })
-
-export const idle: ActionResult | null = null
