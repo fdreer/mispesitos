@@ -9,6 +9,7 @@ import { category, installment, movement, userSettings } from "@/db/schema"
 import {
   assertExchangeDirection,
   assertInstallmentMovementKind,
+  assertPaidDate,
 } from "@/lib/movement-asserts"
 import { buildUsdPositionEvents, type PositionEvent } from "@/lib/position"
 
@@ -108,8 +109,8 @@ export async function listMovements(
 
 /** Todas las cuotas pagadas, para el cálculo de saldo. */
 export async function listPaidInstallments(userId: string) {
-  return withUser(userId, (tx) =>
-    tx
+  return withUser(userId, async (tx) => {
+    const rows = await tx
       .select({
         paidDate: installment.paidDate,
         amountCents: installment.amountCents,
@@ -120,8 +121,12 @@ export async function listPaidInstallments(userId: string) {
       })
       .from(installment)
       .innerJoin(movement, eq(installment.movementId, movement.id))
-      .where(and(eq(installment.userId, userId), eq(installment.paid, true))),
-  )
+      .where(and(eq(installment.userId, userId), eq(installment.paid, true)))
+
+    // El filtro `paid = true` ya está arriba: acá es donde vive el saber que
+    // convierte `paidDate` de `string | null` a `IsoDate`.
+    return rows.map((r) => ({ ...r, paidDate: assertPaidDate(r.paidDate) }))
+  })
 }
 
 /** Todas las cuotas pendientes, para deudas, cobros y proyección. */

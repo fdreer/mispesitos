@@ -18,6 +18,7 @@
  * sola definición, un solo comportamiento ante la misma fila mala.
  */
 
+import type { IsoDate } from "@/lib/dates"
 import type { Currency } from "@/lib/money"
 
 /**
@@ -56,4 +57,22 @@ export function assertInstallmentMovementKind(kind: string): "income" | "expense
   throw new Error(
     `Movimiento con cuotas y kind inesperado (se esperaba income o expense): ${JSON.stringify(kind)}`,
   )
+}
+
+/**
+ * `installment.paid_date` es `string | null` en el tipo de Drizzle porque la
+ * columna es nullable: una cuota impaga no tiene fecha de pago. Pero
+ * `listPaidInstallments` (@/server/queries) ya filtró `paid = true`, y con
+ * `paid = true` la CHECK `installment_paid_date_required_when_paid`
+ * (migración 0009) exige `paid_date` no nulo.
+ *
+ * Con un `as`, una fila que rompiera esa garantía se colaría sin ruido: la
+ * cuota se caería en silencio de la tarjeta que arma con estas fechas,
+ * mientras el saldo la sigue contando igual. Un null acá no es un dato
+ * faltante más, es la CHECK dejando de sostenerse — mejor que reviente fuerte
+ * y visible.
+ */
+export function assertPaidDate(paidDate: string | null): IsoDate {
+  if (paidDate !== null) return paidDate
+  throw new Error(`Cuota pagada sin paidDate: ${JSON.stringify(paidDate)}`)
 }
