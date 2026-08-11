@@ -242,3 +242,115 @@ agregue tiene que seguirla también.
 
 Es inherente a la estética de Linear, no un error del rediseño: Linear misma vive
 con esos contrastes.
+
+---
+
+## 6. La corrección de la auditoría (2026-08-11)
+
+Las doce tareas del plan `docs/superpowers/plans/2026-08-10-auditoria-v1.md`
+están hechas y revisadas, más una revisión final sobre los 22 commits de la rama.
+Lo que sigue es lo que quedó afuera.
+
+### 6.1 Lo que el plan no toca porque es una decisión de negocio
+
+Ya está en la sección 1 de este documento y sigue abierto: caja vs. devengado en
+el dashboard (1.1), desarchivar categorías (1.2), el mensaje de error de
+`saveSettings` (1.3) y el favicon (1.4).
+
+### 6.2 La cobertura de componentes sigue siendo parcial
+
+Después de la tarea 1 hay tests de `MovementForm` y de nada más. `ExchangeForm`,
+`SettingsForm`, `CategoryManager` y `AuthForm` siguen sin una sola prueba.
+
+Duele más en dos lugares nuevos:
+
+- **`InstallmentRows` no tiene archivo de test.** Toda la lógica de concurrencia
+  que trajo la tarea 8 —el `Set` de cuotas en vuelo, el `finally` que libera una
+  fila cuando la promesa se rechaza— no tiene ninguna cobertura automática. Se
+  leyó y es correcta, pero una regresión sólo aparece a mano. Testearla necesita
+  un doble de la Server Action que se pueda resolver a voluntad y timers falsos:
+  es una tarea propia, no un ajuste.
+- **El camino de los cambios de divisa en `buildDashboardView` nunca se
+  ejercita.** Los tests pasan `exchanges: []` en todos los casos, así que
+  `assertExchangeDirection` y la conversión `Number(e.rate)` de ese brazo no
+  tienen nada que los fije. Es el único tramo del borde de la plata en ese
+  archivo sin red.
+- **`assertPaidDate` no tiene test propio**, a diferencia de sus tres hermanos.
+  Su `throw` es todo el punto de la función y es la única parte sin cubrir de
+  `movement-asserts.ts`.
+
+La infraestructura ya está puesta, así que agregarlos es escribir el test y nada
+más.
+
+### 6.3 Sin verificación por imagen
+
+Todo lo visual de este plan se verificó a ojo en el navegador, no con capturas
+comparadas.
+
+### 6.4 Los hallazgos de la revisión final que se decidió no arreglar
+
+Ninguno toca plata mal calculada, aislamiento entre usuarios ni un crash. Se
+dejan anotados con su escenario, para que el próximo que los encuentre no tenga
+que volver a razonarlos.
+
+- **`/ajustes`: el "Guardado." sobrevive al cambio siguiente.** El `state` de
+  `useActionState` vive hasta el próximo submit. Guardás, después editás
+  "¿Cuántos pesos tenés hoy?", y el cartel verde sigue en pantalla al lado de un
+  campo sin guardar. En una app de finanzas es la señal equivocada sobre el campo
+  equivocado. El arreglo tiene la forma del `handledState` que ya usa
+  `MovementForm`: una marca de "sucio" que apague el mensaje ante cualquier
+  cambio.
+- **Un cambio de divisa anterior al saldo inicial ahora es invisible y no se
+  puede borrar.** La tarea 6 le puso piso de fecha a la lista de `/cambios` para
+  que coincida con sus tarjetas, y eso está bien. Pero los cambios no aparecen ni
+  en `/ingresos` ni en `/egresos`, y `/cambios` no tiene botón de borrar: una
+  operación cargada con la fecha mal tipeada antes desaparecía de las cuentas y
+  al menos se veía; ahora no se ve en ningún lado y queda una fila en `movement`
+  que va a reaparecer en todos los saldos el día que se mueva la fecha del saldo
+  inicial. Salidas posibles: avisar en la pantalla cuántas operaciones quedaron
+  por debajo del piso, o darle a esa lista el botón de borrar que ya tienen las
+  otras.
+- **No hay `global-error.tsx`.** El `error.tsx` que trajo la tarea 1 cubre las
+  páginas del grupo `(app)` pero no el layout de su propio segmento. Un fallo de
+  base adentro de `requireSettings()` —justo la llamada que la tarea 3
+  memoizó— sigue dando el "Application error" pelado de Next. El arreglo es un
+  `src/app/global-error.tsx` con el mismo cuerpo.
+- **El `console.error` de `error.tsx` corre en el cuerpo del render**, o sea en
+  cada re-render y dos veces bajo StrictMode en desarrollo. Va en un `useEffect`
+  con `[error]`.
+- **`logDbError` es una garantía sólo de las Server Actions.** Ninguna función de
+  `src/server/queries.ts` tiene `try`/`catch`, así que un fallo de Drizzle
+  durante el render lo loguea Next en crudo, con su `Failed query: … params: …`.
+  Ahí los parámetros son ids de usuario y fechas, no valores de filas —los INSERT
+  donde los parámetros SÍ son la fila pasan todos por Server Actions y están
+  cubiertos—, pero el comentario del helper se lee como si la garantía fuera
+  global.
+- **El dashboard sigue pagando cuotas que descarta.** La tarea 4 dejó
+  `MovementRow` sin cuotas, pero la página sigue llamando `listMovements`, cuya
+  segunda consulta trae todas las cuotas de todos los movimientos de la ventana
+  para que el mapeo de la página las tire. Con 200 movimientos en doce meses a
+  doce cuotas son ~2400 filas traídas y serializadas por carga. Sigue siendo
+  mucho mejor que traer toda la historia: es una optimización que quedó a mitad
+  de camino, no una regresión.
+- **`/cambios` lee `user_settings` dos veces.** `listUsdPositionEvents` abre su
+  propia transacción y vuelve a seleccionar la fila del usuario, así que el
+  `cache()` de la tarea 3 dedupeó sólo la mitad. El comentario de `getSettings`
+  afirma ser "la única consulta de la app que se repite tal cual dentro del mismo
+  request", y eso ya no es exacto.
+- **`listUsdPositionEvents` conserva un `i.date!`** sobre el mismo invariante que
+  `assertPaidDate` centralizó. Hoy es seguro sólo de casualidad: su filtro
+  `gte(installment.paidDate, …)` no puede matchear un nulo. El día que ese filtro
+  se mueva o se relaje, el `!` produce `undefined` en un `PositionEvent.date` y
+  el orden de `usdPosition` empieza a reventar en vez de que falle el assert.
+- **`installmentInput.amountCents` sigue admitiendo cero.** La cota `> 0` de la
+  tarea 11 quedó sobre el importe total del movimiento. No se encontró ningún
+  escenario que produzca plata mal: `installmentsSumMatches` obliga a que las
+  partes sumen un total que ahora es mayor a cero, así que lo peor que sale es
+  una fila de 0 centavos en un plan de 120 cuotas para un movimiento de un peso.
+- **Los tipos exportados de `dashboard-view.ts` están de más, salvo uno.** De los
+  siete, sólo `DashboardInput` lo importa alguien fuera del módulo. `UpcomingItem`
+  además está redeclarado campo por campo como `Item` en `upcoming.tsx`, su único
+  consumidor: dos definiciones de una misma forma que el compilador no va a
+  mantener sincronizadas.
+- **La medición de cobertura de la sección 3.4 es una foto.** Los números son
+  exactos hoy y van a estar viejos apenas se agregue un test.
