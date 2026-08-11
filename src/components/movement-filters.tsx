@@ -2,10 +2,15 @@
 
 import { useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import { CalendarIcon } from "lucide-react"
+import { es } from "date-fns/locale"
+import type { DateRange } from "react-day-picker"
 
 import { Button } from "@/components/ui/button"
+import { Calendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -13,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { dateToIso, isoToDate } from "@/lib/dates"
 import { cn } from "@/lib/utils"
 import {
   SEARCH_MAX,
@@ -41,6 +47,74 @@ const STATUS_OPTIONS: { value: MovementStatus | "all"; label: string }[] = [
 
 /** Cuánto se espera a que la persona deje de tipear antes de navegar. */
 const DEBOUNCE_MS = 400
+
+/**
+ * Bordes de navegación del calendario, en años redondos para que el
+ * desplegable de año quede prolijo. SIN esto, `captionLayout="dropdown"`
+ * hace que react-day-picker 10 (`getNavMonth`) calcule sus propios bordes
+ * y el techo queda en el 31 de diciembre de ESTE año: la flecha "mes
+ * siguiente" se deshabilita ahí, el desplegable de año no ofrece ningún año
+ * futuro, y `defaultMonth` se clampea de vuelta a ese techo aunque pida un
+ * mes más adelante — un `?from=` de marzo del año que viene abriría en
+ * diciembre de este año con la selección fuera de pantalla. Esta app SÍ
+ * necesita ese margen hacia adelante: `addMonthsClamped` en
+ * `installments.ts` agenda cuotas hasta `MAX_INSTALLMENTS = 120` meses
+ * (diez años) desde la primera fecha de vencimiento, así que sin este borde
+ * hay movimientos reales que ningún filtro de fecha puede alcanzar. No
+ * simplificar sacando estos bordes: sin ellos el tope silencioso vuelve.
+ */
+const CALENDAR_YEARS_MARGIN = 10
+const CALENDAR_START_MONTH = new Date(new Date().getFullYear() - CALENDAR_YEARS_MARGIN, 0, 1)
+const CALENDAR_END_MONTH = new Date(new Date().getFullYear() + CALENDAR_YEARS_MARGIN, 11, 1)
+
+/**
+ * "YYYY-MM-DD" -> "DD/MM/YYYY" para mostrar en el botón del picker. Es sólo
+ * reordenar texto, no pasa por `Date` en ningún momento: no hay zona horaria
+ * de la que cuidarse acá.
+ */
+function formatIsoForDisplay(iso: string): string {
+  const [year, month, day] = iso.split("-")
+  return `${day}/${month}/${year}`
+}
+
+/**
+ * Texto del botón que dispara el calendario. Cubre los cuatro casos que
+ * `MovementQuery` permite: sin rango, sólo piso, sólo techo, o los dos. Del
+ * calendario en sí sólo salen tres (sin rango, sólo piso — un solo click,
+ * ver `handleCalendarSelect` — y los dos lados); "sólo techo" es alcanzable
+ * nada más escribiendo la URL a mano o desde un link externo (el `?status=`
+ * del dashboard sigue el mismo patrón), así que el botón tiene que poder
+ * mostrarlo igual.
+ */
+function rangoLabel(from: string, to: string): string {
+  if (from && to) return `${formatIsoForDisplay(from)} – ${formatIsoForDisplay(to)}`
+  if (from) return `Desde ${formatIsoForDisplay(from)}`
+  if (to) return `Hasta ${formatIsoForDisplay(to)}`
+  return "Elegir un período"
+}
+
+/**
+ * `query.from`/`query.to` (los dos ISO) al `DateRange` que espera
+ * `react-day-picker`. Se usa SÓLO para sembrar el borrador al abrir el
+ * popover (ver `draft` más abajo) — el calendario en sí ya no lee `query`
+ * directo mientras está abierto.
+ */
+function rangeFromQuery(query: Pick<MovementQuery, "from" | "to">): DateRange | undefined {
+  return query.from || query.to
+    ? {
+        from: query.from ? isoToDate(query.from) : undefined,
+        to: query.to ? isoToDate(query.to) : undefined,
+      }
+    : undefined
+}
+
+/** El camino inverso: de un `DateRange` (o nada) al patch que espera `go()`. */
+function rangeToPatch(range: DateRange | undefined): Pick<MovementQuery, "from" | "to"> {
+  return {
+    from: range?.from ? dateToIso(range.from) : "",
+    to: range?.to ? dateToIso(range.to) : "",
+  }
+}
 
 /**
  * Reconstruye la query que representa un href ya armado por
@@ -80,6 +154,23 @@ export function MovementFilters({ basePath, query, categories }: Props) {
   const { push } = useRouter()
   const [search, setSearch] = useState(query.search)
   const [pending, startTransition] = useTransition()
+  // Rango en BORRADOR mientras el popover del período está abierto. Esto NO
+  // es un espejo del filtro comprometido (lo que la arquitectura prohíbe):
+  // `query.from`/`query.to` siguen siendo la única fuente para el texto del
+  // botón disparador y para todo lo demás de la barra. `draft` vive y muere
+  // con una sola apertura del popover — se siembra desde `query` al abrir
+  // (`handlePeriodoOpenChange`) y se descarta al cerrar, aplicado o no. Sin
+  // esto, cada click en un día navegaba solo: `selected` salía de `query`,
+  // que queda vieja durante toda la transición, así que un segundo click
+  // antes de que el primero commitee no veía el primer día puesto y perdía
+  // el rango a medias (hallazgo A de la auditoría).
+  const [draft, setDraft] = useState<DateRange | undefined>(undefined)
+  // Sólo existe para que el efecto de acá abajo sepa si tiene que resembrar
+  // `draft` cuando cambia `query` (ver ese comentario): Radix es dueño de su
+  // propio estado de apertura y sólo nos avisa por `onOpenChange`, así que
+  // sin esto el componente no tiene forma de saber "¿el popover sigue
+  // abierto ahora?" fuera de ese callback.
+  const [periodoAbierto, setPeriodoAbierto] = useState(false)
   // Vive en un ref: `go()`, `limpiar()` y el propio debounce necesitan poder
   // cancelarlo o reprogramarlo entre renders sin disparar uno nuevo (un
   // estado sí lo haría).
@@ -102,9 +193,39 @@ export function MovementFilters({ basePath, query, categories }: Props) {
   // prop todavía vieja— pisaría el valor recién empujado con esa prop vieja,
   // reabriendo el mismo bug.
   const queryRef = useRef(query)
+  // Además de la sync de arriba, este efecto resiembra `draft` cuando `query`
+  // cambia CON EL POPOVER TODAVÍA ABIERTO. Sin esto, Atrás/Adelante del
+  // navegador puede deshacerse solo: Radix no cierra el popover por una
+  // navegación de historial (no es él quien la escucha), así que `draft` se
+  // queda con la selección de ANTES de volver; al cerrar, la comparación de
+  // `handlePeriodoOpenChange` la ve distinta de la `query` ya vuelta atrás y
+  // la reaplica con `go()`, pisando el Atrás que la persona acaba de pedir.
+  //
+  // La comparación es por VALOR de `from`/`to` contra `queryRef.current`, NO
+  // por referencia del objeto `query` entero: eso es lo que distingue un
+  // cambio externo (Atrás, Adelante, un link) de uno que este mismo
+  // componente originó (`go()`, `limpiar()`, el debounce del buscador). Esos
+  // tres actualizan `queryRef.current` SINCRÓNICAMENTE al valor que están por
+  // confirmar, antes de que el `push` real commitee — así que para cuando la
+  // prop `query` efectivamente llega, ya coincide EN VALOR con
+  // `queryRef.current` (aunque sea un objeto `MovementQuery` nuevo, con otra
+  // referencia: `hrefToQuery` arma uno de cero en cada llamada). Eso es clave
+  // para no pisar una selección en curso: después de clickear "Borrar rango"
+  // (que navega con el popover todavía abierto, ver más abajo), la persona
+  // puede arrancar un rango nuevo mientras ese primer push todavía viaja: la
+  // llegada tardía de la `query` ya vacía coincide EN VALOR con lo que
+  // `queryRef.current` ya tenía anotado desde el click, así que no se
+  // considera "externa" y el rango nuevo que se está armando no se resiembra
+  // por encima.
   useEffect(() => {
+    if (
+      periodoAbierto &&
+      (query.from !== queryRef.current.from || query.to !== queryRef.current.to)
+    ) {
+      setDraft(rangeFromQuery(query))
+    }
     queryRef.current = query
-  }, [query])
+  }, [query, periodoAbierto])
   // El timeout del debounce es un setTimeout de JS puro: React no sabe que
   // existe, así que si el componente se desmonta antes de que dispare, nadie
   // lo cancela y termina navegando desde una pantalla que ya no está.
@@ -154,6 +275,82 @@ export function MovementFilters({ basePath, query, categories }: Props) {
     startTransition(() => {
       push(href)
     })
+  }
+
+  // Cada click en un día actualiza SÓLO el borrador, nunca navega (hallazgo
+  // A). `react-day-picker` en modo rango, sin restricciones extra (`min`,
+  // etc.), da un rango completo desde el primer click: `{from: día, to:
+  // día}`, no el `{from, to: undefined}` progresivo que uno esperaría de un
+  // picker de dos pasos (se verificó con un test descartable montando el
+  // propio `Calendar` — no es un supuesto). Eso deja ambiguo qué quiso decir
+  // un solo click: ¿"quiero sólo este día" o "quiero arrancar un rango
+  // abierto"? Se resuelve a favor de lo segundo — un click sólo dejó
+  // `from` puesto, sin `to` — porque es lo que hace falta para no perder la
+  // capacidad de "desde tal fecha, sin techo" que los dos `<input
+  // type="date">` anteriores tenían gratis (si el primer click completara
+  // el rango solo, esa capacidad quedaría inalcanzable desde el mouse).
+  //
+  // Repetir el click sobre el MISMO día confirma ese día como rango
+  // COMPLETO de un solo día (`from` y `to` iguales): es la propia rama
+  // `from && !to` + `isSameDay` de `addToRange` (la función interna de
+  // react-day-picker) la que arma ese resultado en cuanto `draft` ya trae
+  // `from` puesto, así que no hace falta reimplementar nada para ese paso —
+  // sólo evitar que el PRIMER click ya lo complete solo. Un tercer click
+  // sobre el mismo día limpia el borrador entero (misma rama de la
+  // librería, con el rango ya completo). Se documenta la secuencia acá
+  // porque no es obvia leyendo sólo el código de abajo.
+  //
+  // `draft` con sólo `to` puesto (alcanzable escribiendo la URL a mano, no
+  // desde el calendario) es la otra mitad del mismo problema: `addToRange`
+  // no tiene ninguna rama para esa forma y devuelve `undefined` sin tocar
+  // el día clickeado, borrando el filtro en el próximo click sin que la
+  // persona lo haya pedido (tercer bug de este hallazgo). Por eso acá abajo
+  // no se confía en el `range` que computó la librería para decidir si hay
+  // que "arrancar de cero": se usa `triggerDate` (el día clickeado, que
+  // react-day-picker manda siempre aparte de `range`) tanto para el primer
+  // click de un borrador vacío como para cualquier click sobre un borrador
+  // roto de sólo `to`. Ninguno de los dos casos pierde el click.
+  function handleCalendarSelect(range: DateRange | undefined, triggerDate: Date) {
+    if (!draft?.from) {
+      setDraft({ from: triggerDate, to: undefined })
+      return
+    }
+    setDraft(range)
+  }
+
+  /**
+   * Abrir/cerrar el popover del período. Radix manda ACÁ los tres caminos de
+   * cierre (Escape, click afuera, o el propio trigger de nuevo — los tres
+   * llaman a `context.onOpenChange(false)` adentro de Radix, se verificó
+   * leyendo `@radix-ui/react-popover`), así que un solo callback alcanza
+   * para aplicar el borrador sin importar cómo se cerró.
+   */
+  function handlePeriodoOpenChange(open: boolean) {
+    setPeriodoAbierto(open)
+    if (open) {
+      // Única vez que el borrador copia algo de afuera: se siembra desde el
+      // filtro YA aplicado (`query`, igual que el resto de los controles de
+      // esta barra — ver el comentario de `draft` más arriba). De acá en
+      // más vive solo hasta que este mismo popover se cierre.
+      setDraft(rangeFromQuery(query))
+      return
+    }
+    const patch = rangeToPatch(draft)
+    // El borrador vive y muere con esta apertura (ver el comentario de
+    // `draft`): se descarta ACÁ, se haya aplicado o no, para que la próxima
+    // apertura nunca herede nada de ésta.
+    setDraft(undefined)
+    // Contra `queryRef.current`, no contra la prop `query`: la prop se queda
+    // vieja hasta que el viaje al servidor commitea (mismo motivo que en
+    // `go()`, ver el comentario de `queryRef`). Comparar contra la prop
+    // dejaba una ventana: clickear "Borrar rango" (que ya navegó y actualizó
+    // `queryRef.current`, ver más abajo) y cerrar el popover ANTES de que
+    // ese push commitee comparaba contra una `query` que todavía mostraba el
+    // rango viejo, así que disparaba un segundo push idéntico — inocuo en el
+    // resultado final, pero una entrada de historial de más y un viaje de
+    // más que nadie pidió.
+    if (patch.from === queryRef.current.from && patch.to === queryRef.current.to) return
+    go(patch)
   }
 
   function limpiar() {
@@ -228,23 +425,105 @@ export function MovementFilters({ basePath, query, categories }: Props) {
       </div>
 
       <div className="space-y-1">
-        <Label htmlFor="filtro-desde">Desde</Label>
-        <Input
-          id="filtro-desde"
-          type="date"
-          value={query.from}
-          onChange={(e) => go({ from: e.target.value })}
-        />
-      </div>
-
-      <div className="space-y-1">
-        <Label htmlFor="filtro-hasta">Hasta</Label>
-        <Input
-          id="filtro-hasta"
-          type="date"
-          value={query.to}
-          onChange={(e) => go({ to: e.target.value })}
-        />
+        {/* Id propio en el Label: hace falta como blanco de `aria-labelledby`
+            más abajo (hallazgo D). El `htmlFor` se deja como estaba, no
+            estorba — con `aria-labelledby` puesto en el botón, el accname
+            algorithm lo consulta a él primero y ni llega a mirar el `for`. */}
+        <Label id="filtro-periodo-label" htmlFor="filtro-periodo">
+          Período
+        </Label>
+        <Popover onOpenChange={handlePeriodoOpenChange}>
+          <PopoverTrigger asChild>
+            <Button
+              id="filtro-periodo"
+              type="button"
+              variant="outline"
+              // El <Label htmlFor> de arriba es una asociación válida, y ese
+              // es justo el problema (hallazgo D): el accname algorithm
+              // consulta el <label> primero y corta ahí — nunca llega a leer
+              // el contenido del botón, así que un lector de pantalla
+              // anunciaba "Período, botón" igual con el rango puesto que
+              // vacío. `aria-label` gana esa resolución ANTES que el `for` y
+              // reemplaza el nombre entero (se probó primero con
+              // `aria-labelledby` apuntando al propio botón para reusar su
+              // contenido visible sin duplicar el string, pero el cómputo de
+              // nombre accesible que usan los tests, al toparse con una
+              // auto-referencia, no cae al contenido — devuelve sólo el
+              // label; de ahí el string armado a mano): cambia solo cada vez
+              // que cambia `rangoLabel`, así que nunca puede quedar
+              // desincronizado del texto que se ve.
+              aria-label={`Período: ${rangoLabel(query.from, query.to)}`}
+              className={cn(
+                "w-full justify-start font-normal",
+                !query.from && !query.to && "text-muted-foreground",
+              )}
+            >
+              <CalendarIcon />
+              {rangoLabel(query.from, query.to)}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            // El wrapper de más arriba atenúa mientras `pending` está
+            // prendido, pero ese div no alcanza a este contenido: Radix lo
+            // porta a `document.body` (hallazgo C), fuera de ese subárbol.
+            // Bajo el modelo de borrador ya no hay carrera de datos al
+            // clickear (nada navega hasta que el popover cierra), pero SÍ
+            // sigue habiendo un caso real: reabrir este mismo popover
+            // mientras OTRO filtro todavía está en tránsito siembra el
+            // borrador desde `query.from`/`query.to` (a propósito, ver
+            // `handlePeriodoOpenChange`), que en ese momento puede seguir
+            // mostrando el valor viejo. Repetir la atenuación acá adentro
+            // es lo que avisa que ese valor recién sembrado podría no ser
+            // el definitivo, igual que ya pasa con los Select de esta
+            // barra.
+            className={cn("w-auto p-0 transition-opacity", pending && "opacity-60")}
+            aria-busy={pending}
+            // El primitivo de Radix pone `role="dialog"` sin nombre propio
+            // (hallazgo D, ítem menor); reusa la misma etiqueta del trigger
+            // en vez de inventar un string aparte.
+            aria-labelledby="filtro-periodo-label"
+            align="start"
+          >
+            <Calendar
+              mode="range"
+              locale={es}
+              captionLayout="dropdown"
+              startMonth={CALENDAR_START_MONTH}
+              endMonth={CALENDAR_END_MONTH}
+              // Sin esto el calendario siempre abre en el mes de "hoy" (no
+              // hay `forceMount`, así que se remonta en cada apertura) — con
+              // años de movimientos cargados, un filtro de marzo de 2025
+              // quedaba a 17 clicks de distancia (hallazgo B). Se deriva del
+              // borrador, no de `query`, porque es lo que el calendario va a
+              // mostrar seleccionado.
+              defaultMonth={draft?.from ?? draft?.to}
+              selected={draft}
+              onSelect={handleCalendarSelect}
+            />
+            {/* "Limpiar" ya borra todo el filtrado; esto es aparte porque
+                alguien puede querer sacar sólo el rango de fechas y dejar el
+                resto (buscador, categoría, estado) como está. A diferencia
+                de un click en un día, esto SÍ navega al toque: es una
+                acción explícita de "borrar ya", no un paso de armado de
+                rango, y tiene que poder usarse aunque el borrador todavía
+                no tenga nada aplicado (por eso mira `draft`, no `query`). */}
+            {(draft?.from || draft?.to) && (
+              <div className="flex justify-end border-t p-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setDraft(undefined)
+                    go(rangeToPatch(undefined))
+                  }}
+                >
+                  Borrar rango
+                </Button>
+              </div>
+            )}
+          </PopoverContent>
+        </Popover>
       </div>
 
       {hayFiltrosActivos(query) && (

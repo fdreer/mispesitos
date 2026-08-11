@@ -40,15 +40,37 @@ describe("MovementPagination", () => {
   })
 
   it("la página 1 no ofrece anterior y la última no ofrece siguiente", () => {
+    // `PaginationPrevious`/`PaginationNext` traen su propio `aria-label` (más
+    // descriptivo que el texto visible, que además se oculta en pantallas
+    // chicas), así que el nombre accesible real es ese, no "Anterior"/"Siguiente".
     montar(1, 3)
-    expect(screen.queryByRole("link", { name: "Anterior" })).toBeNull()
-    expect(screen.getByRole("link", { name: "Siguiente" })).toBeTruthy()
+    expect(screen.queryByRole("link", { name: "Ir a la página anterior" })).toBeNull()
+    expect(screen.getByRole("link", { name: "Ir a la página siguiente" })).toBeTruthy()
 
     cleanup()
 
     montar(3, 3)
-    expect(screen.getByRole("link", { name: "Anterior" })).toBeTruthy()
-    expect(screen.queryByRole("link", { name: "Siguiente" })).toBeNull()
+    expect(screen.getByRole("link", { name: "Ir a la página anterior" })).toBeTruthy()
+    expect(screen.queryByRole("link", { name: "Ir a la página siguiente" })).toBeNull()
+  })
+
+  // Hallazgo F de la auditoría de esta rama: el test de arriba ubica los
+  // links por `aria-label` (el nombre accesible), pero nada afirmaba nada
+  // sobre el texto VISIBLE (el prop `text` que `movement-pagination.tsx` le
+  // pasa a `PaginationPrevious`/`PaginationNext`). Borrar `text="Anterior"`/
+  // `text="Siguiente"` de ese archivo deja los botones mostrando en pantalla
+  // "Previous"/"Next" (el default en inglés del primitivo) sin que ningún
+  // test lo note, porque el `aria-label` en español sigue estando y por sí
+  // solo ya alcanza para que el test de arriba pase.
+  it("el texto visible en español sigue ahí, no sólo el aria-label (hallazgo F)", () => {
+    montar(2, 3)
+
+    expect(screen.getByRole("link", { name: "Ir a la página anterior" }).textContent).toContain(
+      "Anterior",
+    )
+    expect(screen.getByRole("link", { name: "Ir a la página siguiente" }).textContent).toContain(
+      "Siguiente",
+    )
   })
 
   it("la página 1 no lleva ?page= en el enlace", () => {
