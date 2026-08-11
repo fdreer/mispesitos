@@ -124,6 +124,36 @@ La cobertura se mide con `pnpm test:coverage` (`@vitest/coverage-v8`). El
 criterio sigue siendo el mismo —buscar el caso que rompe, no el porcentaje—,
 pero ahora se puede ver qué quedó sin tocar.
 
+**No hay esqueleto de carga, y no es un olvido: con este Next no se puede.** El
+plan de la auditoría pedía un `src/app/(app)/loading.tsx` genérico para que el
+dashboard no mostrara una pantalla vacía mientras hace sus idas a Supabase. Se
+escribió, se revisó y se commiteó, y recién al levantar la app se vio que deja
+**todas** las pantallas del grupo en blanco para siempre: se ve la nav y el
+esqueleto, y nada más.
+
+Lo que se comprobó, para que nadie tenga que volver a averiguarlo:
+
+- El servidor manda bien el HTML: llega entero, con las cuatro tarjetas adentro,
+  y no hay pantalla de error.
+- El contenido queda dentro de un elemento `[hidden]` que nunca se intercambia.
+  Los marcadores de Suspense figuran resueltos, `$RC` está definido y su script
+  corrió, React hidrata, y la consola no tira ni un error.
+- Sacando el archivo, el dashboard pinta completo.
+- Reproduce en `next dev` **y** en un build de producción (`next build` +
+  `next start`), o sea que no es una rareza del modo desarrollo.
+- Reproduce con un `loading.tsx` trivial de una línea (`<p>Cargando…</p>`), así
+  que **no es el markup del esqueleto**: es cualquier `loading.tsx` en este grupo
+  de rutas, con Next 16.3.0.
+
+Ningún gate lo veía: `pnpm test`, `pnpm test:db`, `pnpm typecheck`, `pnpm lint` y
+`pnpm build` pasaban los cinco con la app en blanco. Es el mejor argumento que
+tiene este proyecto para levantar la app antes de dar algo por terminado.
+
+Reintentarlo pide entender antes por qué Next no hace el intercambio acá. Los dos
+sospechosos que quedaron sin descartar son la convivencia con el `error.tsx` del
+mismo segmento y el `redirect()` que puede hacer `requireSettings()` desde el
+layout de `(app)`.
+
 Los tests de componente corren en la misma suite que los de lógica: los `.tsx`
 declaran su entorno con `// @vitest-environment jsdom` en la primera línea, así
 que el resto sigue corriendo en node y no paga jsdom.
