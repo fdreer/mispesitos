@@ -22,10 +22,12 @@ Element.prototype.scrollIntoView ??= () => {}
 
 /**
  * Día `day` del mes que el calendario muestra por default (el mes real de
- * "hoy", porque no le pasamos `defaultMonth`). Se calcula sobre el reloj real
- * en vez de fijarlo con fake timers: mezclar timers falsos con el
- * posicionamiento de Radix (que puede depender de rAF) es justamente el tipo
- * de acoplamiento que estos tests no necesitan para lo que verifican.
+ * "hoy", porque no le pasamos `defaultMonth` — o, bajo el modelo de
+ * borrador, porque el borrador con el que se abre está vacío). Se calcula
+ * sobre el reloj real en vez de fijarlo con fake timers: mezclar timers
+ * falsos con el posicionamiento de Radix (que puede depender de rAF) es
+ * justamente el tipo de acoplamiento que estos tests no necesitan para lo
+ * que verifican.
  */
 function dayInCurrentMonth(day: number): Date {
   const now = new Date()
@@ -46,6 +48,27 @@ function getDayButton(date: Date): HTMLElement {
   const found = screen.getAllByRole("button").find((b) => b.getAttribute("data-day") === target)
   if (!found) throw new Error(`No se encontró el botón del ${target}`)
   return found
+}
+
+/**
+ * El botón que abre/cierra el popover del período. Antes se ubicaba con
+ * `screen.getByLabelText("Período")`, pero el hallazgo D hace que el nombre
+ * accesible del botón incluya el rango elegido (no sólo la etiqueta fija) —
+ * ver `movement-filters.tsx`, `aria-labelledby` del trigger. Eso deja de
+ * calzar con el string exacto "Período" en cuanto hay algo puesto, así que
+ * acá se ancla sólo el PREFIJO del nombre accesible, que es estable pase lo
+ * que pase con el resto (vacío, "Desde ...", o el rango completo).
+ *
+ * El mismo botón sirve para abrir Y cerrar: Radix trata un segundo click
+ * sobre el trigger como un toggle (ver `PopoverTrigger` en
+ * `@radix-ui/react-popover`, que compone su `onClick` con
+ * `context.onOpenToggle`), así que "clickearlo de nuevo" es una de las tres
+ * formas reales de cerrar el popover (las otras son Escape y click afuera;
+ * las tres llaman al mismo `onOpenChange` — ver el comentario de
+ * `handlePeriodoOpenChange` en movement-filters.tsx).
+ */
+function getPeriodoTrigger(): HTMLElement {
+  return screen.getByRole("button", { name: /^Período\b/ })
 }
 
 const CATEGORIAS = [
@@ -102,44 +125,50 @@ describe("MovementFilters", () => {
     expect(push).not.toHaveBeenCalled()
   })
 
-  // El calendario abre por default en el mes real de "hoy" (no le pasamos
-  // `defaultMonth`), así que el día que se clickea se calcula sobre el mes
-  // vigente en vez de fijarlo con fake timers: eso evitaría depender de que
-  // el posicionamiento de Radix (que puede usar rAF) conviva bien con timers
-  // falsos, algo que no hacía falta comprobar para lo que este test verifica.
-  it("elegir una fecha navega con el filtro puesto", () => {
+  // Hallazgo A de la auditoría de esta rama: bajo el modelo viejo, cada click
+  // en un día navegaba solo. Ahora sólo actualiza un borrador local; recién
+  // CERRAR el popover aplica ese borrador con un único `go()`. Este test
+  // cubre el mínimo que pide la tarea: "un borrador de un solo día cierra
+  // como filtro abierto" — un solo click deja `from` puesto y `to` vacío, no
+  // un rango de un solo día, para no perder la capacidad de "desde tal
+  // fecha, sin techo" que el viejo `<input type="date">` tenía gratis.
+  it("un solo click no navega todavía; cerrar el popover lo aplica como filtro abierto (hallazgo A)", () => {
     montar()
 
-    fireEvent.click(screen.getByLabelText("Período"))
+    fireEvent.click(getPeriodoTrigger())
     const day = dayInCurrentMonth(10)
     fireEvent.click(getDayButton(day))
 
-    // Sin restricciones (`min`, etc.) react-day-picker entrega un rango
-    // completo desde el primer click: `{from: día, to: día}`, no el
-    // `{from, to: undefined}` de un picker de dos pasos. Ver el comentario
-    // de `handleRangeSelect` en movement-filters.tsx.
+    // El click sólo tocó el borrador: bajo el modelo viejo esto ya hubiera
+    // navegado (ver el comentario de `handleCalendarSelect`).
+    expect(push).not.toHaveBeenCalled()
+
+    fireEvent.click(getPeriodoTrigger())
+
     const iso = dateToIso(day)
-    expect(push).toHaveBeenCalledWith(`/egresos?from=${iso}&to=${iso}`)
+    expect(push).toHaveBeenCalledWith(`/egresos?from=${iso}`)
   })
 
   it("cambiar un filtro con página vieja vuelve a la página 1", () => {
     montar({ page: "7", status: "paid" })
 
-    fireEvent.click(screen.getByLabelText("Período"))
+    fireEvent.click(getPeriodoTrigger())
     const day = dayInCurrentMonth(20)
     fireEvent.click(getDayButton(day))
+    fireEvent.click(getPeriodoTrigger())
 
     const iso = dateToIso(day)
-    expect(push).toHaveBeenCalledWith(`/egresos?status=paid&from=${iso}&to=${iso}`)
+    expect(push).toHaveBeenCalledWith(`/egresos?status=paid&from=${iso}`)
   })
 
   it("muestra el valor que viene de la URL, no uno vacío", () => {
     montar({ search: "alquiler", from: "2026-03-01" })
 
     expect(screen.getByLabelText<HTMLInputElement>("Buscar").value).toBe("alquiler")
-    // Sólo `from` puesto (sin `to`) es un estado alcanzable por URL aunque el
-    // calendario no lo produzca clickeando: ver `rangoLabel`.
-    expect(screen.getByLabelText("Período").textContent).toBe("Desde 01/03/2026")
+    // Sólo `from` puesto (sin `to`) es un estado alcanzable por URL, y
+    // también el que deja un solo click del calendario (ver el test de
+    // arriba): ver `rangoLabel`.
+    expect(getPeriodoTrigger().textContent).toBe("Desde 01/03/2026")
   })
 
   it("los desplegables muestran el filtro puesto sin necesidad de abrirlos", () => {
@@ -255,16 +284,20 @@ describe("MovementFilters", () => {
   // los mismos valores — así es como React deja las props de un client
   // component cuando su server component padre todavía no volvió a
   // renderizar) antes de disparar el segundo cambio.
-  // El primer cambio usa el calendario y el segundo Categoría (antes eran
-  // Desde y Hasta, los dos inputs de fecha). Repetir el segundo click sobre
-  // el MISMO calendario acá no serviría: su `selected` sale de la prop
-  // `query`, que este test deja fija a propósito para simular el commit que
-  // todavía no llegó, así que react-day-picker vería el mismo rango vacío de
-  // antes y no completaría un rango — recalcularía un click "desde cero" en
-  // vez de extenderlo (ver el reporte de esta tarea). Usar un control
-  // distinto para el segundo cambio evita ese caso aparte y sigue probando
-  // exactamente lo que este test verifica: que `queryRef` acumula un segundo
-  // filtro en vez de pisar al primero.
+  //
+  // Mecanismo cambiado (hallazgo A de ESTA auditoría): antes el primer cambio
+  // usaba el calendario (con un `rerender` a mitad de camino simulando el
+  // commit que todavía no llegó) y el segundo Categoría, justo porque el
+  // `selected` del calendario viejo salía de la prop `query` y se quedaba
+  // vieja durante la transición — usarlo dos veces seguidas no hubiera
+  // completado un rango. Bajo el modelo de borrador esa limitación ya no
+  // existe (el calendario ya no lee `query` mientras está abierto), pero lo
+  // que este test verifica es otra cosa: que `queryRef` (no la prop) es la
+  // base de CUALQUIER `go()`. Dos controles que navegan directo al click
+  // (Categoría y Estado, sin pasar por un popover que abrir y cerrar) prueban
+  // exactamente eso sin la complicación extra de simular una apertura de
+  // calendario. La aserción final —el segundo push suma sobre el primero en
+  // vez de pisarlo— es la misma que antes.
   it("un segundo filtro durante una navegación pendiente se suma al primero en vez de pisarlo", () => {
     push.mockClear()
     const query = parseMovementQuery({})
@@ -272,19 +305,17 @@ describe("MovementFilters", () => {
       <MovementFilters basePath="/egresos" query={query} categories={CATEGORIAS} />,
     )
 
-    fireEvent.click(screen.getByLabelText("Período"))
-    const day = dayInCurrentMonth(10)
-    fireEvent.click(getDayButton(day))
-    const iso = dateToIso(day)
-    expect(push).toHaveBeenCalledWith(`/egresos?from=${iso}&to=${iso}`)
+    fireEvent.click(screen.getByLabelText("Categoría"))
+    fireEvent.click(screen.getByText("Supermercado"))
+    expect(push).toHaveBeenCalledWith("/egresos?categoryId=cat-1")
 
     // El commit todavía no llegó: la prop sigue siendo exactamente la misma.
     rerender(<MovementFilters basePath="/egresos" query={query} categories={CATEGORIAS} />)
 
-    fireEvent.click(screen.getByLabelText("Categoría"))
-    fireEvent.click(screen.getByText("Supermercado"))
+    fireEvent.click(screen.getByLabelText("Estado"))
+    fireEvent.click(screen.getByText("Pagado"))
 
-    expect(push).toHaveBeenLastCalledWith(`/egresos?categoryId=cat-1&from=${iso}&to=${iso}`)
+    expect(push).toHaveBeenLastCalledWith("/egresos?categoryId=cat-1&status=paid")
   })
 
   // Mismo agujero que el anterior pero del lado del buscador: el debounce
@@ -322,50 +353,130 @@ describe("MovementFilters", () => {
     expect(screen.getByLabelText("Buscar").id).toBe("filtro-buscar")
     expect(screen.getByLabelText("Categoría").id).toBe("filtro-categoria")
     expect(screen.getByLabelText("Estado").id).toBe("filtro-estado")
-    expect(screen.getByLabelText("Período").id).toBe("filtro-periodo")
+    // No con `getByLabelText`: ver el comentario de `getPeriodoTrigger` más
+    // arriba (hallazgo D de esta auditoría).
+    expect(getPeriodoTrigger().id).toBe("filtro-periodo")
   })
 
-  // Cobertura nueva: completar un rango de varios días con dos clicks tiene
-  // que terminar en un solo llamado a `push` con `from` y `to` de días
-  // distintos (no el mismo día repetido, que es lo que cubre el primer test
-  // de este archivo). El segundo click necesita que la prop `query` ya
-  // refleje el primero —por eso el `rerender`—: `Calendar` está controlado
-  // por esa prop, y `addToRange` (la función de react-day-picker que decide
-  // qué hacer con cada click) sólo sabe extender el rango si el `selected`
-  // que recibe ya tiene el primer día adentro.
-  it("completar un rango de varios días con dos clicks navega con from y to distintos", () => {
-    const { rerender } = montar()
+  // Cobertura mínima que pide la tarea para el hallazgo A: dos clicks DENTRO
+  // de la misma apertura del popover tienen que navegar una sola vez, con
+  // los dos días puestos. Antes esto necesitaba un `rerender` a mitad de
+  // camino simulando un commit del servidor, porque cada click navegaba
+  // solo y el segundo click dependía de que la prop `query` ya reflejara el
+  // primero. Bajo el modelo de borrador eso ya no hace falta: el segundo
+  // click ve el primero porque los dos leen y escriben el mismo estado local
+  // (`draft`), no la prop.
+  it("completar un rango de varios días con dos clicks en la misma apertura navega una sola vez con from y to distintos (hallazgo A)", () => {
+    montar()
 
-    fireEvent.click(screen.getByLabelText("Período"))
+    fireEvent.click(getPeriodoTrigger())
     const dayFrom = dayInCurrentMonth(5)
     fireEvent.click(getDayButton(dayFrom))
-    const from = dateToIso(dayFrom)
-    expect(push).toHaveBeenCalledWith(`/egresos?from=${from}&to=${from}`)
 
-    rerender(
-      <MovementFilters
-        basePath="/egresos"
-        query={parseMovementQuery({ from, to: from })}
-        categories={CATEGORIAS}
-      />,
-    )
+    // Primer click: sólo borrador, todavía nada que navegar.
+    expect(push).not.toHaveBeenCalled()
 
     const dayTo = dayInCurrentMonth(20)
     fireEvent.click(getDayButton(dayTo))
+
+    // Segundo click: sigue sin navegar. La prueba de que no se perdió el
+    // primer día está en el `push` de más abajo, después de cerrar.
+    expect(push).not.toHaveBeenCalled()
+
+    fireEvent.click(getPeriodoTrigger())
+
+    const from = dateToIso(dayFrom)
     const to = dateToIso(dayTo)
-    expect(push).toHaveBeenLastCalledWith(`/egresos?from=${from}&to=${to}`)
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(push).toHaveBeenCalledWith(`/egresos?from=${from}&to=${to}`)
+  })
+
+  // Cobertura mínima que pide la tarea para el hallazgo A: abrir y cerrar el
+  // popover sin clickear ningún día no puede generar una navegación — ni
+  // siquiera cuando ya había un rango puesto (el borrador se siembra igual a
+  // lo que ya está aplicado, así que la comparación de `handlePeriodoOpenChange`
+  // no encuentra ninguna diferencia).
+  it("abrir y cerrar el popover sin tocar nada no navega (hallazgo A)", () => {
+    montar({ status: "paid", from: "2026-01-05", to: "2026-01-20" })
+
+    fireEvent.click(getPeriodoTrigger())
+    fireEvent.click(getPeriodoTrigger())
+
+    expect(push).not.toHaveBeenCalled()
+  })
+
+  // Cobertura mínima que pide la tarea para el hallazgo A: un `to` sin
+  // `from` (sólo alcanzable escribiendo la URL a mano — el calendario nunca
+  // produce esta forma clickeando) no puede desaparecer solo en el próximo
+  // click. Antes sí pasaba: `addToRange` (la función interna de
+  // react-day-picker) no tiene ninguna rama para "to sin from" y devolvía
+  // `undefined` sin tocar el día clickeado, así que el click "perdía" en vez
+  // de ganar.
+  it("un estado inicial de sólo 'to' sin 'from' no se destruye al clickear un día (hallazgo A)", () => {
+    montar({ to: "2026-03-20" })
+
+    fireEvent.click(getPeriodoTrigger())
+    // El calendario abre mostrando marzo de 2026 (hallazgo B: `defaultMonth`
+    // sale del borrador recién sembrado, y acá el único lado sembrado es
+    // `to`), así que el día que se clickea tiene que estar en ESE mes, no en
+    // el mes real de "hoy".
+    const day = new Date(2026, 2, 10)
+    fireEvent.click(getDayButton(day))
+    fireEvent.click(getPeriodoTrigger())
+
+    // El click gana: arranca un borrador nuevo desde el día clickeado en vez
+    // de desaparecer.
+    const iso = dateToIso(day)
+    expect(push).toHaveBeenCalledWith(`/egresos?from=${iso}`)
   })
 
   // Con un rango ya puesto, "Borrar rango" tiene que sacar sólo `from`/`to` y
   // no tocar el resto: "Limpiar" (que borra todo) sigue estando para el caso
   // general, esto es para cuando la persona quiere conservar los demás
-  // filtros.
+  // filtros. A diferencia de un click en un día, "Borrar rango" sigue
+  // navegando al toque (no pasa por el borrador que se aplica al cerrar):
+  // es una acción explícita de "borrar ya", no un paso de armado de rango.
   it("borrar rango saca sólo las fechas y deja el resto de los filtros", () => {
     montar({ status: "paid", from: "2026-01-05", to: "2026-01-20" })
 
-    fireEvent.click(screen.getByLabelText("Período"))
+    fireEvent.click(getPeriodoTrigger())
     fireEvent.click(screen.getByRole("button", { name: "Borrar rango" }))
 
     expect(push).toHaveBeenCalledWith("/egresos?status=paid")
+  })
+
+  // Hallazgo D: el trigger tenía una asociación válida <Label htmlFor> +
+  // <Button id>, y ese era justo el problema — el accname algorithm consulta
+  // el <label> primero y devuelve ahí mismo, así que el contenido del botón
+  // (el rango elegido) nunca se leía. Un lector de pantalla anunciaba
+  // "Período, botón" igual con el rango vacío que con uno puesto. Se prueba
+  // con `getByRole(..., { name })`, no `getByLabelText`, porque es
+  // exactamente el cómputo que un lector de pantalla usa (accessible name),
+  // y es el que hay que demostrar que cambia.
+  it("el botón del período anuncia el rango elegido, no sólo la etiqueta fija 'Período' (hallazgo D)", () => {
+    montar()
+
+    // Sin rango: el nombre accesible es la etiqueta más lo que el botón ya
+    // muestra vacío.
+    expect(screen.getByRole("button", { name: "Período: Elegir un período" })).toBeTruthy()
+
+    cleanup()
+    montar({ from: "2026-03-01", to: "2026-03-20" })
+
+    // Con un rango puesto: el nombre accesible cambia con él. Antes esto no
+    // pasaba nunca — el nombre era siempre "Período".
+    expect(
+      screen.getByRole("button", { name: "Período: 01/03/2026 – 20/03/2026" }),
+    ).toBeTruthy()
+  })
+
+  // Hallazgo D, ítem menor: el `PopoverContent` de Radix pone `role="dialog"`
+  // sin ningún nombre accesible propio.
+  it("el popover del período tiene nombre accesible (hallazgo D, ítem menor)", () => {
+    montar()
+
+    fireEvent.click(getPeriodoTrigger())
+
+    expect(screen.getByRole("dialog", { name: "Período" })).toBeTruthy()
   })
 })

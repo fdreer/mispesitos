@@ -137,9 +137,23 @@ describe("isoToDate / dateToIso", () => {
 
   it("dateToIso lee componentes locales, no UTC", () => {
     // Un Date armado a medianoche LOCAL con el constructor de componentes.
-    // `.toISOString().slice(0, 10)` leería UTC y devolvería "2025-12-31".
+    // Acá arriba la zona forzada es Buenos Aires (UTC-3), un offset
+    // NEGATIVO: la medianoche local del 1/1 cae en "2026-01-01T03:00:00Z",
+    // el mismo día en UTC. Una implementación rota que leyera
+    // `.toISOString().slice(0, 10)` también daría "2026-01-01" acá — este
+    // caso solo no alcanza para distinguir una lectura local de una UTC.
     const local = new Date(2026, 0, 1)
     expect(dateToIso(local)).toBe("2026-01-01")
+
+    // Con un offset POSITIVO (Berlín, UTC+1 en enero) la medianoche local
+    // del 1/1 son las 23:00 UTC del 31/12: `.toISOString().slice(0, 10)`
+    // daría "2025-12-31", un día antes. Sólo un offset positivo expone una
+    // lectura UTC rota, así que este es el caso que de verdad guarda la
+    // dirección de `dateToIso` (hallazgo E de la auditoría: el caso de
+    // arriba, solo, dejaba pasar una implementación rota).
+    process.env.TZ = "Europe/Berlin"
+    const localBerlin = new Date(2026, 0, 1)
+    expect(dateToIso(localBerlin)).toBe("2026-01-01")
   })
 
   it("rechaza una fecha inválida en vez de fabricar un Date roto (misma postura que addMonthsClamped)", () => {

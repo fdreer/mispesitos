@@ -54,6 +54,25 @@ describe("MovementPagination", () => {
     expect(screen.queryByRole("link", { name: "Ir a la página siguiente" })).toBeNull()
   })
 
+  // Hallazgo F de la auditoría de esta rama: el test de arriba ubica los
+  // links por `aria-label` (el nombre accesible), pero nada afirmaba nada
+  // sobre el texto VISIBLE (el prop `text` que `movement-pagination.tsx` le
+  // pasa a `PaginationPrevious`/`PaginationNext`). Borrar `text="Anterior"`/
+  // `text="Siguiente"` de ese archivo deja los botones mostrando en pantalla
+  // "Previous"/"Next" (el default en inglés del primitivo) sin que ningún
+  // test lo note, porque el `aria-label` en español sigue estando y por sí
+  // solo ya alcanza para que el test de arriba pase.
+  it("el texto visible en español sigue ahí, no sólo el aria-label (hallazgo F)", () => {
+    montar(2, 3)
+
+    expect(screen.getByRole("link", { name: "Ir a la página anterior" }).textContent).toContain(
+      "Anterior",
+    )
+    expect(screen.getByRole("link", { name: "Ir a la página siguiente" }).textContent).toContain(
+      "Siguiente",
+    )
+  })
+
   it("la página 1 no lleva ?page= en el enlace", () => {
     montar(2, 3)
 
