@@ -1,11 +1,13 @@
-import { MovementForm } from "@/components/movement-form"
+import { Suspense } from "react"
+
+import { MovementFormDialog } from "@/components/movement-form-dialog"
 import { MovementList } from "@/components/movement-list"
 import { StatusFilter } from "@/components/status-filter"
-import { todayInAr } from "@/lib/dates"
+import { todayInAr, type IsoDate } from "@/lib/dates"
 import { BASE_PATHS } from "@/lib/movement-routes"
 import { getMovementStatus, type MovementStatus } from "@/lib/movement-status"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
-import { listCategories, listMovements } from "@/server/queries"
+import { listCategories, listMovements, type Category } from "@/server/queries"
 import { requireSettings } from "@/server/session"
 
 const TITLES: Record<"income" | "expense", string> = {
@@ -26,6 +28,34 @@ type Props = {
 }
 
 /**
+ * La cotización sugerida sale de dolarapi, que en el peor caso tarda hasta
+ * 3s (ver TIMEOUT_MS en @/lib/rate) antes de resolver a null. Separada en su
+ * propio componente async y detrás de un Suspense: así esa espera no bloquea
+ * el resto de la pantalla, que no depende de ella para pintar.
+ */
+async function MovementFormDialogWithRate({
+  kind,
+  categories,
+  today,
+  ratePreference,
+}: {
+  kind: "income" | "expense"
+  categories: Category[]
+  today: IsoDate
+  ratePreference: RatePreference
+}) {
+  const rate = await fetchSuggestedRate(ratePreference)
+  return (
+    <MovementFormDialog
+      kind={kind}
+      categories={categories}
+      suggestedRate={rate?.referenceRate ?? null}
+      today={today}
+    />
+  )
+}
+
+/**
  * Cuerpo compartido de /ingresos y /egresos: sólo cambia `kind`. Ver
  * TITLES/BASE_PATHS de acá arriba para el resto de la diferencia.
  */
@@ -39,11 +69,10 @@ export async function MovementScreen({ kind, statusParam }: Props) {
   // categoría archivada tiene que seguir resolviendo su nombre ahí. Si las dos
   // pantallas compartieran la misma lista "sólo activas", archivar una
   // categoría haría que los movimientos que la usaban pasen a mostrar "—".
-  const [activeCategories, allCategories, movements, rate] = await Promise.all([
+  const [activeCategories, allCategories, movements] = await Promise.all([
     listCategories(user.id, kind),
     listCategories(user.id, kind, true),
     listMovements(user.id, { kind }),
-    fetchSuggestedRate(settings.preferredRate as RatePreference),
   ])
 
   const statusFilter = parseStatus(statusParam)
@@ -54,14 +83,26 @@ export async function MovementScreen({ kind, statusParam }: Props) {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-paper">{TITLES[kind]}</h1>
-
-      <MovementForm
-        kind={kind}
-        categories={activeCategories}
-        suggestedRate={rate?.referenceRate ?? null}
-        today={today}
-      />
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold text-paper">{TITLES[kind]}</h1>
+        <Suspense
+          fallback={
+            <MovementFormDialog
+              kind={kind}
+              categories={activeCategories}
+              suggestedRate={null}
+              today={today}
+            />
+          }
+        >
+          <MovementFormDialogWithRate
+            kind={kind}
+            categories={activeCategories}
+            today={today}
+            ratePreference={settings.preferredRate as RatePreference}
+          />
+        </Suspense>
+      </div>
 
       <StatusFilter basePath={BASE_PATHS[kind]} current={statusFilter} />
 

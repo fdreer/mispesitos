@@ -20,7 +20,7 @@ type Item = {
 
 export function Upcoming({ items, today }: { items: Item[]; today: IsoDate }) {
   return (
-    <Card>
+    <Card size="sm">
       <CardHeader>
         <CardTitle className="text-base">Vencimientos</CardTitle>
       </CardHeader>

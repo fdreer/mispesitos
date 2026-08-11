@@ -1,4 +1,17 @@
+"use client"
+
+import { Fragment, useState } from "react"
+import { ChevronDown, ChevronRight } from "lucide-react"
+
 import { Badge } from "@/components/ui/badge"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { DeleteMovementButton } from "@/components/delete-movement-button"
 import { InstallmentRows } from "@/components/installment-rows"
 import { type IsoDate } from "@/lib/dates"
@@ -15,6 +28,16 @@ type Props = {
 
 export function MovementList({ movements, categories, today }: Props) {
   const categoryName = new Map(categories.map((c) => [c.id, c.name]))
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  function toggle(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   if (movements.length === 0) {
     return (
@@ -25,54 +48,75 @@ export function MovementList({ movements, categories, today }: Props) {
   }
 
   return (
-    <ul className="divide-y">
-      {movements.map((m) => {
-        // El mismo cálculo que usa el filtro de estado de esta pantalla: el
-        // badge y el filtro no pueden discrepar sobre qué está vencido.
-        const { status, pendingCount, overdueCount } = summarizeMovementStatus(
-          m.installments,
-          today,
-        )
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-8" />
+          <TableHead>Fecha</TableHead>
+          <TableHead>Descripción</TableHead>
+          <TableHead>Categoría</TableHead>
+          <TableHead>Importe</TableHead>
+          <TableHead>Estado</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {movements.map((m) => {
+          // El mismo cálculo que usa el filtro de estado de esta pantalla: el
+          // badge y el filtro no pueden discrepar sobre qué está vencido.
+          const { status, pendingCount, overdueCount } = summarizeMovementStatus(
+            m.installments,
+            today,
+          )
+          const currency = assertCurrency(m.currency)
+          const isOpen = expanded.has(m.id)
 
-        // Una sola vez por movimiento, y con assert en vez de `as`: el importe
-        // del movimiento y el de sus cuotas se muestran en la MISMA moneda, y
-        // con dos `as` sueltos nada lo garantizaba.
-        const currency = assertCurrency(m.currency)
-
-        return (
-          <li key={m.id} className="py-3">
-            <details>
-              <summary className="flex cursor-pointer items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{m.description}</p>
-                  <p className="text-muted-foreground text-sm">
-                    {m.date} · {m.categoryId ? categoryName.get(m.categoryId) : "—"}
-                    {m.installments.length > 1 && ` · ${m.installments.length} cuotas`}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
+          return (
+            <Fragment key={m.id}>
+              <TableRow
+                className="cursor-pointer"
+                aria-expanded={isOpen}
+                onClick={() => toggle(m.id)}
+              >
+                <TableCell>
+                  {isOpen ? (
+                    <ChevronDown className="text-muted-foreground size-4" />
+                  ) : (
+                    <ChevronRight className="text-muted-foreground size-4" />
+                  )}
+                </TableCell>
+                <TableCell>{m.date}</TableCell>
+                <TableCell className="max-w-64 truncate whitespace-normal">
+                  {m.description}
+                  {m.installments.length > 1 && (
+                    <span className="text-muted-foreground"> · {m.installments.length} cuotas</span>
+                  )}
+                </TableCell>
+                <TableCell>{m.categoryId ? categoryName.get(m.categoryId) : "—"}</TableCell>
+                <TableCell className="tabular-nums">{formatMoney(m.amountCents, currency)}</TableCell>
+                <TableCell>
                   {status === "overdue" && (
                     <Badge variant="destructive">{overdueCount} vencida(s)</Badge>
                   )}
                   {status === "pending" && (
                     <Badge variant="secondary">{pendingCount} pendiente(s)</Badge>
                   )}
-                  <span className="tabular-nums">
-                    {formatMoney(m.amountCents, currency)}
-                  </span>
-                </div>
-              </summary>
-              <InstallmentRows rows={m.installments} currency={currency} today={today} />
-              {/* El botón va fuera del <summary>: un <summary> no puede tener
-                  descendientes interactivos, y anidarlo obligaba a un
-                  preventDefault para que el click no togglee el detalle. */}
-              <div className="mt-2 flex justify-end">
-                <DeleteMovementButton id={m.id} description={m.description} />
-              </div>
-            </details>
-          </li>
-        )
-      })}
-    </ul>
+                  {status === "paid" && <Badge variant="secondary">Pagado</Badge>}
+                </TableCell>
+              </TableRow>
+              {isOpen && (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={6} className="whitespace-normal">
+                    <InstallmentRows rows={m.installments} currency={currency} today={today} />
+                    <div className="mt-2 flex justify-end">
+                      <DeleteMovementButton id={m.id} description={m.description} />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )}
+            </Fragment>
+          )
+        })}
+      </TableBody>
+    </Table>
   )
 }

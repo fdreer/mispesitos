@@ -1,6 +1,6 @@
 import Link from "next/link"
 
-import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import type { MovementStatus } from "@/lib/movement-status"
 
 const OPTIONS: { value: MovementStatus | "all"; label: string }[] = [
@@ -25,18 +25,17 @@ export function StatusFilter({ basePath, current }: Props) {
   return (
     <div className="flex gap-1">
       {OPTIONS.map((opt) => (
-        <Link
+        <Button
           key={opt.value}
-          href={opt.value === "all" ? basePath : `${basePath}?status=${opt.value}`}
-          className={cn(
-            "rounded-md px-3 py-1.5 text-sm",
-            current === opt.value
-              ? "bg-accent text-paper"
-              : "text-fog hover:text-paper",
-          )}
+          asChild
+          type="button"
+          size="sm"
+          variant={current === opt.value ? "secondary" : "ghost"}
         >
-          {opt.label}
-        </Link>
+          <Link href={opt.value === "all" ? basePath : `${basePath}?status=${opt.value}`}>
+            {opt.label}
+          </Link>
+        </Button>
       ))}
     </div>
   )

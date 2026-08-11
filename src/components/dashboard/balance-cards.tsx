@@ -21,22 +21,22 @@ export function BalanceCards({
   const diff = monthIncomeArsCents - monthExpenseArsCents
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Saldo en pesos</CardTitle>
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <Card size="sm">
+        <CardHeader className="pb-1">
+          <CardTitle className="text-xs font-medium text-muted-foreground">Saldo en pesos</CardTitle>
         </CardHeader>
-        <CardContent className="text-2xl tabular-nums">
+        <CardContent className="text-xl tabular-nums">
           {formatMoney(arsCents, "ARS")}
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Saldo en dólares</CardTitle>
+      <Card size="sm">
+        <CardHeader className="pb-1">
+          <CardTitle className="text-xs font-medium text-muted-foreground">Saldo en dólares</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-2xl tabular-nums">{formatMoney(usdCents, "USD")}</p>
+          <p className="text-xl tabular-nums">{formatMoney(usdCents, "USD")}</p>
           {/*
            * A propósito distinto de la "Tenencia" de /cambios (usdPosition):
            * este saldo sale de computeBalances y puede quedar negativo si se
@@ -51,12 +51,12 @@ export function BalanceCards({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Total consolidado</CardTitle>
+      <Card size="sm">
+        <CardHeader className="pb-1">
+          <CardTitle className="text-xs font-medium text-muted-foreground">Total consolidado</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-2xl tabular-nums">
+          <p className="text-xl tabular-nums">
             {consolidatedArsCents === null ? "—" : formatMoney(consolidatedArsCents, "ARS")}
           </p>
           <p className="text-muted-foreground text-xs">
@@ -65,8 +65,8 @@ export function BalanceCards({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
+      <Card size="sm">
+        <CardHeader className="pb-1">
           {/*
            * El título dice qué mide, porque en esta pantalla conviven dos
            * definiciones distintas de "el mes": acá es CAJA —lo que entró y
@@ -76,7 +76,7 @@ export function BalanceCards({
            * $1.200.000 allá y $100.000 acá: los dos números están bien, miden
            * cosas distintas, y hasta ahora nada en la pantalla lo decía.
            */}
-          <CardTitle className="text-sm font-medium">Cobrado y pagado este mes</CardTitle>
+          <CardTitle className="text-xs font-medium text-muted-foreground">Cobrado y pagado este mes</CardTitle>
         </CardHeader>
         <CardContent>
           {/*
@@ -85,7 +85,7 @@ export function BalanceCards({
            * abajo. El detalle de cuánto entró y cuánto salió está en la línea
            * de abajo.
            */}
-          <p className="text-2xl tabular-nums">{formatMoney(diff, "ARS")}</p>
+          <p className="text-xl tabular-nums">{formatMoney(diff, "ARS")}</p>
           <p className="text-muted-foreground text-xs">
             {formatMoney(monthIncomeArsCents, "ARS")} cobrados ·{" "}
             {formatMoney(monthExpenseArsCents, "ARS")} pagados

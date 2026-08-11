@@ -28,11 +28,13 @@ type Props = {
   suggestedRate: number | null
   /** Hoy según el reloj de Buenos Aires, calculado en el servidor. */
   today: IsoDate
+  /** Se dispara junto con `router.refresh()` al guardar. El modal la usa para cerrarse solo. */
+  onSaved?: () => void
 }
 
 type Row = { amount: string; dueDate: string }
 
-export function MovementForm({ kind, categories, suggestedRate, today }: Props) {
+export function MovementForm({ kind, categories, suggestedRate, today, onSaved }: Props) {
   const [state, action, pending] = useActionState(createMovement, null)
   const router = useRouter()
 
@@ -87,8 +89,9 @@ export function MovementForm({ kind, categories, suggestedRate, today }: Props) 
   useEffect(() => {
     if (state?.ok) {
       router.refresh()
+      onSaved?.()
     }
-  }, [state, router])
+  }, [state, router, onSaved])
 
   function updateRow(index: number, patch: Partial<Row>) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)))
@@ -116,18 +119,18 @@ export function MovementForm({ kind, categories, suggestedRate, today }: Props) 
 
         <div className="space-y-1">
           <Label htmlFor="categoryId">Categoría</Label>
-          <select
-            id="categoryId"
-            name="categoryId"
-            required
-            className="border-input h-8 w-full rounded-lg border bg-white/[0.02] px-2.5 text-sm"
-          >
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <Select name="categoryId" required defaultValue={categories[0]?.id}>
+            <SelectTrigger id="categoryId" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {categories.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="space-y-1">

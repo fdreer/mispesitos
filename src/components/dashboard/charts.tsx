@@ -1,21 +1,16 @@
 "use client"
 
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
+import type * as React from "react"
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from "recharts"
 
+import {
+  ChartConfig,
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart"
 import { formatMoney } from "@/lib/money"
 
 /*
@@ -26,9 +21,7 @@ import { formatMoney } from "@/lib/money"
  * El lima ácido no está en esta lista y no tiene que estarlo: es el color de la
  * acción principal y de nada más.
  */
-const GRAPHITE = "#23252a"
 const FOG = "#8a8f98"
-const CARBON = "#0f1011"
 const SIGNAL_TEAL = "#02b8cc"
 const PULSE_GREEN = "#27a644"
 const CORAL_RED = "#eb5757"
@@ -40,26 +33,45 @@ const COLORS = [SIGNAL_TEAL, "#6366f1", "#8b5cf6", PULSE_GREEN, FOG, "#62666d", 
 
 const toPesos = (cents: number) => cents / 100
 const tip = (value: number) => formatMoney(Math.round(value * 100), "ARS")
-// El `formatter` de Tooltip recibe el ValueType genérico de recharts (puede
-// ser number, string o un array); acá los datos que le pasamos son siempre
-// number, así que sólo se formatea ese caso y el resto se muestra tal cual.
-const tooltipFormatter = (value: number | string | ReadonlyArray<number | string> | undefined) =>
-  typeof value === "number" ? tip(value) : String(value ?? "")
 
-/*
- * Recharts pinta el tooltip blanco por defecto. Sobre un lienzo casi negro eso
- * es un rectángulo encandilante flotando en el medio del gráfico, así que va
- * sobre Carbon con el mismo borde capilar que las tarjetas.
+const AXIS_TICK = { fill: FOG, fontSize: 12 } as const
+
+/**
+ * Pasarle `formatter` a ChartTooltipContent le delega toda la fila —punto de
+ * color incluido, no sólo el número— así que arma la fila entera: el punto
+ * toma `item.payload.fill` (las porciones de la torta) o si no `item.color`
+ * (la referencia `var(--color-...)` que ya trae la Line/Bar).
  */
-const TOOLTIP_STYLE = {
-  backgroundColor: CARBON,
-  border: `1px solid ${GRAPHITE}`,
-  borderRadius: 6,
-  color: "#d0d6e0",
-  fontSize: 13,
-} as const
+const moneyTooltipFormatter: NonNullable<React.ComponentProps<typeof ChartTooltipContent>["formatter"]> = (
+  value,
+  name,
+  item,
+) => {
+  const color = (item.payload as { fill?: string } | undefined)?.fill ?? item.color
+  return (
+    <>
+      <div className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ backgroundColor: color }} />
+      <div className="flex flex-1 items-center justify-between leading-none">
+        <span className="text-muted-foreground">{name}</span>
+        <span className="font-mono font-medium text-foreground tabular-nums">{tip(Number(value))}</span>
+      </div>
+    </>
+  )
+}
 
-const AXIS = { stroke: GRAPHITE, tick: { fill: FOG, fontSize: 12 } } as const
+const PROJECTION_CONFIG = {
+  saldo: { label: "Saldo", color: SIGNAL_TEAL },
+} satisfies ChartConfig
+
+const MONTHLY_CONFIG = {
+  Ingresos: { label: "Ingresos", color: PULSE_GREEN },
+  Egresos: { label: "Egresos", color: CORAL_RED },
+} satisfies ChartConfig
+
+// Genérico a propósito: los nombres de categoría son datos del usuario, no se
+// conocen en build time. El color de cada porción sale de `fill` en el propio
+// dato (ver `CategoryPie` abajo), no de esta config.
+const PIE_CONFIG = { value: { label: "Importe" } } satisfies ChartConfig
 
 export function ProjectionChart({
   data,
@@ -67,15 +79,21 @@ export function ProjectionChart({
   data: { month: string; arsCents: number }[]
 }) {
   return (
-    <ResponsiveContainer width="100%" height={220}>
+    <ChartContainer config={PROJECTION_CONFIG} className="aspect-auto h-[220px] w-full">
       <LineChart data={data.map((d) => ({ month: d.month, saldo: toPesos(d.arsCents) }))}>
-        <CartesianGrid strokeDasharray="3 3" stroke={GRAPHITE} />
-        <XAxis dataKey="month" {...AXIS} />
-        <YAxis width={80} {...AXIS} />
-        <Tooltip formatter={tooltipFormatter} contentStyle={TOOLTIP_STYLE} cursor={{ stroke: GRAPHITE }} />
-        <Line type="monotone" dataKey="saldo" stroke={SIGNAL_TEAL} strokeWidth={2} dot={false} />
+        <CartesianGrid vertical={false} stroke="var(--border)" />
+        <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} tick={AXIS_TICK} />
+        <YAxis width={80} tickLine={false} axisLine={false} tick={AXIS_TICK} />
+        <ChartTooltip content={<ChartTooltipContent formatter={moneyTooltipFormatter} />} />
+        <Line
+          type="monotone"
+          dataKey="saldo"
+          stroke="var(--color-saldo)"
+          strokeWidth={2}
+          dot={false}
+        />
       </LineChart>
-    </ResponsiveContainer>
+    </ChartContainer>
   )
 }
 
@@ -88,25 +106,23 @@ export function CategoryPie({ data }: { data: { name: string; arsCents: number }
     )
   }
 
+  const chartData = data.map((d, index) => ({
+    name: d.name,
+    value: toPesos(d.arsCents),
+    fill: COLORS[index % COLORS.length],
+  }))
+
   return (
-    <ResponsiveContainer width="100%" height={220}>
+    <ChartContainer config={PIE_CONFIG} className="aspect-auto h-[220px] w-full">
       <PieChart>
-        <Pie
-          data={data.map((d) => ({ name: d.name, value: toPesos(d.arsCents) }))}
-          dataKey="value"
-          nameKey="name"
-          outerRadius={80}
-          // El borde de cada porción, en Carbon, separa las porciones entre sí
-          // sin agregar una línea de color.
-          stroke={CARBON}
-        >
-          {data.map((_, index) => (
-            <Cell key={index} fill={COLORS[index % COLORS.length]} />
+        <Pie data={chartData} dataKey="value" nameKey="name" outerRadius={80} stroke="var(--card)">
+          {chartData.map((d) => (
+            <Cell key={d.name} fill={d.fill} />
           ))}
         </Pie>
-        <Tooltip formatter={tooltipFormatter} contentStyle={TOOLTIP_STYLE} />
+        <ChartTooltip content={<ChartTooltipContent formatter={moneyTooltipFormatter} />} />
       </PieChart>
-    </ResponsiveContainer>
+    </ChartContainer>
   )
 }
 
@@ -116,7 +132,7 @@ export function MonthlyBars({
   data: { month: string; incomeArsCents: number; expenseArsCents: number }[]
 }) {
   return (
-    <ResponsiveContainer width="100%" height={220}>
+    <ChartContainer config={MONTHLY_CONFIG} className="aspect-auto h-[220px] w-full">
       <BarChart
         data={data.map((d) => ({
           month: d.month,
@@ -124,16 +140,16 @@ export function MonthlyBars({
           Egresos: toPesos(d.expenseArsCents),
         }))}
       >
-        <CartesianGrid strokeDasharray="3 3" stroke={GRAPHITE} />
-        <XAxis dataKey="month" {...AXIS} />
-        <YAxis width={80} {...AXIS} />
-        <Tooltip formatter={tooltipFormatter} contentStyle={TOOLTIP_STYLE} cursor={{ fill: "rgba(255,255,255,0.03)" }} />
-        <Legend wrapperStyle={{ fontSize: 13, color: FOG }} />
+        <CartesianGrid vertical={false} stroke="var(--border)" />
+        <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} tick={AXIS_TICK} />
+        <YAxis width={80} tickLine={false} axisLine={false} tick={AXIS_TICK} />
+        <ChartTooltip content={<ChartTooltipContent formatter={moneyTooltipFormatter} />} />
+        <ChartLegend content={<ChartLegendContent />} />
         {/* Acá el verde y el rojo son datos, no cuerpo de texto: la regla de
             "los importes van en gris" no aplica a una serie de un gráfico. */}
-        <Bar dataKey="Ingresos" fill={PULSE_GREEN} />
-        <Bar dataKey="Egresos" fill={CORAL_RED} />
+        <Bar dataKey="Ingresos" fill="var(--color-Ingresos)" radius={4} />
+        <Bar dataKey="Egresos" fill="var(--color-Egresos)" radius={4} />
       </BarChart>
-    </ResponsiveContainer>
+    </ChartContainer>
   )
 }

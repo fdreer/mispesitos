@@ -103,7 +103,7 @@ export default async function DashboardPage() {
       <Upcoming items={view.upcoming} today={today} />
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
+        <Card size="sm">
           <CardHeader>
             <CardTitle className="text-base">
               Saldo proyectado al cierre de cada mes ({HORIZON_MONTHS} meses)
@@ -126,7 +126,7 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card size="sm">
           <CardHeader>
             <CardTitle className="text-base">
               Gastos que cargaste este mes, por categoría
@@ -143,7 +143,7 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      <Card>
+      <Card size="sm">
         <CardHeader>
           <CardTitle className="text-base">
             Lo que cargaste en los últimos {HISTORY_MONTHS} meses
