@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
 import { buildMovementHref, type MovementQuery } from "@/lib/movement-query"
 import type { MovementStatus } from "@/lib/movement-status"
 import type { Category } from "@/server/queries"
@@ -44,8 +45,20 @@ type Props = {
  * filtrada (`?status=`, ver dashboard/upcoming.tsx).
  */
 export function MovementFilters({ basePath, query, categories }: Props) {
-  const router = useRouter()
+  // Se saca `push` del objeto en vez de dejar `router` como dependencia: el
+  // objeto que devuelve `useRouter()` es un `useMemo` que Next re-crea cada
+  // vez que cambia el router de la app (o sea, en cada navegación nuestra),
+  // aunque `push` en sí sea la misma función. Si el efecto de abajo dependiera
+  // de `router` entero, una navegación de `go()` re-crearía ese objeto,
+  // re-armaría el efecto del buscador aunque `search` no haya cambiado, y
+  // reabriría exactamente la carrera del Finding 2.
+  const { push } = useRouter()
   const [search, setSearch] = useState(query.search)
+  const [pending, startTransition] = useTransition()
+  // Vive en un ref, no solo en el cleanup del efecto: `go()` y `limpiar()`
+  // necesitan poder cancelarlo desde afuera del efecto (ver Finding 2 más
+  // abajo), y un ref sobrevive entre renders sin disparar uno nuevo.
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // El buscador navega solo, con espera: una navegación por tecla tipeada es
   // una consulta a la base por tecla. Los otros filtros cambian de a un click
@@ -56,14 +69,32 @@ export function MovementFilters({ basePath, query, categories }: Props) {
   // anterior viaja, que es el caso frecuente; esto es el raro.
   useEffect(() => {
     if (search === query.search) return
-    const id = setTimeout(() => {
-      router.push(buildMovementHref(basePath, query, { search }))
+    searchTimeout.current = setTimeout(() => {
+      startTransition(() => {
+        push(buildMovementHref(basePath, query, { search }))
+      })
     }, DEBOUNCE_MS)
-    return () => clearTimeout(id)
-  }, [search, query, basePath, router])
+    return () => clearTimeout(searchTimeout.current)
+  }, [search, query, basePath, push])
 
   function go(patch: Partial<MovementQuery>) {
-    router.push(buildMovementHref(basePath, query, patch))
+    // Si el buscador todavía tenía el debounce armado, cancelarlo acá: si no,
+    // dispara más tarde cerrado sobre el `query` de ANTES de este cambio (sin
+    // `patch`) y pisa el filtro que la persona recién eligió.
+    clearTimeout(searchTimeout.current)
+    startTransition(() => {
+      push(buildMovementHref(basePath, query, patch))
+    })
+  }
+
+  function limpiar() {
+    // Mismo motivo que en `go()`: sin cancelar, el debounce puede disparar
+    // después y resucitar los filtros viejos que "Limpiar" acaba de borrar.
+    clearTimeout(searchTimeout.current)
+    setSearch("")
+    startTransition(() => {
+      push(basePath)
+    })
   }
 
   const hayFiltros =
@@ -74,7 +105,14 @@ export function MovementFilters({ basePath, query, categories }: Props) {
     query.to !== ""
 
   return (
-    <div className="flex flex-wrap items-end gap-3">
+    // Los Select muestran el valor viejo hasta que llegan las props nuevas del
+    // server (arquitectura 100% URL, sin estado optimista): atenuar mientras
+    // `pending` está prendido es la señal de "esto ya está cargando", no un
+    // intento de esconder el viaje.
+    <div
+      className={cn("flex flex-wrap items-end gap-3 transition-opacity", pending && "opacity-60")}
+      aria-busy={pending}
+    >
       <div className="min-w-56 flex-1 space-y-1">
         <Label htmlFor="search">Buscar</Label>
         <Input
@@ -133,7 +171,7 @@ export function MovementFilters({ basePath, query, categories }: Props) {
       </div>
 
       {hayFiltros && (
-        <Button type="button" variant="ghost" onClick={() => router.push(basePath)}>
+        <Button type="button" variant="ghost" onClick={limpiar}>
           Limpiar
         </Button>
       )}

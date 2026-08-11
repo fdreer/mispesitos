@@ -90,4 +90,59 @@ describe("MovementFilters", () => {
 
     expect(screen.queryByRole("button", { name: "Limpiar" })).toBeNull()
   })
+
+  // Finding 1: "Limpiar" navegaba a basePath pero dejaba el estado local del
+  // buscador (`search`) intacto, así que el input seguía mostrando el texto
+  // tipeado aunque la URL ya no tuviera `search`. El test anterior
+  // ("limpiar borra todos los filtros de una") sólo miraba el argumento de
+  // `push` y por eso no lo detectaba.
+  it("limpiar también vacía el buscador, no sólo la URL", () => {
+    montar({ search: "alquiler", status: "overdue", page: "3" })
+
+    fireEvent.click(screen.getByRole("button", { name: "Limpiar" }))
+
+    expect(screen.getByLabelText<HTMLInputElement>("Buscar").value).toBe("")
+  })
+
+  // Finding 2: el timeout del debounce cierra sobre el `query` vigente al
+  // tipear. Si mientras espera la persona cambia otro filtro, `go()` navega
+  // ya mismo, pero el timeout seguía armado y disparaba después con el
+  // `query` viejo (sin el filtro recién elegido), pisándolo.
+  it("cambiar otro filtro mientras el buscador espera cancela ese debounce", () => {
+    vi.useFakeTimers()
+    montar({ status: "paid" })
+
+    fireEvent.change(screen.getByLabelText("Buscar"), { target: { value: "kiosco" } })
+    fireEvent.change(screen.getByLabelText("Desde"), { target: { value: "2026-01-01" } })
+
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(push).toHaveBeenCalledWith("/egresos?status=paid&from=2026-01-01")
+
+    vi.advanceTimersByTime(400)
+
+    // Si el debounce no se hubiera cancelado, acá dispararía con el `query`
+    // de antes del cambio de fecha (sin `from`) y lo pisaría.
+    expect(push).toHaveBeenCalledTimes(1)
+  })
+
+  // Minor: nada ejercía el onValueChange de los Select ni la asociación
+  // htmlFor/id de sus Label. getByLabelText sólo encuentra el trigger si esa
+  // asociación está bien hecha.
+  it("elegir una categoría navega con ese filtro", () => {
+    montar()
+
+    fireEvent.click(screen.getByLabelText("Categoría"))
+    fireEvent.click(screen.getByText("Supermercado"))
+
+    expect(push).toHaveBeenCalledWith("/egresos?categoryId=cat-1")
+  })
+
+  it("elegir un estado navega con ese filtro", () => {
+    montar()
+
+    fireEvent.click(screen.getByLabelText("Estado"))
+    fireEvent.click(screen.getByText("Pagado"))
+
+    expect(push).toHaveBeenCalledWith("/egresos?status=paid")
+  })
 })
