@@ -43,7 +43,7 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
 
   return (
     <form action={action} className="space-y-4">
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <Label htmlFor="initialBalanceArs">¿Cuántos pesos tenés hoy?</Label>
         <Input
           id="initialBalanceArs"
@@ -54,7 +54,7 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
         />
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <Label htmlFor="initialBalanceUsd">¿Y cuántos dólares?</Label>
         <Input
           id="initialBalanceUsd"
@@ -65,7 +65,7 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
         />
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <Label htmlFor="initialBalanceUsdRate">
           ¿A qué tipo de cambio promedio los compraste?
         </Label>
@@ -81,7 +81,7 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
         </p>
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <Label htmlFor="initialBalanceDate">¿Desde qué fecha?</Label>
         <Input
           id="initialBalanceDate"
@@ -95,18 +95,24 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
         </p>
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <Label htmlFor="preferredRate">¿Qué dólar usás de referencia?</Label>
-        <Select name="preferredRate" defaultValue={defaults.preferredRate}>
-          <SelectTrigger id="preferredRate">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="blue">Blue</SelectItem>
-            <SelectItem value="oficial">Oficial</SelectItem>
-            <SelectItem value="mep">MEP</SelectItem>
-          </SelectContent>
-        </Select>
+        {/* El div de más es el mismo truco que en la barra de filtros: en el
+            HTML del servidor el Select de Radix deja un tercer hijo acá, y
+            `space-y-1.5` se lo cobraba como 6px de aire de más hasta que
+            hidrataba. Ver el comentario largo en `movement-filters.tsx`. */}
+        <div>
+          <Select name="preferredRate" defaultValue={defaults.preferredRate}>
+            <SelectTrigger id="preferredRate" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="blue">Blue</SelectItem>
+              <SelectItem value="oficial">Oficial</SelectItem>
+              <SelectItem value="mep">MEP</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {state && !state.ok && <p className="text-destructive text-sm">{state.message}</p>}

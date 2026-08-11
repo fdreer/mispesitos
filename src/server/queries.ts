@@ -38,8 +38,17 @@ export type MovementWithInstallments = Movement & { installments: Installment[] 
  * categoría precisamente para que deje de ofrecerse al cargar un movimiento.
  * La propia pantalla de categorías (Task 16) necesita ver también las
  * archivadas para listarlas, de ahí el parámetro en vez de duplicar la query.
+ *
+ * Memoizada por request, igual que `getSettings`. Desde que /ingresos y
+ * /egresos transmiten la pantalla por partes (ver `movement-screen.tsx`), la
+ * barra de filtros y la tabla son dos ramas independientes del árbol que piden
+ * LA MISMA lista completa de categorías: sin este memo, cada carga abre dos
+ * transacciones idénticas. La clave del memo son los argumentos tal como se
+ * pasan, así que `(id, kind)` y `(id, kind, false)` son dos entradas distintas
+ * con el mismo resultado — inofensivo, pero por eso las dos ramas llaman con
+ * la misma forma.
  */
-export async function listCategories(
+export const listCategories = cache(async function listCategories(
   userId: string,
   kind?: "income" | "expense",
   includeArchived = false,
@@ -55,7 +64,7 @@ export async function listCategories(
       .where(and(...conditions))
       .orderBy(asc(category.name))
   })
-}
+})
 
 export type MovementFilters = {
   kind?: "income" | "expense" | "exchange"

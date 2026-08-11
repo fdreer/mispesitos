@@ -58,6 +58,14 @@
     --color-acid-lime: #e4f222;
     --color-pulse-green: #27a644;
     --color-coral-red: #eb5757;
+    /*
+     * El naranja de Linear. Entra al sistema para el tercer estado de un
+     * movimiento: vencido ya es coral y pagado ya es verde, y "pendiente"
+     * venía saliendo gris —el mismo gris que usa cualquier badge sin
+     * significado propio—, así que el estado más común de la tabla era el
+     * único que no se leía de un vistazo.
+     */
+    --color-ember-orange: #f2994a;
     --color-signal-teal: #02b8cc;
     --color-iris-violet: #6366f1;
     --color-lavender: #8b5cf6;

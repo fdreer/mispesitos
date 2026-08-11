@@ -1,3 +1,5 @@
+import { Suspense } from "react"
+
 import { ExchangeForm } from "@/components/exchange-form"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { todayInAr } from "@/lib/dates"
@@ -7,7 +9,20 @@ import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import { listExchanges, listUsdPositionEvents } from "@/server/queries"
 import { requireSettings } from "@/server/session"
 
-export default async function CambiosPage() {
+/**
+ * Todo lo que hay debajo del título, detrás de un Suspense: el título sale en
+ * el primer flush en vez de esperar a la cotización, que sola puede tardar 3s
+ * (TIMEOUT_MS en @/lib/rate) y era lo que hacía que esta pantalla entera se
+ * quedara en el esqueleto genérico.
+ *
+ * Un solo límite y no uno por bloque, aunque acá los datos SÍ son separables:
+ * si el formulario tuviera el suyo propio, React lo montaría primero sin
+ * cotización y lo reemplazaría al llegar —dos instancias distintas—, así que
+ * lo que la persona hubiera empezado a tipear en esos segundos se perdería al
+ * hacer el cambio. Con un solo límite el formulario se monta una vez, ya con
+ * su cotización adentro.
+ */
+async function CambiosBody() {
   const { user, settings } = await requireSettings()
   const today = todayInAr()
 
@@ -23,9 +38,7 @@ export default async function CambiosPage() {
   const position = usdPosition(events)
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-paper">Cambios</h1>
-
+    <>
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
@@ -84,6 +97,33 @@ export default async function CambiosPage() {
           </li>
         ))}
       </ul>
+    </>
+  )
+}
+
+/** La misma grilla que arma `CambiosBody`, en gris. Ver `DashboardSkeleton`. */
+function CambiosSkeleton() {
+  return (
+    <div className="space-y-6" aria-hidden>
+      <div className="grid gap-4 sm:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="h-[132px] animate-pulse rounded-xl border border-border" />
+        ))}
+      </div>
+      <div className="h-[180px] animate-pulse rounded-lg border border-border" />
+    </div>
+  )
+}
+
+/** Sin `async`: el título sale sin esperar a nada. Ver `CambiosBody`. */
+export default function CambiosPage() {
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-semibold text-paper">Cambios</h1>
+
+      <Suspense fallback={<CambiosSkeleton />}>
+        <CambiosBody />
+      </Suspense>
     </div>
   )
 }

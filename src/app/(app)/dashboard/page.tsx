@@ -1,3 +1,5 @@
+import { Suspense } from "react"
+
 import { BalanceCards } from "@/components/dashboard/balance-cards"
 import { CategoryPie, MonthlyBars, ProjectionChart } from "@/components/dashboard/charts"
 import { Upcoming } from "@/components/dashboard/upcoming"
@@ -23,7 +25,22 @@ import { requireSettings } from "@/server/session"
 const HORIZON_MONTHS = 6
 const HISTORY_MONTHS = 12
 
-export default async function DashboardPage() {
+/**
+ * Todo lo que hay debajo del título. Va aparte, detrás de un Suspense, para
+ * que el título salga en el primer flush en vez de esperar a las seis
+ * consultas y a la cotización (que sola puede tardar 3s, ver TIMEOUT_MS en
+ * @/lib/rate).
+ *
+ * A diferencia de /ingresos y /egresos, acá NO se puede transmitir bloque por
+ * bloque: `buildDashboardView` es un solo cálculo que necesita las seis
+ * consultas juntas —los saldos de las tarjetas alimentan el primer punto de la
+ * proyección, y la torta y las barras salen del mismo recorte de movimientos—,
+ * así que partirlo en cuatro Suspense sería partir también esa función, y las
+ * cuatro partes terminarían esperando lo mismo igual. Un solo límite, con un
+ * esqueleto que promete la grilla de verdad, es todo lo que esta pantalla
+ * puede ganar sin rehacer el cálculo.
+ */
+async function DashboardBody() {
   const { user, settings } = await requireSettings()
   const today = todayInAr()
 
@@ -88,9 +105,7 @@ export default async function DashboardPage() {
   })
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-paper">Dashboard</h1>
-
+    <>
       <BalanceCards
         arsCents={view.arsCents}
         usdCents={view.usdCents}
@@ -157,6 +172,52 @@ export default async function DashboardPage() {
           <MonthlyBars data={view.bars} />
         </CardContent>
       </Card>
+    </>
+  )
+}
+
+/**
+ * La misma grilla que arma `DashboardBody`, en gris. Los altos son los que
+ * salen del contenido real (tarjeta chica, tarjeta de vencimientos, y las de
+ * gráfico con su `ChartContainer` de 220px más el encabezado), así que cuando
+ * llegan los datos el contenido no empuja nada hacia abajo.
+ *
+ * `aria-hidden`: es andamiaje, no información. Quien no ve la pantalla no
+ * gana nada con que le lean cuatro cajas vacías.
+ */
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6" aria-hidden>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="h-[164px] animate-pulse rounded-xl border border-border" />
+        ))}
+      </div>
+      {/* La única que no tiene alto fijo: crece con la cantidad de
+          vencimientos. 150px es lo que mide con uno. */}
+      <div className="h-[150px] animate-pulse rounded-xl border border-border" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        {[0, 1].map((i) => (
+          <div key={i} className="h-[340px] animate-pulse rounded-xl border border-border" />
+        ))}
+      </div>
+      <div className="h-[308px] animate-pulse rounded-xl border border-border" />
+    </div>
+  )
+}
+
+/**
+ * Sin `async`: el título sale sin esperar a nada (ver `DashboardBody` para
+ * por qué el resto no se puede partir más).
+ */
+export default function DashboardPage() {
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-semibold text-paper">Dashboard</h1>
+
+      <Suspense fallback={<DashboardSkeleton />}>
+        <DashboardBody />
+      </Suspense>
     </div>
   )
 }
