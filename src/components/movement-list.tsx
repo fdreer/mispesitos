@@ -24,9 +24,14 @@ type Props = {
   movements: MovementWithInstallments[]
   categories: Category[]
   today: IsoDate
+  /**
+   * Sin esto, filtrar hasta cero resultados decía "todavía no cargaste nada":
+   * el mensaje contradecía la tabla que la persona acababa de llenar.
+   */
+  emptyMessage: string
 }
 
-export function MovementList({ movements, categories, today }: Props) {
+export function MovementList({ movements, categories, today, emptyMessage }: Props) {
   const categoryName = new Map(categories.map((c) => [c.id, c.name]))
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
@@ -40,11 +45,7 @@ export function MovementList({ movements, categories, today }: Props) {
   }
 
   if (movements.length === 0) {
-    return (
-      <p className="text-muted-foreground py-8 text-center text-sm">
-        Todavía no cargaste nada acá.
-      </p>
-    )
+    return <p className="text-muted-foreground py-8 text-center text-sm">{emptyMessage}</p>
   }
 
   return (
