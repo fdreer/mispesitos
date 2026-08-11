@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { isValidIsoDate, todayInAr } from "@/lib/dates"
+import { isValidIsoDate, type IsoDate } from "@/lib/dates"
 import { buildInstallments } from "@/lib/installments"
 import { formatMoney, parseAmountToCents } from "@/lib/money"
 import { MAX_INSTALLMENTS } from "@/lib/schemas"
@@ -27,19 +27,21 @@ type Props = {
   categories: Category[]
   /** Cotización sugerida. null cuando dolarapi no respondió: se tipea a mano. */
   suggestedRate: number | null
+  /** Hoy según el reloj de Buenos Aires, calculado en el servidor. */
+  today: IsoDate
 }
 
 type Row = { amount: string; dueDate: string }
 
-export function MovementForm({ kind, categories, suggestedRate }: Props) {
+export function MovementForm({ kind, categories, suggestedRate, today }: Props) {
   const [state, action, pending] = useActionState(createMovement, null)
   const router = useRouter()
 
   const [amount, setAmount] = useState("")
   const [currency, setCurrency] = useState<"ARS" | "USD">("ARS")
-  const [date, setDate] = useState(todayInAr())
+  const [date, setDate] = useState(today)
   const [count, setCount] = useState(1)
-  const [rows, setRows] = useState<Row[]>([{ amount: "", dueDate: todayInAr() }])
+  const [rows, setRows] = useState<Row[]>([{ amount: "", dueDate: today }])
 
   const totalCents = parseAmountToCents(amount) ?? 0
 

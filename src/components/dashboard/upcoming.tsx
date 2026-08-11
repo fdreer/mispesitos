@@ -2,6 +2,7 @@ import Link from "next/link"
 
 import { InstallmentRows } from "@/components/installment-rows"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import type { IsoDate } from "@/lib/dates"
 import { BASE_PATHS } from "@/lib/movement-routes"
 import type { MovementStatus } from "@/lib/movement-status"
 
@@ -17,7 +18,7 @@ type Item = {
   status: MovementStatus
 }
 
-export function Upcoming({ items }: { items: Item[] }) {
+export function Upcoming({ items, today }: { items: Item[]; today: IsoDate }) {
   return (
     <Card>
       <CardHeader>
@@ -48,6 +49,7 @@ export function Upcoming({ items }: { items: Item[] }) {
                   <InstallmentRows
                     rows={[{ ...item, paid: false }]}
                     currency={item.currency}
+                    today={today}
                   />
                 </li>
               )

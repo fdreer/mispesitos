@@ -34,7 +34,9 @@ afterEach(cleanup)
 
 describe("MovementForm", () => {
   it("no revienta cuando se borra la fecha con un importe ya cargado", () => {
-    render(<MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} />)
+    render(
+      <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+    )
 
     // Con importe cargado, el plan de cuotas se genera en el render.
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
@@ -52,7 +54,9 @@ describe("MovementForm", () => {
   })
 
   it("regenera el plan cuando la fecha vuelve a ser válida", () => {
-    render(<MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} />)
+    render(
+      <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+    )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
     fireEvent.change(screen.getByLabelText("Fecha"), { target: { value: "" } })
@@ -63,7 +67,9 @@ describe("MovementForm", () => {
   })
 
   it("no genera más de 120 filas de cuota aunque se tipee un número enorme", () => {
-    render(<MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} />)
+    render(
+      <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+    )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
     // Usamos 5000 en lugar de 99999: lo suficientemente grande para ejercer el clamp,

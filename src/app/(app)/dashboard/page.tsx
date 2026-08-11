@@ -100,7 +100,7 @@ export default async function DashboardPage() {
         monthExpenseArsCents={view.monthExpenseArsCents}
       />
 
-      <Upcoming items={view.upcoming} />
+      <Upcoming items={view.upcoming} today={today} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>

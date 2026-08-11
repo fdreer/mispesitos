@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react"
 
 import { Button } from "@/components/ui/button"
-import { isOverdue, todayInAr } from "@/lib/dates"
+import { isOverdue, type IsoDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
 import { setInstallmentPaid } from "@/server/actions/movements"
 
@@ -15,21 +15,34 @@ type Row = {
   paid: boolean
 }
 
+/**
+ * `today` llega como prop y no se calcula acá: este es un componente cliente,
+ * y `todayInAr()` evaluado en el navegador puede dar un día distinto al que
+ * usó el servidor para el mismo render. Alrededor de medianoche eso es un
+ * mismatch de hidratación y un badge "vencida" que aparece o desaparece solo.
+ * El servidor ya tiene la fecha; se pasa.
+ */
 export function InstallmentRows({
   rows,
   currency,
+  today,
 }: {
   rows: Row[]
   currency: "ARS" | "USD"
+  today: IsoDate
 }) {
-  const [pending, startTransition] = useTransition()
+  const [, startTransition] = useTransition()
+  // El id en vuelo, no un booleano de la lista entera: con un flag compartido,
+  // marcar una cuota dejaba muertos los botones de las otras 19.
+  const [enVuelo, setEnVuelo] = useState<string | null>(null)
   const [error, setError] = useState<{ id: string; message: string } | null>(null)
-  const today = todayInAr()
 
   function handleToggle(row: Row) {
     setError(null)
+    setEnVuelo(row.id)
     startTransition(async () => {
       const result = await setInstallmentPaid(row.id, !row.paid)
+      setEnVuelo(null)
       if (!result.ok) {
         setError({ id: row.id, message: result.message })
       }
@@ -53,7 +66,7 @@ export function InstallmentRows({
                 type="button"
                 size="sm"
                 variant={row.paid ? "secondary" : "outline"}
-                disabled={pending}
+                disabled={enVuelo === row.id}
                 onClick={() => handleToggle(row)}
               >
                 {row.paid ? "Pagada" : "Marcar pagada"}

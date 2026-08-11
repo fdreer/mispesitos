@@ -60,6 +60,7 @@ export async function MovementScreen({ kind, statusParam }: Props) {
         kind={kind}
         categories={activeCategories}
         suggestedRate={rate?.referenceRate ?? null}
+        today={today}
       />
 
       <StatusFilter basePath={BASE_PATHS[kind]} current={statusFilter} />

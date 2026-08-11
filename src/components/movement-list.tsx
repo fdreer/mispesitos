@@ -62,7 +62,7 @@ export function MovementList({ movements, categories, today }: Props) {
                   </span>
                 </div>
               </summary>
-              <InstallmentRows rows={m.installments} currency={currency} />
+              <InstallmentRows rows={m.installments} currency={currency} today={today} />
               {/* El botón va fuera del <summary>: un <summary> no puede tener
                   descendientes interactivos, y anidarlo obligaba a un
                   preventDefault para que el click no togglee el detalle. */}
