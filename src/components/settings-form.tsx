@@ -110,6 +110,16 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
       </div>
 
       {state && !state.ok && <p className="text-destructive text-sm">{state.message}</p>}
+      {/*
+       * En /onboarding el éxito se ve porque la pantalla se va a /dashboard.
+       * En /ajustes no hay `redirectTo`, así que sin esto guardar no producía
+       * ninguna señal: el único feedback del formulario era el de error.
+       */}
+      {state?.ok && !redirectTo && (
+        <p className="text-pulse-green text-sm" role="status">
+          Guardado.
+        </p>
+      )}
 
       <Button type="submit" className="w-full" disabled={pending}>
         {pending ? "Guardando…" : submitLabel}
