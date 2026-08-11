@@ -120,9 +120,27 @@ que ya registró, pero no se pueden correr dos veces a mano.
 
 ### 3.4 Herramientas
 
-No hay medición de cobertura instalada. Las suites son grandes y buscan el caso
-que rompe, no el porcentaje, pero hoy no hay forma de ver qué quedó sin tocar sin
-agregar la herramienta.
+La cobertura se mide con `pnpm test:coverage` (`@vitest/coverage-v8`). El
+criterio sigue siendo el mismo —buscar el caso que rompe, no el porcentaje—,
+pero ahora se puede ver qué quedó sin tocar.
+
+Los tests de componente corren en la misma suite que los de lógica: los `.tsx`
+declaran su entorno con `// @vitest-environment jsdom` en la primera línea, así
+que el resto sigue corriendo en node y no paga jsdom.
+
+La primera corrida dio 94.39% de statements (337/357), 91.2% de branches
+(228/250), 89.09% de funciones (98/110) y 94.53% de líneas (294/311). Los tres
+archivos que quedaron claramente por debajo del resto: `components/movement-form.tsx`
+(75% stmts, 62.5% funcs), `components/ui/select.tsx` (72.72% stmts, 70% funcs)
+y `lib/movement-asserts.ts` (75% stmts, 75% funcs).
+
+La tabla sólo lista los archivos que la suite realmente importó, no el
+proyecto entero. `src/db/**` no aparece porque `pnpm test` excluye
+`*.db.test.ts` —esos corren aparte, por `pnpm test:db`, que sí los ejercita—
+y buena parte de `src/server/actions/**` tampoco aparece por el mismo motivo.
+Las pantallas de `src/app/**` y los formularios sin test propio (`ExchangeForm`,
+`SettingsForm`, `CategoryManager`, `AuthForm`, ver sección 2) tampoco figuran:
+no es que midan 0%, es que nada los importó en esta corrida.
 
 ---
 
