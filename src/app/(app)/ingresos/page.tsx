@@ -1,10 +1,9 @@
 import { MovementScreen } from "@/components/movement-screen"
 
 type Props = {
-  searchParams: Promise<{ status?: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }
 
 export default async function IngresosPage({ searchParams }: Props) {
-  const { status } = await searchParams
-  return <MovementScreen kind="income" statusParam={status} />
+  return <MovementScreen kind="income" searchParams={await searchParams} />
 }

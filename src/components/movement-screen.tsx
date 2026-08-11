@@ -1,11 +1,13 @@
 import { Suspense } from "react"
 
+import { MovementFilters } from "@/components/movement-filters"
 import { MovementFormDialog } from "@/components/movement-form-dialog"
 import { MovementList } from "@/components/movement-list"
-import { StatusFilter } from "@/components/status-filter"
+import { MovementPagination } from "@/components/movement-pagination"
 import { todayInAr, type IsoDate } from "@/lib/dates"
+import { hayFiltrosActivos, paginate, parseMovementQuery } from "@/lib/movement-query"
 import { BASE_PATHS } from "@/lib/movement-routes"
-import { getMovementStatus, type MovementStatus } from "@/lib/movement-status"
+import { getMovementStatus } from "@/lib/movement-status"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import { listCategories, listMovements, type Category } from "@/server/queries"
 import { requireSettings } from "@/server/session"
@@ -15,16 +17,10 @@ const TITLES: Record<"income" | "expense", string> = {
   expense: "Egresos",
 }
 
-const STATUS_VALUES: MovementStatus[] = ["pending", "paid", "overdue"]
-
-function parseStatus(raw: string | undefined): MovementStatus | "all" {
-  return (STATUS_VALUES as string[]).includes(raw ?? "") ? (raw as MovementStatus) : "all"
-}
-
 type Props = {
   kind: "income" | "expense"
-  /** El valor crudo de `?status=` de la URL, tal como llega del page.tsx. */
-  statusParam: string | undefined
+  /** Los search params crudos de la URL, tal como llegan del page.tsx. */
+  searchParams: Record<string, string | string[] | undefined>
 }
 
 /**
@@ -59,27 +55,40 @@ async function MovementFormDialogWithRate({
  * Cuerpo compartido de /ingresos y /egresos: sólo cambia `kind`. Ver
  * TITLES/BASE_PATHS de acá arriba para el resto de la diferencia.
  */
-export async function MovementScreen({ kind, statusParam }: Props) {
+export async function MovementScreen({ kind, searchParams }: Props) {
   const { user, settings } = await requireSettings()
   const today = todayInAr()
+  const query = parseMovementQuery(searchParams)
 
-  // Dos consultas a propósito, no una: el desplegable de carga (MovementForm)
-  // no debe ofrecer una categoría archivada, pero la lista (MovementList)
-  // arma el nombre de la categoría de CADA movimiento —viejo incluido— y una
-  // categoría archivada tiene que seguir resolviendo su nombre ahí. Si las dos
-  // pantallas compartieran la misma lista "sólo activas", archivar una
-  // categoría haría que los movimientos que la usaban pasen a mostrar "—".
+  // Dos consultas de categorías a propósito, no una: el desplegable de carga
+  // (MovementForm) no debe ofrecer una categoría archivada, pero la lista
+  // (MovementList) arma el nombre de la categoría de CADA movimiento —viejo
+  // incluido— y una categoría archivada tiene que seguir resolviendo su nombre
+  // ahí. Si las dos pantallas compartieran la misma lista "sólo activas",
+  // archivar una categoría haría que los movimientos que la usaban pasen a
+  // mostrar "—". El filtro usa la lista completa por el mismo motivo.
   const [activeCategories, allCategories, movements] = await Promise.all([
     listCategories(user.id, kind),
     listCategories(user.id, kind, true),
-    listMovements(user.id, { kind }),
+    listMovements(user.id, {
+      kind,
+      search: query.search || undefined,
+      categoryId: query.categoryId === "all" ? undefined : query.categoryId,
+      from: query.from || undefined,
+      to: query.to || undefined,
+    }),
   ])
 
-  const statusFilter = parseStatus(statusParam)
+  // El estado no es columna de la base: se deriva de las cuotas. Por eso se
+  // filtra acá y no en el WHERE, y por eso la paginación va después y no con
+  // un LIMIT: un LIMIT en la consulta no sabría cuántas filas van a sobrevivir
+  // a este filtro.
   const filtered =
-    statusFilter === "all"
+    query.status === "all"
       ? movements
-      : movements.filter((m) => getMovementStatus(m.installments, today) === statusFilter)
+      : movements.filter((m) => getMovementStatus(m.installments, today) === query.status)
+
+  const { items, page, totalPages } = paginate(filtered, query.page)
 
   return (
     <div className="space-y-6">
@@ -104,9 +113,29 @@ export async function MovementScreen({ kind, statusParam }: Props) {
         </Suspense>
       </div>
 
-      <StatusFilter basePath={BASE_PATHS[kind]} current={statusFilter} />
+      <MovementFilters
+        basePath={BASE_PATHS[kind]}
+        query={query}
+        categories={allCategories}
+      />
 
-      <MovementList movements={filtered} categories={allCategories} today={today} />
+      <MovementList
+        movements={items}
+        categories={allCategories}
+        today={today}
+        emptyMessage={
+          hayFiltrosActivos(query)
+            ? "Ningún movimiento entra en el filtro."
+            : "Todavía no cargaste nada acá."
+        }
+      />
+
+      <MovementPagination
+        basePath={BASE_PATHS[kind]}
+        query={query}
+        page={page}
+        totalPages={totalPages}
+      />
     </div>
   )
 }
