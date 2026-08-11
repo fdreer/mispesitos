@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { es } from "date-fns/locale"
 
 import { MovementFilters } from "@/components/movement-filters"
 import { dateToIso } from "@/lib/dates"
@@ -36,15 +37,24 @@ function dayInCurrentMonth(day: number): Date {
 
 /**
  * Botón de un día del calendario, ubicado por su atributo `data-day`
- * (`CalendarDayButton` en calendar.tsx lo arma con `toLocaleDateString()`) y
- * no por el número visible: la grilla puede mostrar "días de afuera" del mes
- * siguiente o anterior con el mismo número que un día real del mes actual
- * (p. ej. el 5 de este mes y el 5 del que viene, en la misma semana final), y
- * buscar por texto encontraría el primero que aparezca en el DOM, no
- * necesariamente el del mes bajo prueba.
+ * (`CalendarDayButton` en calendar.tsx lo arma con
+ * `day.date.toLocaleDateString(locale?.code)`, y el componente le pasa la
+ * locale `es`) y no por el número visible: la grilla puede mostrar "días de
+ * afuera" del mes siguiente o anterior con el mismo número que un día real
+ * del mes actual (p. ej. el 5 de este mes y el 5 del que viene, en la misma
+ * semana final), y buscar por texto encontraría el primero que aparezca en
+ * el DOM, no necesariamente el del mes bajo prueba.
+ *
+ * `toLocaleDateString()` SIN código de locale usa el default de la máquina
+ * que corre el test — no el de `es` que arma el componente. En una máquina
+ * de-AR-o-similar los dos formatean igual (d/m/yyyy) y por eso la suite
+ * pasaba igual, pero en una en-US-default `toLocaleDateString()` da
+ * "m/d/yyyy" mientras el componente sigue armando "d/m/yyyy": ningún día se
+ * encuentra y los tests de calendario explotan. Se fuerza acá el mismo
+ * código de locale (`es.code`, es decir "es") que recibe el componente.
  */
 function getDayButton(date: Date): HTMLElement {
-  const target = date.toLocaleDateString()
+  const target = date.toLocaleDateString(es.code)
   const found = screen.getAllByRole("button").find((b) => b.getAttribute("data-day") === target)
   if (!found) throw new Error(`No se encontró el botón del ${target}`)
   return found
@@ -430,6 +440,26 @@ describe("MovementFilters", () => {
     expect(push).toHaveBeenCalledWith(`/egresos?from=${iso}`)
   })
 
+  // Fix 1: sin `startMonth`/`endMonth`, `captionLayout="dropdown"` hace que
+  // react-day-picker calcule sus propios bordes de navegación — hasta
+  // diciembre de ESTE año nada más, sin importar qué mes pida
+  // `defaultMonth` (`getInitialMonth` lo clampea de vuelta a ese borde).
+  // Esta app agenda cuotas hasta `MAX_INSTALLMENTS = 120` meses (diez años)
+  // adelante (`installments.ts`), así que sin bordes explícitos un filtro
+  // de "desde enero del año que viene" no tiene forma de mostrarse: el
+  // calendario abre en diciembre de este año con la selección fuera de
+  // pantalla y ni la flecha "mes siguiente" ni el desplegable de año
+  // ofrecen manera de llegar ahí.
+  it("el calendario llega a enero del año que viene, no se topa en diciembre de este año", () => {
+    const nextYear = new Date().getFullYear() + 1
+    const day = new Date(nextYear, 0, 15)
+    montar({ from: dateToIso(day) })
+
+    fireEvent.click(getPeriodoTrigger())
+
+    expect(getDayButton(day)).toBeTruthy()
+  })
+
   // Con un rango ya puesto, "Borrar rango" tiene que sacar sólo `from`/`to` y
   // no tocar el resto: "Limpiar" (que borra todo) sigue estando para el caso
   // general, esto es para cuando la persona quiere conservar los demás
@@ -443,6 +473,60 @@ describe("MovementFilters", () => {
     fireEvent.click(screen.getByRole("button", { name: "Borrar rango" }))
 
     expect(push).toHaveBeenCalledWith("/egresos?status=paid")
+  })
+
+  // Fix 3: la comparación de cierre leía la prop `query`, que se queda vieja
+  // hasta que el push commitea. "Borrar rango" ya navegó y actualizó
+  // `queryRef.current` (no cierra el popover solo), así que cerrar ANTES de
+  // que ese push commitee comparaba contra una `query` que todavía mostraba
+  // el rango viejo y disparaba un segundo push idéntico. El mock de `push`
+  // nunca hace "commitear" la navegación (no hay `rerender` acá), así que el
+  // escenario queda expuesto tal cual: si la comparación mirara la prop en
+  // vez de `queryRef.current`, este test vería dos pushes.
+  it("cerrar el popover justo después de 'Borrar rango' no dispara un segundo push (fix 3)", () => {
+    montar({ status: "paid", from: "2026-01-05", to: "2026-01-20" })
+
+    fireEvent.click(getPeriodoTrigger())
+    fireEvent.click(screen.getByRole("button", { name: "Borrar rango" }))
+    expect(push).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(getPeriodoTrigger())
+
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(push).toHaveBeenLastCalledWith("/egresos?status=paid")
+  })
+
+  // Fix 4: el borrador se siembra al abrir y no se resembraba si `query`
+  // cambiaba con el popover TODAVÍA abierto. Radix no cierra el popover por
+  // una navegación de historial (no la escucha), así que un Atrás del
+  // navegador dejaba el borrador viejo puesto; al cerrar sin tocar nada, la
+  // comparación lo veía distinto de la `query` ya vuelta atrás y reaplicaba
+  // el rango de ANTES del Atrás, deshaciéndolo. Se simula "Atrás" con un
+  // `rerender` a una prop `query` DISTINTA en valor (a diferencia de los
+  // tests de "navegación pendiente" de más arriba, que resimulan con la
+  // MISMA referencia para representar un commit propio todavía en tránsito):
+  // acá se representa justo lo contrario, una navegación externa real.
+  it("volver atrás con el navegador mientras el período está abierto no se deshace solo al cerrar (fix 4)", () => {
+    push.mockClear()
+    const queryA = parseMovementQuery({ from: "2026-01-05", to: "2026-01-20" })
+    const { rerender } = render(
+      <MovementFilters basePath="/egresos" query={queryA} categories={CATEGORIAS} />,
+    )
+
+    fireEvent.click(getPeriodoTrigger())
+
+    // "Atrás": la prop `query` que manda el server component vuelve a un
+    // estado sin rango sin que el componente haya pedido nada — el popover
+    // sigue abierto, Radix no escucha el historial.
+    const queryB = parseMovementQuery({})
+    rerender(<MovementFilters basePath="/egresos" query={queryB} categories={CATEGORIAS} />)
+
+    // Cerrar sin tocar nada.
+    fireEvent.click(getPeriodoTrigger())
+
+    // Si el borrador no se hubiera resembrado, acá reaplicaría el rango de
+    // `queryA`, pisando el Atrás.
+    expect(push).not.toHaveBeenCalled()
   })
 
   // Hallazgo D: el trigger tenía una asociación válida <Label htmlFor> +

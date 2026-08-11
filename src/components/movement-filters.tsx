@@ -49,6 +49,25 @@ const STATUS_OPTIONS: { value: MovementStatus | "all"; label: string }[] = [
 const DEBOUNCE_MS = 400
 
 /**
+ * Bordes de navegación del calendario, en años redondos para que el
+ * desplegable de año quede prolijo. SIN esto, `captionLayout="dropdown"`
+ * hace que react-day-picker 10 (`getNavMonth`) calcule sus propios bordes
+ * y el techo queda en el 31 de diciembre de ESTE año: la flecha "mes
+ * siguiente" se deshabilita ahí, el desplegable de año no ofrece ningún año
+ * futuro, y `defaultMonth` se clampea de vuelta a ese techo aunque pida un
+ * mes más adelante — un `?from=` de marzo del año que viene abriría en
+ * diciembre de este año con la selección fuera de pantalla. Esta app SÍ
+ * necesita ese margen hacia adelante: `addMonthsClamped` en
+ * `installments.ts` agenda cuotas hasta `MAX_INSTALLMENTS = 120` meses
+ * (diez años) desde la primera fecha de vencimiento, así que sin este borde
+ * hay movimientos reales que ningún filtro de fecha puede alcanzar. No
+ * simplificar sacando estos bordes: sin ellos el tope silencioso vuelve.
+ */
+const CALENDAR_YEARS_MARGIN = 10
+const CALENDAR_START_MONTH = new Date(new Date().getFullYear() - CALENDAR_YEARS_MARGIN, 0, 1)
+const CALENDAR_END_MONTH = new Date(new Date().getFullYear() + CALENDAR_YEARS_MARGIN, 11, 1)
+
+/**
  * "YYYY-MM-DD" -> "DD/MM/YYYY" para mostrar en el botón del picker. Es sólo
  * reordenar texto, no pasa por `Date` en ningún momento: no hay zona horaria
  * de la que cuidarse acá.
@@ -146,6 +165,12 @@ export function MovementFilters({ basePath, query, categories }: Props) {
   // antes de que el primero commitee no veía el primer día puesto y perdía
   // el rango a medias (hallazgo A de la auditoría).
   const [draft, setDraft] = useState<DateRange | undefined>(undefined)
+  // Sólo existe para que el efecto de acá abajo sepa si tiene que resembrar
+  // `draft` cuando cambia `query` (ver ese comentario): Radix es dueño de su
+  // propio estado de apertura y sólo nos avisa por `onOpenChange`, así que
+  // sin esto el componente no tiene forma de saber "¿el popover sigue
+  // abierto ahora?" fuera de ese callback.
+  const [periodoAbierto, setPeriodoAbierto] = useState(false)
   // Vive en un ref: `go()`, `limpiar()` y el propio debounce necesitan poder
   // cancelarlo o reprogramarlo entre renders sin disparar uno nuevo (un
   // estado sí lo haría).
@@ -168,9 +193,39 @@ export function MovementFilters({ basePath, query, categories }: Props) {
   // prop todavía vieja— pisaría el valor recién empujado con esa prop vieja,
   // reabriendo el mismo bug.
   const queryRef = useRef(query)
+  // Además de la sync de arriba, este efecto resiembra `draft` cuando `query`
+  // cambia CON EL POPOVER TODAVÍA ABIERTO. Sin esto, Atrás/Adelante del
+  // navegador puede deshacerse solo: Radix no cierra el popover por una
+  // navegación de historial (no es él quien la escucha), así que `draft` se
+  // queda con la selección de ANTES de volver; al cerrar, la comparación de
+  // `handlePeriodoOpenChange` la ve distinta de la `query` ya vuelta atrás y
+  // la reaplica con `go()`, pisando el Atrás que la persona acaba de pedir.
+  //
+  // La comparación es por VALOR de `from`/`to` contra `queryRef.current`, NO
+  // por referencia del objeto `query` entero: eso es lo que distingue un
+  // cambio externo (Atrás, Adelante, un link) de uno que este mismo
+  // componente originó (`go()`, `limpiar()`, el debounce del buscador). Esos
+  // tres actualizan `queryRef.current` SINCRÓNICAMENTE al valor que están por
+  // confirmar, antes de que el `push` real commitee — así que para cuando la
+  // prop `query` efectivamente llega, ya coincide EN VALOR con
+  // `queryRef.current` (aunque sea un objeto `MovementQuery` nuevo, con otra
+  // referencia: `hrefToQuery` arma uno de cero en cada llamada). Eso es clave
+  // para no pisar una selección en curso: después de clickear "Borrar rango"
+  // (que navega con el popover todavía abierto, ver más abajo), la persona
+  // puede arrancar un rango nuevo mientras ese primer push todavía viaja: la
+  // llegada tardía de la `query` ya vacía coincide EN VALOR con lo que
+  // `queryRef.current` ya tenía anotado desde el click, así que no se
+  // considera "externa" y el rango nuevo que se está armando no se resiembra
+  // por encima.
   useEffect(() => {
+    if (
+      periodoAbierto &&
+      (query.from !== queryRef.current.from || query.to !== queryRef.current.to)
+    ) {
+      setDraft(rangeFromQuery(query))
+    }
     queryRef.current = query
-  }, [query])
+  }, [query, periodoAbierto])
   // El timeout del debounce es un setTimeout de JS puro: React no sabe que
   // existe, así que si el componente se desmonta antes de que dispare, nadie
   // lo cancela y termina navegando desde una pantalla que ya no está.
@@ -271,6 +326,7 @@ export function MovementFilters({ basePath, query, categories }: Props) {
    * para aplicar el borrador sin importar cómo se cerró.
    */
   function handlePeriodoOpenChange(open: boolean) {
+    setPeriodoAbierto(open)
     if (open) {
       // Única vez que el borrador copia algo de afuera: se siembra desde el
       // filtro YA aplicado (`query`, igual que el resto de los controles de
@@ -280,11 +336,20 @@ export function MovementFilters({ basePath, query, categories }: Props) {
       return
     }
     const patch = rangeToPatch(draft)
-    // Si el borrador quedó igual a lo que ya está aplicado —se abrió y se
-    // cerró sin tocar nada, o se clickeó hasta volver al mismo estado—, no
-    // hay nada que navegar: abrir y cerrar el popover no puede ser un viaje
-    // al server por sí solo.
-    if (patch.from === query.from && patch.to === query.to) return
+    // El borrador vive y muere con esta apertura (ver el comentario de
+    // `draft`): se descarta ACÁ, se haya aplicado o no, para que la próxima
+    // apertura nunca herede nada de ésta.
+    setDraft(undefined)
+    // Contra `queryRef.current`, no contra la prop `query`: la prop se queda
+    // vieja hasta que el viaje al servidor commitea (mismo motivo que en
+    // `go()`, ver el comentario de `queryRef`). Comparar contra la prop
+    // dejaba una ventana: clickear "Borrar rango" (que ya navegó y actualizó
+    // `queryRef.current`, ver más abajo) y cerrar el popover ANTES de que
+    // ese push commitee comparaba contra una `query` que todavía mostraba el
+    // rango viejo, así que disparaba un segundo push idéntico — inocuo en el
+    // resultado final, pero una entrada de historial de más y un viaje de
+    // más que nadie pidió.
+    if (patch.from === queryRef.current.from && patch.to === queryRef.current.to) return
     go(patch)
   }
 
@@ -423,6 +488,8 @@ export function MovementFilters({ basePath, query, categories }: Props) {
               mode="range"
               locale={es}
               captionLayout="dropdown"
+              startMonth={CALENDAR_START_MONTH}
+              endMonth={CALENDAR_END_MONTH}
               // Sin esto el calendario siempre abre en el mes de "hoy" (no
               // hay `forceMount`, así que se remonta en cada apertura) — con
               // años de movimientos cargados, un filtro de marzo de 2025
