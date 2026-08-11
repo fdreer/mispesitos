@@ -11,7 +11,10 @@ export default async function CambiosPage() {
 
   const [events, exchanges, rate] = await Promise.all([
     listUsdPositionEvents(user.id),
-    listExchanges(user.id),
+    // El mismo piso de fecha que usa listUsdPositionEvents para las tres
+    // tarjetas de arriba: una operación anterior al saldo inicial no las mueve,
+    // así que tampoco tiene que aparecer en la lista de abajo.
+    listExchanges(user.id, settings.initialBalanceDate),
     fetchSuggestedRate(settings.preferredRate as RatePreference),
   ])
 

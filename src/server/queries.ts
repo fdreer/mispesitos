@@ -151,15 +151,28 @@ export async function listPendingInstallments(userId: string) {
   )
 }
 
-/** Todos los cambios de divisa, para saldo y posición. */
-export async function listExchanges(userId: string) {
-  return withUser(userId, (tx) =>
-    tx
+/**
+ * Cambios de divisa, para saldo y posición.
+ *
+ * `from` es opcional y existe para /cambios: las tres tarjetas de esa pantalla
+ * salen de `listUsdPositionEvents`, que corta en `initialBalanceDate`. Sin el
+ * mismo corte en la lista, una operación anterior al saldo inicial se veía en
+ * la lista sin mover ninguna de las tarjetas de arriba.
+ *
+ * El dashboard lo llama SIN `from` a propósito: `computeBalances` (@/lib/balance)
+ * aplica su propio corte en memoria, y ese corte es el que está testeado.
+ */
+export async function listExchanges(userId: string, from?: string) {
+  return withUser(userId, (tx) => {
+    const conditions = [eq(movement.userId, userId), eq(movement.kind, "exchange")]
+    if (from) conditions.push(gte(movement.date, from))
+
+    return tx
       .select()
       .from(movement)
-      .where(and(eq(movement.userId, userId), eq(movement.kind, "exchange")))
-      .orderBy(asc(movement.date)),
-  )
+      .where(and(...conditions))
+      .orderBy(asc(movement.date))
+  })
 }
 
 /**

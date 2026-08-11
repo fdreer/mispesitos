@@ -844,6 +844,19 @@ describe("listExchanges", () => {
     expect(ids(await listExchanges(USUARIO_A))).toContain(MOV.cambioViejo)
   })
 
+  it("con piso de fecha deja afuera lo anterior a ese día", async () => {
+    // El llamado que hace /cambios: el mismo corte que listUsdPositionEvents
+    // aplica para las tres tarjetas de esa pantalla.
+    const desde = ids(await listExchanges(USUARIO_A, SALDO_INICIAL_A))
+
+    expect(desde).not.toContain(MOV.cambioViejo)
+    // El del día exacto SÍ entra: el corte es `>=`, igual que el de
+    // listUsdPositionEvents. Un `gt` acá volvería a abrir la brecha entre las
+    // dos pantallas que ese otro describe protege.
+    expect(desde).toContain(MOV.cambioBorde)
+    expect(desde).toContain(MOV.cambioVenta)
+  })
+
   it("no trae cambios de otro usuario", async () => {
     const cambios = await listExchanges(USUARIO_A)
 
