@@ -8,6 +8,7 @@ import { z } from "zod"
 import { withUser } from "@/db/client"
 import { category, userSettings } from "@/db/schema"
 import { DEFAULT_CATEGORIES } from "@/lib/default-categories"
+import { logDbError } from "@/lib/log-db-error"
 import { settingsSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { requireUser } from "@/server/session"
@@ -79,7 +80,7 @@ export async function saveSettings(
         .onConflictDoNothing()
     })
   } catch (error) {
-    console.error("saveSettings", error)
+    logDbError("saveSettings", error)
     return failure("No pudimos guardar los ajustes. Probá de nuevo.")
   }
 

@@ -152,7 +152,14 @@ export const movementSchema = z
     categoryId: z.string().min(1, "Elegí una categoría."),
     date: isoDate,
     currency: currency,
-    amountCents: amountCents,
+    /**
+     * Mayor a cero, no sólo no-negativo: un movimiento de $0 no es un dato, es
+     * una fila que después aparece en la torta y en las barras aportando nada.
+     * La cota va acá y no en `amountCents` porque esa pieza la comparte
+     * `settingsSchema`, donde el cero SÍ es válido (un saldo inicial sin
+     * dólares). Mismo patrón que `exchangeSchema.usdCents`.
+     */
+    amountCents: amountCents.refine((c) => c > 0, "El importe tiene que ser mayor a cero."),
     rate: positiveRate,
     installments: z
       .array(installmentInput)

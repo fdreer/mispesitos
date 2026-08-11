@@ -8,6 +8,7 @@ import { z } from "zod"
 import { withUser } from "@/db/client"
 import { installment, movement } from "@/db/schema"
 import { todayInAr } from "@/lib/dates"
+import { logDbError } from "@/lib/log-db-error"
 import { BASE_PATHS } from "@/lib/movement-routes"
 import { exchangeSchema, movementSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
@@ -85,7 +86,7 @@ export async function createMovement(
       )
     })
   } catch (error) {
-    console.error("createMovement", error)
+    logDbError("createMovement", error)
     return failure("No pudimos guardar el movimiento. Probá de nuevo.")
   }
 
@@ -139,7 +140,7 @@ export async function createExchange(
       }),
     )
   } catch (error) {
-    console.error("createExchange", error)
+    logDbError("createExchange", error)
     return failure("No pudimos registrar la operación.")
   }
 
@@ -170,7 +171,7 @@ export async function deleteMovement(id: string): Promise<ActionResult> {
         .where(and(eq(movement.id, parsed.data), eq(movement.userId, user.id))),
     )
   } catch (error) {
-    console.error("deleteMovement", error)
+    logDbError("deleteMovement", error)
     return failure("No pudimos borrar el movimiento.")
   }
 
@@ -207,7 +208,7 @@ export async function setInstallmentPaid(id: string, paid: boolean): Promise<Act
 
     if (updated.length === 0) return failure("No encontramos esa cuota.")
   } catch (error) {
-    console.error("setInstallmentPaid", error)
+    logDbError("setInstallmentPaid", error)
     return failure("No pudimos actualizar la cuota.")
   }
 

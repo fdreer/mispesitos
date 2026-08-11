@@ -8,6 +8,7 @@ import { z } from "zod"
 import { withUser } from "@/db/client"
 import { category } from "@/db/schema"
 import { isUniqueViolation } from "@/lib/db-errors"
+import { logDbError } from "@/lib/log-db-error"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { requireUser } from "@/server/session"
 
@@ -41,10 +42,10 @@ export async function createCategory(
     // genérico: decirle "nombre repetido" al usuario cuando no lo es no le
     // deja forma de entender qué pasa.
     if (isUniqueViolation(error, "category_active_unique")) {
-      console.error("createCategory: nombre repetido", error)
+      logDbError("createCategory: nombre repetido", error)
       return failure("Ya tenés una categoría con ese nombre.")
     }
-    console.error("createCategory", error)
+    logDbError("createCategory", error)
     return failure("No pudimos crear la categoría. Probá de nuevo.")
   }
 
@@ -83,7 +84,7 @@ export async function archiveCategory(id: string): Promise<ActionResult> {
 
     if (updated.length === 0) return failure("No encontramos esa categoría.")
   } catch (error) {
-    console.error("archiveCategory", error)
+    logDbError("archiveCategory", error)
     return failure("No pudimos archivar la categoría.")
   }
 

@@ -59,6 +59,21 @@ describe("settingsSchema", () => {
     expect(result.success).toBe(true)
   })
 
+  it("sigue admitiendo un saldo inicial en cero", () => {
+    // `amountCents` la comparten los dos esquemas: la cota de "mayor a cero"
+    // es de movementSchema y no puede haberse colado acá, donde arrancar sin
+    // un peso y sin un dólar es un caso legítimo.
+    const result = settingsSchema.safeParse({
+      initialBalanceArsCents: "0",
+      initialBalanceUsdCents: "0",
+      initialBalanceUsdRate: "0",
+      initialBalanceDate: "2026-08-10",
+      preferredRate: "blue",
+    })
+
+    expect(result.success).toBe(true)
+  })
+
   it("rechaza una fecha con formato inválido", () => {
     const result = settingsSchema.safeParse({ ...valid, initialBalanceDate: "10/08/2026" })
     expect(result.success).toBe(false)
@@ -385,6 +400,22 @@ describe("movementSchema", () => {
     })
 
     expect(result.success).toBe(true)
+  })
+
+  it("rechaza un movimiento de importe cero", () => {
+    const result = movementSchema.safeParse({
+      kind: "expense",
+      description: "Nada",
+      categoryId: "cat-1",
+      date: "2026-08-10",
+      currency: "ARS",
+      amountCents: "0",
+      rate: "1",
+      installments: [{ amountCents: 0, dueDate: "2026-08-10" }],
+    })
+
+    expect(result.success).toBe(false)
+    expect(fieldError(result, "amountCents")).toBeDefined()
   })
 
   it("rechaza 121 cuotas", () => {
