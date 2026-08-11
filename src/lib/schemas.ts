@@ -173,8 +173,6 @@ export const movementSchema = z
     },
   )
 
-export type MovementInput = z.infer<typeof movementSchema>
-
 /**
  * Compra o venta de dólares. A diferencia de `movementSchema`, no lleva
  * `categoryId` ni `installments`: un cambio es instantáneo, mueve las dos
@@ -186,5 +184,3 @@ export const exchangeSchema = z.object({
   usdCents: amountCents.refine((c) => c > 0, "Poné una cantidad mayor a cero."),
   rate: positiveRate,
 })
-
-export type ExchangeInput = z.infer<typeof exchangeSchema>

@@ -61,21 +61,10 @@ const ejecutarConsultaRolReal: EjecutorConsultaRol = async () => {
   return [...filas] as { rolbypassrls: boolean; rolsuper: boolean }[]
 }
 
-/**
- * El ejecutor es inyectable y con el ejecutor real como default: withUser()
- * sigue llamando esta función sin argumentos, igual que antes de separar la
- * verificación en @/lib/rls-guard.
- */
-async function consultarRolDeConexion(
-  ejecutarConsulta: EjecutorConsultaRol = ejecutarConsultaRolReal,
-): Promise<void> {
-  await verificarRolNoSalteaRls(ejecutarConsulta)
-}
-
 function verificarRolSinBypassRls(): Promise<void> {
   const enCurso =
     verificacionDeRol ??
-    consultarRolDeConexion().catch((error: unknown) => {
+    verificarRolNoSalteaRls(ejecutarConsultaRolReal).catch((error: unknown) => {
       verificacionDeRol = undefined
       throw error
     })

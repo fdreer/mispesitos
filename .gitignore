@@ -35,3 +35,10 @@ next-env.d.ts
 
 # Config local del launcher del editor
 /.claude/
+
+# Estado local de las herramientas de agentes: no es del proyecto.
+/.agents/
+/.playwright/
+/.playwright-cli/
+/.superpowers/
+skills-lock.json
