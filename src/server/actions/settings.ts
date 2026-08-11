@@ -46,23 +46,37 @@ export async function saveSettings(
         .where(eq(userSettings.userId, user.id))
         .limit(1)
 
-      if (existing.length > 0) {
-        await tx.update(userSettings).set(values).where(eq(userSettings.userId, user.id))
-        return
-      }
+      // `onConflictDoUpdate` en vez de ramificar entre INSERT y UPDATE: entre
+      // el SELECT de arriba y esta línea puede colarse otro request del mismo
+      // usuario (dos clics en "Listo, empezar"). Con el INSERT pelado, el
+      // segundo chocaba contra la PK, la transacción entera volvía atrás y el
+      // usuario veía "no pudimos guardar" con los ajustes ya guardados.
+      await tx
+        .insert(userSettings)
+        .values({ userId: user.id, ...values })
+        .onConflictDoUpdate({ target: userSettings.userId, set: values })
 
-      await tx.insert(userSettings).values({ userId: user.id, ...values })
+      if (existing.length > 0) return
 
       // Primera vez: se precargan las categorías para que nadie arranque con
       // una pantalla en blanco.
-      await tx.insert(category).values(
-        DEFAULT_CATEGORIES.map((c) => ({
-          id: randomUUID(),
-          userId: user.id,
-          name: c.name,
-          kind: c.kind,
-        })),
-      )
+      //
+      // `onConflictDoNothing` por la misma carrera: si el otro request ya las
+      // sembró, el índice único parcial (category_active_unique) las rechaza
+      // una por una en vez de tumbar la transacción. NO se llega acá en un
+      // guardado desde /ajustes —`existing` corta antes—, así que archivar una
+      // categoría y volver a guardar los ajustes no la resucita.
+      await tx
+        .insert(category)
+        .values(
+          DEFAULT_CATEGORIES.map((c) => ({
+            id: randomUUID(),
+            userId: user.id,
+            name: c.name,
+            kind: c.kind,
+          })),
+        )
+        .onConflictDoNothing()
     })
   } catch (error) {
     console.error("saveSettings", error)

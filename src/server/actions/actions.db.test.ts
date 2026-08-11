@@ -53,6 +53,12 @@ const USUARIO_B = "actions-test-b"
 /** Recién llegado: sin ajustes y sin categorías, para el onboarding. */
 const USUARIO_NUEVO = "actions-test-nuevo"
 /**
+ * Otro recién llegado, aparte de USUARIO_NUEVO: el caso de carrera necesita
+ * arrancar sin ajustes y sin categorías, y los dos tests de onboarding que ya
+ * están dejan a USUARIO_NUEVO con las dos cosas.
+ */
+const USUARIO_CARRERA = "actions-test-carrera"
+/**
  * NO se siembra en `user` a propósito. Es la forma de provocar un error real de
  * la base que NO es una violación de unicidad (la FK `category.user_id → user.id`
  * lo rechaza con 23503), que es lo que hace falta para probar que
@@ -81,7 +87,7 @@ const USUARIO_FANTASMA = "actions-test-fantasma"
  */
 const USUARIO_QUE_LA_BASE_NO_PUEDE_LEER = "actions-test-\u0000"
 
-const USUARIOS_SEMBRADOS = [USUARIO_A, USUARIO_B, USUARIO_NUEVO]
+const USUARIOS_SEMBRADOS = [USUARIO_A, USUARIO_B, USUARIO_NUEVO, USUARIO_CARRERA]
 /** El fantasma nunca llega a escribir nada, pero se limpia igual por las dudas. */
 const USUARIOS_A_LIMPIAR = [...USUARIOS_SEMBRADOS, USUARIO_FANTASMA]
 
@@ -1491,6 +1497,40 @@ describe("saveSettings", () => {
     // por el UPDATE y se saltea la precarga.
     expect(await ajustesDe(USUARIO_NUEVO)).toHaveLength(1)
     expect(await categoriasDe(USUARIO_NUEVO)).toHaveLength(DEFAULT_CATEGORIES.length)
+  })
+
+  /**
+   * NO BORRAR NI RELAJAR. `saveSettings` hace select-y-después-decide: mira si
+   * ya hay ajustes y recién ahí elige entre INSERT y UPDATE. Con dos clics en
+   * "Listo, empezar" casi al mismo tiempo —doble click, doble tab, lo que sea—
+   * los dos requests hacen su SELECT antes de que el otro haya insertado nada,
+   * así que los dos toman la rama del alta. El segundo INSERT choca contra la
+   * PK de `user_settings`, esa transacción entera vuelve atrás, y ese usuario
+   * ve "No pudimos guardar los ajustes" con sus ajustes YA guardados por el
+   * otro request. El mensaje miente.
+   *
+   * `Promise.all` no fuerza el orden por sí solo: lo que abre la ventana es que
+   * cada llamada hace un viaje de red real a Supabase antes de decidir qué
+   * rama tomar, y ese viaje de red tarda muchísimo más que lo que tarda el
+   * event loop en arrancar la segunda llamada. Las dos SELECT quedan pedidas
+   * antes de que cualquiera de las dos INSERT haya viajado.
+   */
+  it("dos altas simultáneas del mismo usuario terminan las dos en ok", async () => {
+    comoUsuario(USUARIO_CARRERA)
+    expect(await categoriasDe(USUARIO_CARRERA)).toEqual([])
+
+    // Dos clics en "Listo, empezar". Los dos requests hacen su SELECT antes de
+    // que el otro haya insertado, así que los dos toman la rama del alta.
+    const [a, b] = await Promise.all([
+      saveSettings(null, formulario(AJUSTES_VALIDOS)),
+      saveSettings(null, formulario(AJUSTES_VALIDOS)),
+    ])
+
+    expect(a).toEqual({ ok: true })
+    expect(b).toEqual({ ok: true })
+
+    // Y las categorías por default quedaron sembradas UNA sola vez.
+    expect(await categoriasDe(USUARIO_CARRERA)).toHaveLength(DEFAULT_CATEGORIES.length)
   })
 
   it("guardar los ajustes de uno no toca los del otro", async () => {
