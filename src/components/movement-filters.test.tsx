@@ -54,6 +54,22 @@ describe("MovementFilters", () => {
     expect(push).toHaveBeenCalledWith("/egresos?search=kiosco")
   })
 
+  // El timeout del debounce es un setTimeout de JS puro, ajeno al ciclo de
+  // vida de React: si el componente se desmonta antes de que se cumplan los
+  // 400ms, nada lo cancela y dispara igual, navegando desde una pantalla que
+  // ya no existe.
+  it("desmontar mientras el buscador espera no navega después", () => {
+    vi.useFakeTimers()
+    const { unmount } = montar()
+
+    fireEvent.change(screen.getByLabelText("Buscar"), { target: { value: "kiosco" } })
+
+    unmount()
+    vi.advanceTimersByTime(400)
+
+    expect(push).not.toHaveBeenCalled()
+  })
+
   it("elegir una fecha navega con el filtro puesto", () => {
     montar()
 

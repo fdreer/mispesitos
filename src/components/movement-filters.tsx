@@ -66,6 +66,10 @@ export function MovementFilters({ basePath, query, categories }: Props) {
   useEffect(() => {
     queryRef.current = query
   })
+  // El timeout del debounce es un setTimeout de JS puro: React no sabe que
+  // existe, así que si el componente se desmonta antes de que dispare, nadie
+  // lo cancela y termina navegando desde una pantalla que ya no está.
+  useEffect(() => () => clearTimeout(searchTimeout.current), [])
 
   // El buscador navega solo, con espera: una navegación por tecla tipeada es
   // una consulta a la base por tecla. Los otros filtros cambian de a un click
