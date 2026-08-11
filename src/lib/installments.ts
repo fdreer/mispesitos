@@ -1,5 +1,20 @@
 import { addMonthsClamped, type IsoDate } from "@/lib/dates"
 
+/**
+ * Techo de cuotas de un movimiento. La cota no es de negocio: es de volumen.
+ * Cada cuota es una fila que se inserta en la misma transacción, y la cantidad
+ * la elige el cliente. Sin techo, un POST armado a mano escribe las filas que
+ * quiera. 120 son diez años de cuotas mensuales, más de lo que cualquier plan
+ * real necesita.
+ *
+ * Vive acá y no en `schemas.ts` porque los dos lados tienen que usar el mismo
+ * número —el `max` del input y el `.max()` del schema son la misma regla— y
+ * éste es el módulo que ya comparten el formulario cliente y el schema
+ * servidor. Importarlo desde `schemas.ts` metería zod en el bundle del
+ * navegador para el precio de un entero.
+ */
+export const MAX_INSTALLMENTS = 120
+
 export type PlannedInstallment = {
   number: number
   amountCents: number

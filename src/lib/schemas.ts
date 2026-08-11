@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { isValidIsoDate } from "@/lib/dates"
-import { installmentsSumMatches } from "@/lib/installments"
+import { installmentsSumMatches, MAX_INSTALLMENTS } from "@/lib/installments"
 import { parseAmountToCents, parseDecimalInput } from "@/lib/money"
 
 /** Importe tipeado por el usuario, convertido a centavos enteros. */
@@ -122,18 +122,6 @@ export const settingsSchema = z
   )
 
 export const currency = z.enum(["ARS", "USD"])
-
-/**
- * Techo de cuotas de un movimiento. La cota no es de negocio: es de volumen.
- * Cada cuota es una fila que se inserta en la misma transacción, y la cantidad
- * la elige el cliente. Sin techo, un POST armado a mano escribe las filas que
- * quiera. 120 son diez años de cuotas mensuales, más de lo que cualquier plan
- * real necesita.
- *
- * Vive acá y no en el formulario porque los dos lados tienen que usar el mismo
- * número: el `max` del input y este `.max()` son la misma regla.
- */
-export const MAX_INSTALLMENTS = 120
 
 /**
  * Una cuota tal como llega del formulario.

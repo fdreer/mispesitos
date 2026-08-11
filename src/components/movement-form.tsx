@@ -16,9 +16,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { isValidIsoDate, type IsoDate } from "@/lib/dates"
-import { buildInstallments } from "@/lib/installments"
+import { buildInstallments, MAX_INSTALLMENTS } from "@/lib/installments"
 import { formatMoney, parseAmountToCents } from "@/lib/money"
-import { MAX_INSTALLMENTS } from "@/lib/schemas"
 import { createMovement } from "@/server/actions/movements"
 import type { Category } from "@/server/queries"
 
