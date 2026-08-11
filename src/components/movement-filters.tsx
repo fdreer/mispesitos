@@ -1,11 +1,13 @@
 "use client"
 
-import { useEffect, useRef, useState, useTransition } from "react"
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
-import { CalendarIcon } from "lucide-react"
+import { CalendarIcon, SearchIcon, XIcon } from "lucide-react"
 import { es } from "date-fns/locale"
 import type { DateRange } from "react-day-picker"
 
+import { CategoryBadge } from "@/components/category-badge"
+import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
@@ -40,13 +42,92 @@ const STATUS_LABELS: Record<MovementStatus, string> = {
   overdue: "Vencido",
 }
 
-const STATUS_OPTIONS: { value: MovementStatus | "all"; label: string }[] = [
-  { value: "all", label: "Todos" },
-  ...STATUS_VALUES.map((value) => ({ value, label: STATUS_LABELS[value] })),
-]
+const STATUS_OPTIONS: (MovementStatus | "all")[] = ["all", ...STATUS_VALUES]
+
+/**
+ * El texto que va adentro del `SelectValue` de cada desplegable, calculado
+ * acá en vez de dejárselo a Radix.
+ *
+ * Radix no lo escribe él: cada `SelectItem` seleccionado se portea a sí mismo
+ * dentro del trigger, y un portal existe recién después de montar en el
+ * navegador. En el HTML que manda el servidor los dos triggers salen VACÍOS,
+ * y como esta pantalla ahora manda la barra de filtros mucho antes que la
+ * tabla (ver `movement-screen.tsx`), esa ventana pasó de invisible a bien
+ * visible: se veían dos cajas sin texto donde tenía que decir con qué está
+ * filtrada la lista. Pasándole `children` al `SelectValue`, Radix desactiva
+ * ese portal (`valueNodeHasChildren`) y usa este texto, que sí viaja en el
+ * HTML.
+ *
+ * `undefined` —no una cadena vacía— cuando el id no corresponde a ninguna
+ * categoría conocida: eso es alcanzable escribiendo la URL a mano, y en ese
+ * caso conviene volver al comportamiento de Radix (trigger vacío) antes que
+ * mentir con "Todas" mientras la consulta filtra por un id que no existe.
+ */
+function categoriaValue(categoryId: string, categories: Category[]): ReactNode | undefined {
+  if (categoryId === "all") return TODAS
+  const name = categories.find((c) => c.id === categoryId)?.name
+  return name === undefined ? undefined : <CategoryBadge name={name} />
+}
+
+/**
+ * "Todas"/"Todos" van en texto atenuado y no en badge: no son una categoría
+ * ni un estado, son la AUSENCIA de filtro, y darles un color propio las
+ * pondría al mismo nivel visual que las opciones que sí filtran algo.
+ */
+const TODAS = <span className="text-muted-foreground">Todas</span>
+
+/**
+ * Una opción del desplegable de estado: el MISMO badge que pinta la tabla.
+ * No es adorno — el filtro se elige mirando la tabla, así que la opción tiene
+ * que verse igual que lo que va a quedar filtrado.
+ */
+function OpcionEstado({ value }: { value: MovementStatus | "all" }) {
+  return value === "all" ? (
+    <span className="text-muted-foreground">Todos</span>
+  ) : (
+    <StatusBadge status={value}>{STATUS_LABELS[value]}</StatusBadge>
+  )
+}
 
 /** Cuánto se espera a que la persona deje de tipear antes de navegar. */
 const DEBOUNCE_MS = 400
+
+/**
+ * Ancho de cada campo, en un solo lugar. Tres motivos para que sean anchos
+ * FIJOS y no `flex-1`:
+ *
+ * 1. El buscador tenía `min-w-56 flex-1` y se comía todo el sobrante de la
+ *    fila (unos 690px en un monitor normal) por ser el único que crecía. Un
+ *    campo de texto de 700px para escribir "kiosco" no ayuda a nadie y hacía
+ *    que la barra se leyera como un formulario en vez de un filtro.
+ * 2. El período no tenía ancho propio: se lo daba su contenido, que cambia
+ *    de "Elegir un período" a "01/03/2026 – 20/03/2026". Elegir un rango
+ *    ensanchaba el botón y corría todo lo que tenía al lado.
+ * 3. Con anchos fijos los cuatro campos ocupan lo mismo carga tras carga, así
+ *    que el esqueleto de más abajo puede reservar exactamente el mismo lugar
+ *    y la barra no salta cuando llegan las categorías.
+ *
+ * El período entra "01/03/2026 – 20/03/2026" (el texto más largo que
+ * `rangoLabel` puede devolver) más el ícono, sin recortar.
+ */
+const FIELD_WIDTH = {
+  search: "w-full sm:w-64",
+  category: "w-40",
+  status: "w-32",
+  period: "w-56",
+} as const
+
+/**
+ * Las etiquetas de esta barra no son las de un formulario: acá no se carga
+ * nada, se acota una tabla. En el tamaño de `Label` por default competían con
+ * el h1 y con los encabezados de la tabla por la misma atención. Chicas y
+ * atenuadas siguen estando (que es lo que pide la accesibilidad) sin pelearse
+ * con el contenido.
+ */
+const LABEL_CLASS = "text-xs font-normal text-muted-foreground"
+
+/** La fila entera. Compartida con el esqueleto para que no puedan separarse. */
+const BAR_CLASS = "flex flex-wrap items-end gap-x-2 gap-y-3"
 
 /**
  * Bordes de navegación del calendario, en años redondos para que el
@@ -374,62 +455,98 @@ export function MovementFilters({ basePath, query, categories }: Props) {
     // `pending` está prendido es la señal de "esto ya está cargando", no un
     // intento de esconder el viaje.
     <div
-      className={cn("flex flex-wrap items-end gap-3 transition-opacity", pending && "opacity-60")}
+      className={cn(BAR_CLASS, "transition-opacity", pending && "opacity-60")}
       aria-busy={pending}
     >
-      <div className="min-w-56 flex-1 space-y-1">
-        <Label htmlFor="filtro-buscar">Buscar</Label>
-        <Input
-          id="filtro-buscar"
-          value={search}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          placeholder="Descripción"
-          maxLength={SEARCH_MAX}
-        />
+      <div className={cn(FIELD_WIDTH.search, "space-y-1.5")}>
+        <Label htmlFor="filtro-buscar" className={LABEL_CLASS}>
+          Buscar
+        </Label>
+        {/* El ícono es lo único que distingue de un vistazo este campo de
+            cualquier otro input de texto de la app; sin él, el único que decía
+            "esto busca" era el placeholder, que desaparece apenas se tipea.
+            `pointer-events-none` para que clickear encima siga cayendo en el
+            input y no coma el foco. */}
+        <div className="relative">
+          <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="filtro-buscar"
+            value={search}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Descripción"
+            maxLength={SEARCH_MAX}
+            className="pl-8"
+          />
+        </div>
       </div>
 
-      <div className="min-w-40 space-y-1">
-        <Label htmlFor="filtro-categoria">Categoría</Label>
-        <Select value={query.categoryId} onValueChange={(v) => go({ categoryId: v })}>
-          <SelectTrigger id="filtro-categoria" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas</SelectItem>
-            {categories.map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {c.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className={cn(FIELD_WIDTH.category, "space-y-1.5")}>
+        <Label htmlFor="filtro-categoria" className={LABEL_CLASS}>
+          Categoría
+        </Label>
+        {/*
+          El div envolvente no es decorativo. En el HTML del servidor el Select
+          de Radix deja TRES hijos en esta columna, no dos: la etiqueta, el
+          botón, y un nodo auxiliar propio que recién desaparece al hidratar.
+          `space-y-1.5` le pone margen superior a todo hijo que no sea el
+          primero, así que ese tercero se llevaba 6px y las dos columnas con
+          desplegable quedaban 6px más altas que Buscar y Período. Con
+          `items-end` en la fila, eso se veía como Categoría y Estado corridos
+          hacia arriba hasta que hidrataba, y saltando a su lugar después —una
+          ventana que antes casi no se veía y que ahora, con la barra llegando
+          mucho antes que la tabla, sí se ve. El envoltorio deja siempre
+          exactamente dos hijos acá y se lleva el nodo auxiliar adentro, donde
+          ningún `space-y` lo cuenta.
+        */}
+        <div>
+          <Select value={query.categoryId} onValueChange={(v) => go({ categoryId: v })}>
+            <SelectTrigger id="filtro-categoria" className="w-full">
+              <SelectValue>{categoriaValue(query.categoryId, categories)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{TODAS}</SelectItem>
+              {categories.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  <CategoryBadge name={c.name} />
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      <div className="min-w-36 space-y-1">
-        <Label htmlFor="filtro-estado">Estado</Label>
-        <Select
-          value={query.status}
-          onValueChange={(v) => go({ status: v as MovementStatus | "all" })}
-        >
-          <SelectTrigger id="filtro-estado" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUS_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className={cn(FIELD_WIDTH.status, "space-y-1.5")}>
+        <Label htmlFor="filtro-estado" className={LABEL_CLASS}>
+          Estado
+        </Label>
+        {/* Mismo envoltorio y mismo motivo que en Categoría. */}
+        <div>
+          <Select
+            value={query.status}
+            onValueChange={(v) => go({ status: v as MovementStatus | "all" })}
+          >
+            <SelectTrigger id="filtro-estado" className="w-full">
+              <SelectValue>
+                <OpcionEstado value={query.status} />
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map((o) => (
+                <SelectItem key={o} value={o}>
+                  <OpcionEstado value={o} />
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      <div className="space-y-1">
+      <div className={cn(FIELD_WIDTH.period, "space-y-1.5")}>
         {/* Id propio en el Label: hace falta como blanco de `aria-labelledby`
             más abajo (hallazgo D). El `htmlFor` se deja como estaba, no
             estorba — con `aria-labelledby` puesto en el botón, el accname
             algorithm lo consulta a él primero y ni llega a mirar el `for`. */}
-        <Label id="filtro-periodo-label" htmlFor="filtro-periodo">
+        <Label id="filtro-periodo-label" htmlFor="filtro-periodo" className={LABEL_CLASS}>
           Período
         </Label>
         <Popover onOpenChange={handlePeriodoOpenChange}>
@@ -527,10 +644,50 @@ export function MovementFilters({ basePath, query, categories }: Props) {
       </div>
 
       {hayFiltrosActivos(query) && (
-        <Button type="button" variant="ghost" onClick={limpiar}>
+        <Button type="button" variant="ghost" onClick={limpiar} className="text-muted-foreground">
+          <XIcon />
           Limpiar
         </Button>
       )}
+    </div>
+  )
+}
+
+/**
+ * Lo que se ve en el lugar de la barra mientras el servidor trae las
+ * categorías (ver el `Suspense` de `movement-screen.tsx`).
+ *
+ * Reusa `BAR_CLASS`, `FIELD_WIDTH` y `LABEL_CLASS` de la barra real y muestra
+ * las MISMAS etiquetas, no barritas grises: la fila queda ocupando
+ * exactamente el mismo lugar, y cuando llegan las categorías lo único que
+ * cambia son los cuatro controles. Sin eso, el esqueleto y la barra real se
+ * pueden ir separando en anchos con cualquier retoque futuro y el cambio se
+ * ve como un salto.
+ *
+ * Usa el mismo `Label` que la barra real y no un `<span>` con las mismas
+ * clases: `Label` es un `flex items-center`, así que su caja no mide igual
+ * que la de un span aunque el texto y el tamaño coincidan — con el span, las
+ * etiquetas se corrían 2px al llegar las categorías.
+ *
+ * Todo el bloque va `aria-hidden`: son etiquetas sin ningún control al que
+ * apunten. Que un lector de pantalla anuncie cuatro filtros que todavía no
+ * existen es peor que que no anuncie nada — el `Suspense` de
+ * `movement-screen.tsx` es quien tiene que contar esa espera.
+ */
+export function MovementFiltersSkeleton() {
+  return (
+    <div className={BAR_CLASS} aria-hidden>
+      {[
+        { label: "Buscar", width: FIELD_WIDTH.search },
+        { label: "Categoría", width: FIELD_WIDTH.category },
+        { label: "Estado", width: FIELD_WIDTH.status },
+        { label: "Período", width: FIELD_WIDTH.period },
+      ].map((f) => (
+        <div key={f.label} className={cn(f.width, "space-y-1.5")}>
+          <Label className={LABEL_CLASS}>{f.label}</Label>
+          <div className="h-8 w-full animate-pulse rounded-lg border border-input bg-white/[0.02]" />
+        </div>
+      ))}
     </div>
   )
 }

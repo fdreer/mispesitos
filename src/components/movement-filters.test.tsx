@@ -191,6 +191,19 @@ describe("MovementFilters", () => {
     expect(screen.getByLabelText("Categoría").textContent).toBe("Ocio")
   })
 
+  // El texto del trigger ahora lo calcula el componente (`categoriaLabel`) en
+  // vez de dejárselo al portal de Radix, que no existe hasta montar en el
+  // navegador — así el filtro puesto viaja en el HTML del servidor. La
+  // contracara es que un `categoryId` que no corresponde a ninguna categoría
+  // (alcanzable escribiendo la URL a mano) no puede caer en "Todas": diría que
+  // no hay filtro mientras la consulta filtra por un id que no existe y deja
+  // la tabla vacía.
+  it("un categoryId que no existe no se muestra como 'Todas'", () => {
+    montar({ categoryId: "cat-inventada" })
+
+    expect(screen.getByLabelText("Categoría").textContent).not.toBe("Todas")
+  })
+
   it("limpiar borra todos los filtros de una", () => {
     montar({ search: "alquiler", status: "overdue", page: "3" })
 

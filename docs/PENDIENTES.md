@@ -124,10 +124,32 @@ La cobertura se mide con `pnpm test:coverage` (`@vitest/coverage-v8`). El
 criterio sigue siendo el mismo —buscar el caso que rompe, no el porcentaje—,
 pero ahora se puede ver qué quedó sin tocar.
 
-**El esqueleto de carga está y anda.** Vive en `src/app/(app)/loading.tsx` y
-cubre las seis pantallas del grupo. Es genérico a propósito: las seis tienen
-layouts distintos y un esqueleto que promete la forma equivocada es peor que uno
-neutro.
+**El esqueleto de carga está y anda.** `src/app/(app)/loading.tsx` sigue
+existiendo como piso del grupo, pero desde el 2026-08-11 ya casi no se ve: las
+seis pantallas transmiten su estructura por partes y cada una llega a su propio
+esqueleto, que sí promete la forma correcta.
+
+| Pantalla | Qué sale primero | Qué espera |
+|---|---|---|
+| `/ingresos`, `/egresos` | título; después botón "Nuevo" y barra de filtros | la tabla, con encabezados de verdad y filas en gris |
+| `/dashboard` | título | todo lo demás, en un solo bloque |
+| `/cambios` | título | todo lo demás, en un solo bloque |
+| `/categorias` | título | las dos tarjetas |
+| `/ajustes` | título y la tarjeta | los campos del formulario |
+
+`/ingresos` y `/egresos` son las únicas que se parten en tres porque son las
+únicas donde los datos son separables: las categorías (chicas) alimentan los
+filtros y el desplegable de carga, y los movimientos con sus cuotas —la única
+consulta que crece con el historial— alimentan sólo la tabla. En `/dashboard`
+todo pasa por un único `buildDashboardView` que necesita las seis consultas
+juntas, así que partirlo en cuatro límites sería partir también esa función sin
+que ninguna de las partes llegara antes. En `/cambios` los datos sí serían
+separables, pero un límite propio para el formulario lo montaría sin cotización
+y lo reemplazaría al llegar, perdiendo lo que se hubiera tipeado en el medio:
+por eso también va en un solo bloque. `/categorias` y `/ajustes` no tienen
+ninguna consulta lenta que esconder y ganan poco tiempo — se hicieron igual
+porque el esqueleto genérico les prometía cuatro tarjetas en fila y un bloque
+grande, que no es la forma de ninguna de las dos.
 
 Queda anotado acá porque estuvo borrado un rato por un diagnóstico equivocado, y
 el modo de falla vale para cualquiera que verifique esta app con un navegador
@@ -176,6 +198,25 @@ y buena parte de `src/server/actions/**` tampoco aparece por el mismo motivo.
 Las pantallas de `src/app/**` y los formularios sin test propio (`ExchangeForm`,
 `SettingsForm`, `CategoryManager`, `AuthForm`, ver sección 2) tampoco figuran:
 no es que midan 0%, es que nada los importó en esta corrida.
+
+### 3.5 Los colores de categoría son un hash, no una elección
+
+Cada categoría tiene su color, y sale de un hash de su NOMBRE
+(`src/lib/category-color.ts`): nadie lo elige y no se guarda en la base. Eso
+tiene dos consecuencias que conviene saber antes de que sorprendan:
+
+- **Renombrar una categoría le cambia el color.** Es deliberado (el color
+  acompaña al nombre, que es lo que se reconoce), pero si en algún momento se
+  quiere que el color sea estable ante renombres, hay que hashear el `id` y
+  además hacer que la torta del dashboard reciba ids —hoy sólo recibe nombres—.
+- **Dos categorías pueden compartir color.** Hay 235 tonos disponibles (los 360
+  menos las dos bandas reservadas para el rojo/naranja/verde de los estados,
+  ver el comentario del archivo), así que con pocas categorías es raro, pero
+  posible. No se resolvió porque el nombre siempre está escrito adentro del
+  badge: el color ayuda a encontrar, no es el que informa.
+
+Elegir el color a mano por categoría es alcance nuevo: hace falta una columna
+más, un selector en `/categorias`, y decidir qué pasa con las que ya existen.
 
 ---
 

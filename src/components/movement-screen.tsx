@@ -1,24 +1,34 @@
 import { Suspense } from "react"
+import { Plus } from "lucide-react"
 
-import { MovementFilters } from "@/components/movement-filters"
+import { MovementFilters, MovementFiltersSkeleton } from "@/components/movement-filters"
 import { MovementFormDialog } from "@/components/movement-form-dialog"
-import { MovementList } from "@/components/movement-list"
+import { MovementList, MovementListSkeleton } from "@/components/movement-list"
 import { MovementPagination } from "@/components/movement-pagination"
+import { buttonVariants } from "@/components/ui/button"
 import { todayInAr, type IsoDate } from "@/lib/dates"
-import { hayFiltrosActivos, paginate, parseMovementQuery } from "@/lib/movement-query"
+import {
+  hayFiltrosActivos,
+  paginate,
+  parseMovementQuery,
+  type MovementQuery,
+} from "@/lib/movement-query"
 import { BASE_PATHS } from "@/lib/movement-routes"
 import { getMovementStatus } from "@/lib/movement-status"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import { listCategories, listMovements, type Category } from "@/server/queries"
 import { requireSettings } from "@/server/session"
+import { cn } from "@/lib/utils"
 
 const TITLES: Record<"income" | "expense", string> = {
   income: "Ingresos",
   expense: "Egresos",
 }
 
+type Kind = "income" | "expense"
+
 type Props = {
-  kind: "income" | "expense"
+  kind: Kind
   /** Los search params crudos de la URL, tal como llegan del page.tsx. */
   searchParams: Record<string, string | string[] | undefined>
 }
@@ -35,7 +45,7 @@ async function MovementFormDialogWithRate({
   today,
   ratePreference,
 }: {
-  kind: "income" | "expense"
+  kind: Kind
   categories: Category[]
   today: IsoDate
   ratePreference: RatePreference
@@ -52,23 +62,82 @@ async function MovementFormDialogWithRate({
 }
 
 /**
- * Cuerpo compartido de /ingresos y /egresos: sólo cambia `kind`. Ver
- * TITLES/BASE_PATHS de acá arriba para el resto de la diferencia.
+ * El botón "Nuevo" con su diálogo. Dos consultas de categorías a propósito,
+ * no una: este desplegable no debe ofrecer una categoría archivada, pero la
+ * tabla y el filtro sí las necesitan (ver `ListaConPaginacion`).
  */
-export async function MovementScreen({ kind, searchParams }: Props) {
+async function BotonNuevo({ kind }: { kind: Kind }) {
   const { user, settings } = await requireSettings()
+  const categories = await listCategories(user.id, kind)
   const today = todayInAr()
-  const query = parseMovementQuery(searchParams)
 
-  // Dos consultas de categorías a propósito, no una: el desplegable de carga
-  // (MovementForm) no debe ofrecer una categoría archivada, pero la lista
-  // (MovementList) arma el nombre de la categoría de CADA movimiento —viejo
-  // incluido— y una categoría archivada tiene que seguir resolviendo su nombre
-  // ahí. Si las dos pantallas compartieran la misma lista "sólo activas",
-  // archivar una categoría haría que los movimientos que la usaban pasen a
-  // mostrar "—". El filtro usa la lista completa por el mismo motivo.
-  const [activeCategories, allCategories, movements] = await Promise.all([
-    listCategories(user.id, kind),
+  return (
+    <Suspense
+      fallback={
+        <MovementFormDialog
+          kind={kind}
+          categories={categories}
+          suggestedRate={null}
+          today={today}
+        />
+      }
+    >
+      <MovementFormDialogWithRate
+        kind={kind}
+        categories={categories}
+        today={today}
+        ratePreference={settings.preferredRate as RatePreference}
+      />
+    </Suspense>
+  )
+}
+
+/**
+ * El lugar del botón mientras viajan las categorías. Un `div` con las clases
+ * del botón y no un `<Button disabled>`: no tiene que ser enfocable ni que un
+ * lector de pantalla lo anuncie como una acción que existe pero no anda —
+ * todavía no es un botón, es el hueco donde va a haber uno.
+ */
+function BotonNuevoSkeleton() {
+  return (
+    <div aria-hidden className={cn(buttonVariants(), "pointer-events-none opacity-50")}>
+      <Plus />
+      Nuevo
+    </div>
+  )
+}
+
+/**
+ * La barra de filtros. Necesita la lista COMPLETA de categorías (archivadas
+ * incluidas): un movimiento viejo puede apuntar a una categoría ya archivada y
+ * tiene que poder filtrarse por ella igual.
+ */
+async function BarraDeFiltros({ kind, query }: { kind: Kind; query: MovementQuery }) {
+  const { user } = await requireSettings()
+  const categories = await listCategories(user.id, kind, true)
+
+  return <MovementFilters basePath={BASE_PATHS[kind]} query={query} categories={categories} />
+}
+
+/**
+ * La parte cara de la pantalla: `listMovements` se trae los movimientos que
+ * pasan el filtro MÁS todas sus cuotas, sin LIMIT (ver más abajo por qué no
+ * puede tenerlo). Es la única consulta de acá que crece con el historial, y
+ * por eso es la que va detrás de su propio Suspense.
+ *
+ * La misma lista completa de categorías que pide `BarraDeFiltros`: la tabla
+ * arma el nombre de la categoría de CADA movimiento —viejo incluido—, así que
+ * una archivada tiene que seguir resolviendo su nombre acá. Si las dos
+ * pantallas compartieran una lista "sólo activas", archivar una categoría
+ * haría que los movimientos que la usaban pasen a mostrar "—". Las dos ramas
+ * llaman con los mismos argumentos y `listCategories` está memoizada por
+ * request, así que es una sola consulta y no dos.
+ */
+async function ListaConPaginacion({ kind, query }: { kind: Kind; query: MovementQuery }) {
+  const { user } = await requireSettings()
+  const today = todayInAr()
+
+  const [categories, movements] = await Promise.all([
     listCategories(user.id, kind, true),
     listMovements(user.id, {
       kind,
@@ -91,37 +160,10 @@ export async function MovementScreen({ kind, searchParams }: Props) {
   const { items, page, totalPages } = paginate(filtered, query.page)
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-semibold text-paper">{TITLES[kind]}</h1>
-        <Suspense
-          fallback={
-            <MovementFormDialog
-              kind={kind}
-              categories={activeCategories}
-              suggestedRate={null}
-              today={today}
-            />
-          }
-        >
-          <MovementFormDialogWithRate
-            kind={kind}
-            categories={activeCategories}
-            today={today}
-            ratePreference={settings.preferredRate as RatePreference}
-          />
-        </Suspense>
-      </div>
-
-      <MovementFilters
-        basePath={BASE_PATHS[kind]}
-        query={query}
-        categories={allCategories}
-      />
-
+    <>
       <MovementList
         movements={items}
-        categories={allCategories}
+        categories={categories}
         today={today}
         emptyMessage={
           hayFiltrosActivos(query)
@@ -136,6 +178,54 @@ export async function MovementScreen({ kind, searchParams }: Props) {
         page={page}
         totalPages={totalPages}
       />
+    </>
+  )
+}
+
+/**
+ * Cuerpo compartido de /ingresos y /egresos: sólo cambia `kind`. Ver
+ * TITLES/BASE_PATHS de acá arriba para el resto de la diferencia.
+ *
+ * NO es `async`, y eso es lo que hace que la pantalla llegue por partes: si
+ * esperara acá arriba a la sesión y a las tres consultas —como hacía antes—,
+ * el servidor no puede mandar UN SOLO byte del HTML hasta que la más lenta
+ * termine, y hasta entonces lo único que se ve es el esqueleto genérico de
+ * `(app)/loading.tsx`, que no se parece a esta pantalla. Devolviendo sin
+ * esperar nada, el título y la estructura salen en el primer flush y cada
+ * `Suspense` de acá abajo se completa cuando su propia consulta llega:
+ *
+ *   1. el título, ya (no depende de nada);
+ *   2. el botón "Nuevo" y los filtros, apenas vuelven las categorías;
+ *   3. la tabla, cuando vuelven los movimientos con sus cuotas.
+ *
+ * `query` se parsea acá y se pasa a las tres ramas en vez de que cada una lo
+ * haga por su cuenta: sale de la URL, no de la base, así que no hay nada que
+ * esperar y las tres tienen que estar mirando exactamente el mismo filtro.
+ *
+ * Ojo al verificar esto con un navegador automatizado: React revela los
+ * Suspense desde `requestAnimationFrame`, que no dispara en una pestaña de
+ * fondo. Con la pestaña oculta los esqueletos se quedan puestos para siempre
+ * y parece un bug de la app. Está documentado en docs/PENDIENTES.md §3.4.
+ */
+export function MovementScreen({ kind, searchParams }: Props) {
+  const query = parseMovementQuery(searchParams)
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold text-paper">{TITLES[kind]}</h1>
+        <Suspense fallback={<BotonNuevoSkeleton />}>
+          <BotonNuevo kind={kind} />
+        </Suspense>
+      </div>
+
+      <Suspense fallback={<MovementFiltersSkeleton />}>
+        <BarraDeFiltros kind={kind} query={query} />
+      </Suspense>
+
+      <Suspense fallback={<MovementListSkeleton />}>
+        <ListaConPaginacion kind={kind} query={query} />
+      </Suspense>
     </div>
   )
 }

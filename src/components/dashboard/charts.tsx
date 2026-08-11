@@ -11,6 +11,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart"
+import { categoryColor } from "@/lib/category-color"
 import { formatMoney } from "@/lib/money"
 
 /*
@@ -25,11 +26,6 @@ const FOG = "#8a8f98"
 const SIGNAL_TEAL = "#02b8cc"
 const PULSE_GREEN = "#27a644"
 const CORAL_RED = "#eb5757"
-
-// La rueda decorativa de la torta: los cuatro acentos cromáticos del sistema
-// más tres grises, para que una lista larga de categorías no se quede sin
-// colores ni invente ninguno.
-const COLORS = [SIGNAL_TEAL, "#6366f1", "#8b5cf6", PULSE_GREEN, FOG, "#62666d", "#383b3f"]
 
 const toPesos = (cents: number) => cents / 100
 const tip = (value: number) => formatMoney(Math.round(value * 100), "ARS")
@@ -106,10 +102,19 @@ export function CategoryPie({ data }: { data: { name: string; arsCents: number }
     )
   }
 
-  const chartData = data.map((d, index) => ({
+  /*
+   * El color sale del NOMBRE de la categoría, no de su posición en esta
+   * lista. Antes era `COLORS[index % COLORS.length]` sobre una lista ordenada
+   * por importe: la misma categoría cambiaba de color de un mes a otro con
+   * sólo gastar más o menos, y no coincidía con el badge que esa categoría
+   * tiene en la tabla de egresos. Ahora es el mismo `categoryColor` que usa
+   * el badge, así que la porción de la torta y la fila de la tabla se
+   * reconocen entre sí.
+   */
+  const chartData = data.map((d) => ({
     name: d.name,
     value: toPesos(d.arsCents),
-    fill: COLORS[index % COLORS.length],
+    fill: categoryColor(d.name),
   }))
 
   return (

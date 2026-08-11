@@ -3,7 +3,8 @@
 import { Fragment, useState } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
+import { CategoryBadge } from "@/components/category-badge"
+import { StatusBadge } from "@/components/status-badge"
 import {
   Table,
   TableBody,
@@ -31,6 +32,28 @@ type Props = {
   emptyMessage: string
 }
 
+/**
+ * Los encabezados en un solo lugar: el esqueleto de más abajo pinta la MISMA
+ * fila de encabezados mientras la consulta viaja, así que si viviera duplicada
+ * agregar una columna a la tabla dejaría al esqueleto prometiendo otra grilla.
+ * La primera columna no tiene título (es la del chevron que despliega las
+ * cuotas) y por eso va aparte, no en esta lista.
+ */
+const COLUMNS = ["Fecha", "Descripción", "Categoría", "Importe", "Estado"] as const
+
+function MovementTableHeader() {
+  return (
+    <TableHeader>
+      <TableRow>
+        <TableHead className="w-8" />
+        {COLUMNS.map((c) => (
+          <TableHead key={c}>{c}</TableHead>
+        ))}
+      </TableRow>
+    </TableHeader>
+  )
+}
+
 export function MovementList({ movements, categories, today, emptyMessage }: Props) {
   const categoryName = new Map(categories.map((c) => [c.id, c.name]))
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -50,16 +73,7 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
 
   return (
     <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-8" />
-          <TableHead>Fecha</TableHead>
-          <TableHead>Descripción</TableHead>
-          <TableHead>Categoría</TableHead>
-          <TableHead>Importe</TableHead>
-          <TableHead>Estado</TableHead>
-        </TableRow>
-      </TableHeader>
+      <MovementTableHeader />
       <TableBody>
         {movements.map((m) => {
           // El mismo cálculo que usa el filtro de estado de esta pantalla: el
@@ -70,6 +84,7 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
           )
           const currency = assertCurrency(m.currency)
           const isOpen = expanded.has(m.id)
+          const categoria = m.categoryId ? categoryName.get(m.categoryId) : undefined
 
           return (
             <Fragment key={m.id}>
@@ -92,16 +107,22 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
                     <span className="text-muted-foreground"> · {m.installments.length} cuotas</span>
                   )}
                 </TableCell>
-                <TableCell>{m.categoryId ? categoryName.get(m.categoryId) : "—"}</TableCell>
+                <TableCell>
+                  {/* `categoryName.get` puede no encontrar nada aunque el
+                      movimiento tenga `categoryId`: la lista que llega por
+                      props es la del tipo de esta pantalla. El guión es para
+                      los dos casos, sin categoría y sin nombre resoluble. */}
+                  {categoria ? <CategoryBadge name={categoria} /> : "—"}
+                </TableCell>
                 <TableCell className="tabular-nums">{formatMoney(m.amountCents, currency)}</TableCell>
                 <TableCell>
                   {status === "overdue" && (
-                    <Badge variant="destructive">{overdueCount} vencida(s)</Badge>
+                    <StatusBadge status="overdue">{overdueCount} vencida(s)</StatusBadge>
                   )}
                   {status === "pending" && (
-                    <Badge variant="secondary">{pendingCount} pendiente(s)</Badge>
+                    <StatusBadge status="pending">{pendingCount} pendiente(s)</StatusBadge>
                   )}
-                  {status === "paid" && <Badge variant="secondary">Pagado</Badge>}
+                  {status === "paid" && <StatusBadge status="paid">Pagado</StatusBadge>}
                 </TableCell>
               </TableRow>
               {isOpen && (
@@ -117,6 +138,37 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
             </Fragment>
           )
         })}
+      </TableBody>
+    </Table>
+  )
+}
+
+/**
+ * La tabla mientras la consulta viaja: encabezados de verdad (los mismos que
+ * `MovementList`, ver `MovementTableHeader`) y filas en gris. La grilla ya
+ * está pintada cuando llegan los datos, así que lo único que cambia es el
+ * contenido de las celdas.
+ *
+ * `rows` no puede adivinar cuántos movimientos van a venir. Cinco es un piso
+ * que casi siempre se llena —la página trae hasta PAGE_SIZE— y deja la tabla
+ * con altura suficiente para leerse como tabla sin empujar media pantalla
+ * hacia abajo si al final vienen menos.
+ */
+export function MovementListSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <Table>
+      <MovementTableHeader />
+      <TableBody>
+        {Array.from({ length: rows }, (_, i) => (
+          <TableRow key={i} className="hover:bg-transparent">
+            <TableCell />
+            {COLUMNS.map((c) => (
+              <TableCell key={c}>
+                <div className="h-4 animate-pulse rounded bg-graphite" />
+              </TableCell>
+            ))}
+          </TableRow>
+        ))}
       </TableBody>
     </Table>
   )
