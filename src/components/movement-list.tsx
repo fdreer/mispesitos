@@ -14,8 +14,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { DeleteMovementButton } from "@/components/delete-movement-button"
-import { InstallmentRows } from "@/components/installment-rows"
-import { type IsoDate } from "@/lib/dates"
+import { InstallmentTableRows } from "@/components/installment-rows"
+import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
 import { assertCurrency } from "@/lib/movement-asserts"
 import { summarizeMovementStatus } from "@/lib/movement-status"
@@ -88,10 +88,23 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
 
           return (
             <Fragment key={m.id}>
+              {/* La fila entera es el disparador, pero el teclado necesita un
+                  control real: sin `tabIndex`/`onKeyDown` las cuotas de cada
+                  movimiento eran inalcanzables sin mouse. `role="button"` no
+                  va acá —rompería la semántica de tabla para un lector de
+                  pantalla—; `aria-expanded` sobre la fila ya comunica el
+                  estado, y la celda del chevron lleva el nombre accesible. */}
               <TableRow
-                className="cursor-pointer"
+                className="cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                tabIndex={0}
                 aria-expanded={isOpen}
                 onClick={() => toggle(m.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    toggle(m.id)
+                  }
+                }}
               >
                 <TableCell>
                   {isOpen ? (
@@ -99,8 +112,13 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
                   ) : (
                     <ChevronRight className="text-muted-foreground size-4" />
                   )}
+                  <span className="sr-only">
+                    {isOpen ? "Ocultar cuotas de" : "Ver cuotas de"} {m.description}
+                  </span>
                 </TableCell>
-                <TableCell>{m.date}</TableCell>
+                <TableCell className="text-muted-foreground tabular-nums">
+                  {formatIsoForDisplay(m.date)}
+                </TableCell>
                 <TableCell className="max-w-64 truncate whitespace-normal">
                   {m.description}
                   {m.installments.length > 1 && (
@@ -126,14 +144,23 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
                 </TableCell>
               </TableRow>
               {isOpen && (
-                <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={6} className="whitespace-normal">
-                    <InstallmentRows rows={m.installments} currency={currency} today={today} />
-                    <div className="mt-2 flex justify-end">
+                <>
+                  <InstallmentTableRows
+                    rows={m.installments}
+                    currency={currency}
+                    today={today}
+                  />
+                  {/* Borrar es del movimiento, no de una cuota: va en su propia
+                      fila de cierre, alineado a la columna Estado —la misma
+                      donde cada cuota tiene su botón— para que las acciones
+                      queden todas sobre el mismo eje. */}
+                  <TableRow className="bg-muted/30 hover:bg-muted/30">
+                    <TableCell colSpan={5} />
+                    <TableCell>
                       <DeleteMovementButton id={m.id} description={m.description} />
-                    </div>
-                  </TableCell>
-                </TableRow>
+                    </TableCell>
+                  </TableRow>
+                </>
               )}
             </Fragment>
           )
