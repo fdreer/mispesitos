@@ -1,3 +1,4 @@
+import { LinkPending } from "@/components/link-pending"
 import {
   Pagination,
   PaginationContent,
@@ -46,7 +47,7 @@ export function MovementPagination({ basePath, query, page, totalPages }: Props)
           <PaginationItem>
             <PaginationPrevious
               href={buildMovementHref(basePath, query, { page: page - 1 })}
-              text="Anterior"
+              text={<LinkPending>Anterior</LinkPending>}
               aria-label="Ir a la página anterior"
             />
           </PaginationItem>
@@ -55,7 +56,10 @@ export function MovementPagination({ basePath, query, page, totalPages }: Props)
         {pages.map((p) => (
           <PaginationItem key={p}>
             <PaginationLink href={buildMovementHref(basePath, query, { page: p })} isActive={p === page}>
-              {p}
+              {/* Ver `LinkPending`: es la única forma que tiene esta pantalla
+                  de avisar que el click ya se tomó sin dejar de ser un server
+                  component. */}
+              <LinkPending>{p}</LinkPending>
             </PaginationLink>
           </PaginationItem>
         ))}
@@ -64,7 +68,7 @@ export function MovementPagination({ basePath, query, page, totalPages }: Props)
           <PaginationItem>
             <PaginationNext
               href={buildMovementHref(basePath, query, { page: page + 1 })}
-              text="Siguiente"
+              text={<LinkPending>Siguiente</LinkPending>}
               aria-label="Ir a la página siguiente"
             />
           </PaginationItem>
