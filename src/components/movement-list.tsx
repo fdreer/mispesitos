@@ -15,9 +15,10 @@ import {
 } from "@/components/ui/table"
 import { DeleteMovementButton } from "@/components/delete-movement-button"
 import { InstallmentTableRows } from "@/components/installment-rows"
+import { MovementFormDialog } from "@/components/movement-form-dialog"
 import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
-import { assertCurrency } from "@/lib/movement-asserts"
+import { assertCurrency, assertInstallmentMovementKind } from "@/lib/movement-asserts"
 import { summarizeMovementStatus } from "@/lib/movement-status"
 import type { Category, MovementWithInstallments } from "@/server/queries"
 
@@ -150,14 +151,29 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
                     currency={currency}
                     today={today}
                   />
-                  {/* Borrar es del movimiento, no de una cuota: va en su propia
-                      fila de cierre, alineado a la columna Estado —la misma
-                      donde cada cuota tiene su botón— para que las acciones
-                      queden todas sobre el mismo eje. */}
+                  {/* Editar y borrar son del movimiento, no de una cuota: van
+                      en su propia fila de cierre, alineados a la columna
+                      Estado —la misma donde cada cuota tiene su botón— para
+                      que las acciones queden todas sobre el mismo eje. */}
                   <TableRow className="bg-muted/30 hover:bg-muted/30">
                     <TableCell colSpan={5} />
                     <TableCell>
-                      <DeleteMovementButton id={m.id} description={m.description} />
+                      <div className="flex items-start gap-1">
+                        {/* Sin cotización sugerida: editando manda el TC con
+                            el que se guardó el movimiento, que es el del día
+                            en que ocurrió (ver `MovementForm`). Pedirle una
+                            sugerencia a dolarapi por cada fila desplegada
+                            sería una llamada de red para un dato que este
+                            formulario no va a usar. */}
+                        <MovementFormDialog
+                          kind={assertInstallmentMovementKind(m.kind)}
+                          categories={categories}
+                          suggestedRate={null}
+                          today={today}
+                          movement={m}
+                        />
+                        <DeleteMovementButton id={m.id} description={m.description} />
+                      </div>
                     </TableCell>
                   </TableRow>
                 </>

@@ -2,13 +2,15 @@
 
 import { randomUUID } from "node:crypto"
 import { revalidatePath } from "next/cache"
-import { and, eq } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { z } from "zod"
 
 import { withUser } from "@/db/client"
 import { installment, movement } from "@/db/schema"
 import { todayInAr } from "@/lib/dates"
+import { highestPaidNumber } from "@/lib/installments"
 import { logDbError } from "@/lib/log-db-error"
+import { assertInstallmentMovementKind } from "@/lib/movement-asserts"
 import { BASE_PATHS } from "@/lib/movement-routes"
 import { exchangeSchema, movementSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
@@ -95,6 +97,170 @@ export async function createMovement(
   // de cada tipo esté escrita una sola vez. Repetirla acá dejaba la acción
   // revalidando la ruta vieja el día que el mapa cambie, sin que nada falle.
   revalidatePath(BASE_PATHS[input.kind])
+  return success()
+}
+
+/**
+ * Los dos tipos que esta acción puede tocar. Un `exchange` NO entra: no tiene
+ * cuotas ni categoría, y reescribirlo con la forma de un movimiento común
+ * dejaría a /cambios leyendo una fila que ya no es un cambio. Va en el WHERE
+ * y no en un chequeo posterior para que un id de cambio salga por la misma
+ * rama que un id que no existe.
+ */
+const EDITABLE_KINDS = ["income", "expense"]
+
+/**
+ * Edita un movimiento ya guardado. Hasta ahora la única forma era borrarlo y
+ * volver a cargarlo, que además se llevaba las cuotas ya marcadas como pagas.
+ *
+ * El plan de cuotas se rehace ENTERO con el que manda el formulario —es el
+ * mismo que arma `buildInstallments`, y pasa por el mismo `movementSchema` que
+ * el alta— pero el PAGO no se pierde: `paid`/`paid_date` se conservan
+ * emparejando por NÚMERO de cuota. Un número que el plan nuevo no tiene se
+ * rechaza antes de escribir nada (ver `highestPaidNumber`): bajar de 12 cuotas
+ * a 3 con la 5 ya paga borraría el registro de un pago que sí ocurrió, y eso no
+ * es una edición, es plata que desaparece.
+ *
+ * Lo que un cambio de importe SÍ hace es mover lo que dice una cuota ya paga:
+ * si la 1 estaba paga en $100.000 y el total pasa a $360.000 en tres, la 1
+ * queda paga en $120.000. Es exactamente lo que significa corregir el importe
+ * de un movimiento cargado mal, y es la razón por la que el saldo tiene que
+ * recalcularse — de ahí que se revalide el dashboard igual que en el alta.
+ *
+ * `kind` NO se escribe aunque el esquema lo exija (el formulario lo manda
+ * porque es el mismo esquema del alta): un ingreso no se convierte en un
+ * egreso, y si lo hiciera cambiaría de pantalla y esta acción estaría
+ * revalidando la que la persona ya no está mirando.
+ */
+export async function updateMovement(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser()
+
+  const id = z.uuid().safeParse(formData.get("id"))
+  if (!id.success) {
+    return failure("Ese movimiento no existe.")
+  }
+
+  const installments = readInstallments(formData)
+  if (installments === null) {
+    return failure("El plan de cuotas llegó incompleto. Recargá la página y probá de nuevo.")
+  }
+
+  const parsed = movementSchema.safeParse({
+    kind: formData.get("kind"),
+    description: formData.get("description"),
+    categoryId: formData.get("categoryId"),
+    date: formData.get("date"),
+    currency: formData.get("currency"),
+    amountCents: formData.get("amountCents") ?? "",
+    rate: formData.get("rate") ?? "1",
+    installments,
+  })
+
+  if (!parsed.success) {
+    const flat = z.flattenError(parsed.error)
+    return failure(flat.formErrors[0] ?? "Revisá los datos.", flat.fieldErrors)
+  }
+
+  const input = parsed.data
+  // Se llena adentro de la transacción y se lee después, para revalidar. Queda
+  // en `null` por cualquiera de las dos salidas tempranas, que es justo cuando
+  // no hay nada que revalidar.
+  let kindGuardado: "income" | "expense" | null = null
+
+  try {
+    const resultado = await withUser(user.id, async (tx) => {
+      const previas = await tx
+        .select({
+          number: installment.number,
+          paid: installment.paid,
+          paidDate: installment.paidDate,
+        })
+        .from(installment)
+        .where(and(eq(installment.movementId, id.data), eq(installment.userId, user.id)))
+
+      const masAlta = highestPaidNumber(previas)
+      if (masAlta > input.installments.length) {
+        return failure(
+          `La cuota ${masAlta} está paga: no podés dejar el plan en ${input.installments.length}. ` +
+            `Desmarcala primero.`,
+        )
+      }
+
+      const actualizado = await tx
+        .update(movement)
+        .set({
+          description: input.description,
+          categoryId: input.categoryId,
+          date: input.date,
+          currency: input.currency,
+          amountCents: input.amountCents,
+          rate: String(input.rate),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(movement.id, id.data),
+            eq(movement.userId, user.id),
+            inArray(movement.kind, EDITABLE_KINDS),
+          ),
+        )
+        // El `kind` sale de la fila, no del formulario: es el que decide qué
+        // pantalla revalidar, y el del formulario es un dato del cliente que
+        // esta acción a propósito no escribe.
+        .returning({ id: movement.id, kind: movement.kind })
+
+      if (actualizado.length === 0) return failure("Ese movimiento no existe.")
+
+      // El WHERE ya acotó a `EDITABLE_KINDS`; el assert es lo que convierte esa
+      // garantía en el tipo, con el mismo criterio que el resto de la app.
+      kindGuardado = assertInstallmentMovementKind(actualizado[0].kind)
+
+      const pagoPorNumero = new Map(previas.map((p) => [p.number, p]))
+
+      // Reemplazo y no UPDATE fila por fila: la cantidad de cuotas puede subir
+      // o bajar, así que igual habría que insertar y borrar. Adentro de la
+      // misma transacción, así que en ningún momento el movimiento queda sin
+      // sus cuotas para nadie más.
+      await tx
+        .delete(installment)
+        .where(and(eq(installment.movementId, id.data), eq(installment.userId, user.id)))
+
+      await tx.insert(installment).values(
+        input.installments.map((cuota, index) => {
+          const number = index + 1
+          const previo = pagoPorNumero.get(number)
+          return {
+            id: randomUUID(),
+            movementId: id.data,
+            userId: user.id,
+            number,
+            amountCents: cuota.amountCents,
+            dueDate: cuota.dueDate,
+            // Sin `?? false` el tipo sería `boolean | undefined` y la fila
+            // caería en el default de la columna, que da lo mismo hoy y
+            // dejaría de darlo el día que el default cambie.
+            paid: previo?.paid ?? false,
+            paidDate: previo?.paidDate ?? null,
+          }
+        }),
+      )
+
+      return success()
+    })
+
+    if (!resultado.ok) return resultado
+  } catch (error) {
+    logDbError("updateMovement", error)
+    return failure("No pudimos guardar los cambios. Probá de nuevo.")
+  }
+
+  // El importe y las fechas de las cuotas pagas pueden haber cambiado, así que
+  // el saldo del dashboard ya no es el que estaba calculado.
+  revalidatePath("/dashboard")
+  if (kindGuardado) revalidatePath(BASE_PATHS[kindGuardado])
   return success()
 }
 

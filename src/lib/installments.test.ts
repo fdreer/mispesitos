@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   splitAmount,
   buildInstallments,
+  highestPaidNumber,
   installmentsSumMatches,
 } from "@/lib/installments"
 
@@ -170,5 +171,27 @@ describe("installmentsSumMatches", () => {
 
   it("rechaza una lista vacía", () => {
     expect(installmentsSumMatches(10_000, [])).toBe(false)
+  })
+})
+
+describe("highestPaidNumber", () => {
+  const cuota = (number: number, paid: boolean) => ({ number, paid })
+
+  it("sin cuotas pagas da cero, que es 'ningún número'", () => {
+    expect(highestPaidNumber([])).toBe(0)
+    expect(highestPaidNumber([cuota(1, false), cuota(2, false)])).toBe(0)
+  })
+
+  it("da el número más alto entre las pagas, no la cantidad de pagas", () => {
+    // Saltada a propósito: se pagó la 1 y la 5, no las cinco primeras.
+    expect(highestPaidNumber([cuota(1, true), cuota(3, false), cuota(5, true)])).toBe(5)
+  })
+
+  it("no lo corre una impaga de número más alto", () => {
+    expect(highestPaidNumber([cuota(2, true), cuota(9, false)])).toBe(2)
+  })
+
+  it("no depende del orden en que vengan", () => {
+    expect(highestPaidNumber([cuota(7, true), cuota(2, true)])).toBe(7)
   })
 })
