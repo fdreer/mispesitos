@@ -2,12 +2,16 @@
 
 import { useActionState, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { CalendarIcon } from "lucide-react"
+import { es } from "date-fns/locale"
 
 import { Button } from "@/components/ui/button"
+import { Calendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import type { IsoDate } from "@/lib/dates"
+import { dateToIso, formatIsoForDisplay, isoToDate, type IsoDate } from "@/lib/dates"
 import { createExchange } from "@/server/actions/movements"
 
 type Props = {
@@ -21,6 +25,8 @@ export function ExchangeForm({ buyRate, sellRate, today }: Props) {
   const router = useRouter()
   const [state, action, pending] = useActionState(createExchange, null)
   const [direction, setDirection] = useState<"buy" | "sell">("buy")
+  const [date, setDate] = useState<IsoDate>(today)
+  const [dateOpen, setDateOpen] = useState(false)
 
   const suggested = direction === "buy" ? buyRate : sellRate
 
@@ -29,7 +35,10 @@ export function ExchangeForm({ buyRate, sellRate, today }: Props) {
   }, [state, router])
 
   return (
-    <form action={action} className="space-y-4 rounded-lg border p-4">
+    // `max-w-lg`: sin tope se estiraba a los 1200px del contenedor de la
+    // página para tres campos y un botón, mucho más ancho de lo que ese
+    // contenido necesita.
+    <form action={action} className="max-w-lg space-y-4 rounded-lg border p-4">
       <input type="hidden" name="direction" value={direction} />
 
       {/*
@@ -62,7 +71,44 @@ export function ExchangeForm({ buyRate, sellRate, today }: Props) {
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1">
           <Label htmlFor="date">Fecha</Label>
-          <Input id="date" name="date" type="date" defaultValue={today} required />
+          <input type="hidden" name="date" value={date} />
+          {/* Mismo picker que el filtro de período de /ingresos y /egresos
+              (`movement-filters.tsx`), no el `<input type="date">` nativo: ese
+              abre el calendario del sistema operativo, que no respeta el tema
+              oscuro de la app. */}
+          <Popover open={dateOpen} onOpenChange={setDateOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                id="date"
+                type="button"
+                variant="outline"
+                // El <label htmlFor="date"> de arriba gana la resolución de
+                // nombre accesible y corta ahí sin leer el contenido del
+                // botón (mismo hallazgo D que el botón de "Período" en
+                // movement-filters.tsx): sin este aria-label, un lector de
+                // pantalla anuncia "Fecha, botón" sin importar qué día esté
+                // elegido.
+                aria-label={`Fecha: ${formatIsoForDisplay(date)}`}
+                className="w-full justify-start font-normal"
+              >
+                <CalendarIcon />
+                {formatIsoForDisplay(date)}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                locale={es}
+                required
+                selected={isoToDate(date)}
+                defaultMonth={isoToDate(date)}
+                onSelect={(d) => {
+                  setDate(dateToIso(d))
+                  setDateOpen(false)
+                }}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
 
         <div className="space-y-1">

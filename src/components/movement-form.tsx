@@ -2,12 +2,16 @@
 
 import { useActionState, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
+import { CalendarIcon } from "lucide-react"
+import { es } from "date-fns/locale"
 
 import type { ActionResult } from "@/server/actions/result"
 
 import { Button } from "@/components/ui/button"
+import { Calendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -15,11 +19,73 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { isValidIsoDate, type IsoDate } from "@/lib/dates"
+import { dateToIso, formatIsoForDisplay, isoToDate, type IsoDate } from "@/lib/dates"
 import { buildInstallments, MAX_INSTALLMENTS } from "@/lib/installments"
 import { formatMoney, parseAmountToCents } from "@/lib/money"
 import { createMovement } from "@/server/actions/movements"
 import type { Category } from "@/server/queries"
+
+/**
+ * Un solo picker para la fecha principal y cada vencimiento de cuota: mismo
+ * Popover + Calendar que exchange-form.tsx y settings-form.tsx, no el
+ * `<input type="date">` nativo (calendario del sistema operativo, no respeta
+ * el tema oscuro). El estado de apertura vive ACÁ, por instancia: con hasta
+ * MAX_INSTALLMENTS filas de vencimiento en pantalla, cada una necesita poder
+ * abrirse y cerrarse sola.
+ *
+ * `ariaLabel` viaja completo desde el llamador (no sólo un título): reproduce
+ * el mismo hallazgo D que ya resolvieron exchange-form.tsx y
+ * movement-filters.tsx —un <label htmlFor> que apunte a este botón le gana la
+ * resolución de nombre accesible al contenido y corta ahí sin leer la fecha—
+ * así que acá también hace falta el mismo `aria-label` con el valor adentro.
+ */
+function DateField({
+  id,
+  value,
+  onChange,
+  ariaLabel,
+  hiddenName,
+}: {
+  id?: string
+  value: IsoDate
+  onChange: (next: IsoDate) => void
+  ariaLabel: string
+  hiddenName?: string
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      {hiddenName && <input type="hidden" name={hiddenName} value={value} />}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            id={id}
+            type="button"
+            variant="outline"
+            aria-label={ariaLabel}
+            className="w-full justify-start font-normal"
+          >
+            <CalendarIcon />
+            {formatIsoForDisplay(value)}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="start">
+          <Calendar
+            mode="single"
+            locale={es}
+            required
+            selected={isoToDate(value)}
+            defaultMonth={isoToDate(value)}
+            onSelect={(d) => {
+              onChange(dateToIso(d))
+              setOpen(false)
+            }}
+          />
+        </PopoverContent>
+      </Popover>
+    </>
+  )
+}
 
 type Props = {
   kind: "income" | "expense"
@@ -76,14 +142,10 @@ export function MovementForm({ kind, categories, suggestedRate, today, onSaved }
    * evita el render en cascada de recalcular después de pintar.
    * https://react.dev/learn/you-might-not-need-an-effect
    */
-  // `isValidIsoDate` y no sólo `date !== ""`: un <input type="date"> devuelve
-  // cadena vacía mientras la fecha está incompleta —el botón de limpiar de
-  // Chrome, y cada tecla mientras se tipea a mano—, y `buildInstallments` de
-  // acá abajo corre en el cuerpo del render. `addMonthsClamped` tira ante una
-  // fecha que no es un día real, así que sin este chequeo borrar la fecha se
-  // lleva puesta la pantalla entera.
-  const planKey =
-    totalCents > 0 && isValidIsoDate(date) ? `${totalCents}|${count}|${date}` : null
+  // `date` sale siempre de `DateField` —nunca de tipeo libre—, así que
+  // siempre es un día real: a diferencia del viejo `<input type="date">`, acá
+  // no hay estado intermedio a medio completar que proteger.
+  const planKey = totalCents > 0 ? `${totalCents}|${count}|${date}` : null
   const [appliedPlanKey, setAppliedPlanKey] = useState<string | null>(null)
   if (planKey !== null && planKey !== appliedPlanKey) {
     setAppliedPlanKey(planKey)
@@ -163,13 +225,12 @@ export function MovementForm({ kind, categories, suggestedRate, today, onSaved }
 
         <div className="space-y-1">
           <Label htmlFor="date">Fecha</Label>
-          <Input
+          <DateField
             id="date"
-            name="date"
-            type="date"
+            hiddenName="date"
             value={date}
-            onChange={(e) => setDate(e.target.value)}
-            required
+            onChange={setDate}
+            ariaLabel={`Fecha: ${formatIsoForDisplay(date)}`}
           />
         </div>
 
@@ -259,12 +320,11 @@ export function MovementForm({ kind, categories, suggestedRate, today, onSaved }
                 aria-label={`Importe de la cuota ${index + 1}`}
                 aria-invalid={row.amount !== "" && installmentCents[index] === null}
               />
-              <Input
-                name="installmentDueDate"
-                type="date"
+              <DateField
+                hiddenName="installmentDueDate"
                 value={row.dueDate}
-                onChange={(e) => updateRow(index, { dueDate: e.target.value })}
-                aria-label={`Vencimiento de la cuota ${index + 1}`}
+                onChange={(next) => updateRow(index, { dueDate: next })}
+                ariaLabel={`Vencimiento de la cuota ${index + 1}: ${formatIsoForDisplay(row.dueDate)}`}
               />
             </div>
           ))}
