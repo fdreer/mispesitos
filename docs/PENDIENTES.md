@@ -32,15 +32,14 @@ no se tome, la pantalla es honesta pero pide leer las etiquetas.
 
 ### 1.2 Desarchivar una categoría
 
-Archivar es hoy **irreversible desde la interfaz**. Las archivadas se ven en
-`/categorias`, diferenciadas de las activas, y los movimientos viejos siguen
-mostrando su nombre — pero no hay forma de volver a activarlas.
+~~Archivar es hoy **irreversible desde la interfaz**.~~ Resuelto el 2026-08-12,
+ver §11: cada archivada tiene su botón "Desarchivar" en `/categorias`.
 
-No se construyó porque era alcance nuevo, no un arreglo. Es una tarea chica:
-la columna `archived` ya existe y el índice único es parcial (sólo mira las
-activas), así que desarchivar sólo puede fallar si mientras tanto se creó otra
-categoría activa con el mismo nombre y tipo — y ese caso hay que resolverlo en la
-interfaz, no en la base.
+El choque de nombres que esta sección anticipaba se resolvió como decía —en la
+interfaz, no en la base—: `unarchiveCategory` distingue el 23505 del índice
+parcial y responde "Ya tenés una categoría activa con ese nombre." en la fila
+que falló. Renombrar cuál de las dos es decisión de quien mira la pantalla; la
+app no renombra ni archiva nada por su cuenta.
 
 ### 1.3 El mensaje de error de `saveSettings`
 
@@ -62,15 +61,12 @@ Sigue siendo el rombo de Next.js. Pide una decisión de diseño.
 
 Se dejó afuera a propósito, con el alcance ya acordado.
 
-- **Editar un movimiento ya guardado.** Se borra y se vuelve a cargar. El botón de
-  borrar existe, pide confirmación y se lleva las cuotas por cascada. Agregar
-  `updateMovement` es una tarea aparte y no bloquea usar la app.
+- ~~**Editar un movimiento ya guardado.**~~ Hecho el 2026-08-12, ver §11.
 - **Elegir la fecha de pago al marcar una cuota.** Siempre queda la fecha de hoy,
   calculada en el servidor con el reloj de Buenos Aires.
-- **Cuatro de los cinco filtros de listas.** Se construyó sólo el de estado
-  (pendiente / pagado / vencido), que es el que el dashboard usa para enlazar.
-  Los otros cuatro que pide el spec —categoría, moneda, desde y hasta— **ya
-  existen en la capa de consultas y están testeados**: falta sólo la interfaz.
+- ~~**Cuatro de los cinco filtros de listas.**~~ Los cuatro que faltaban están:
+  categoría, desde y hasta con la barra de filtros del 2026-08-11 (§7), y moneda
+  el 2026-08-12 (§11). Los cinco del spec, más el buscador por descripción.
 - **Tema claro.** Desde el rediseño del 2026-08-10 la app tiene **un solo tema, el
   oscuro**: `:root` es la paleta de Linear y el bloque `.dark` no existe más. La
   variante `dark:` sigue declarada contra `.dark`, una clase que nadie agrega, así
@@ -652,9 +648,9 @@ cobertura.
   estado y duplicar lo que la URL ya dice — justo lo que la §3.1 del spec no
   quiere. La ventana es de milisegundos y el resultado es un filtro perdido, no
   un dato mal.
-- **El sexto filtro (moneda)**, que §2 sigue listando como deuda declarada de la
-  v1: es alcance nuevo. Lo que sí cambió es que ahora agregarlo es tocar tres
-  lugares declarados en vez de cuatro repartidos.
+- ~~**El sexto filtro (moneda)**~~, que §2 listaba como deuda declarada de la
+  v1. Hecho en la tanda siguiente (§11), y costó exactamente los tres lugares
+  declarados que esta sección anticipaba.
 - **Todo lo de la sección 1**, que sigue esperando una decisión.
 
 ### 10.2 Lo que quedó sin verificar en el navegador
@@ -663,3 +659,95 @@ El paginador atenuado. Hace falta una cuenta con más de 20 movimientos para que
 `MovementPagination` dibuje un solo píxel, y la de prueba tiene cero: sigue
 siendo el punto 1 de §7.1. `useLinkStatus` sólo reporta `pending` durante una
 navegación real, así que en los tests siempre se dibuja apagado.
+
+---
+
+## 11. La cuarta tanda del 2026-08-12
+
+Tres pendientes que ya no eran arreglos sino alcance nuevo, elegidos
+explícitamente. El cuarto candidato —el favicon, §1.4— sigue abierto, y la
+sección 1 entera también: se decidió dejar el dashboard como está (§1.1, caja y
+devengado conviviendo con sus rótulos).
+
+| Qué | Dónde | Sección |
+|---|---|---|
+| Desarchivar una categoría, con el choque de nombre resuelto en la fila | `src/server/actions/categories.ts`, `src/components/category-manager.tsx` | §1.2 |
+| Editar un movimiento guardado, sin perder las cuotas ya pagas | `src/server/actions/movements.ts`, `src/components/movement-form.tsx`, `movement-form-dialog.tsx`, `movement-list.tsx` | §2 |
+| El sexto filtro: moneda | `src/lib/movement-query.ts`, `src/components/movement-filters.tsx` | §2, §7.2, §10.1 |
+
+La suite pasó de 388 a 406 tests, más 12 de base que sólo corren con
+`pnpm test:db`. `pnpm typecheck`, `pnpm lint` y `pnpm build` limpios.
+
+### 11.1 Editar un movimiento: qué se decidió
+
+El plan de cuotas se rehace **entero** con el que manda el formulario —el mismo
+`movementSchema` que el alta— pero el pago no se pierde: `paid` y `paid_date` se
+conservan emparejando por **número** de cuota.
+
+Eso deja un solo caso donde editar podría hacer desaparecer plata, y se
+**rechaza antes de escribir nada**: bajar el plan por debajo del número de una
+cuota ya paga. Con la 3 paga y un plan nuevo de 2, `updateMovement` responde
+"La cuota 3 está paga: no podés dejar el plan en 2. Desmarcala primero." La cota
+la calcula `highestPaidNumber` (`src/lib/installments.ts`), que es el número más
+alto y no la cantidad de pagas: las cuotas se marcan en cualquier orden, así que
+"hay dos pagas" no dice cuál es el plan más chico que las conserva.
+
+Lo que un cambio de importe **sí** hace es mover lo que dice una cuota ya paga:
+si la 1 estaba paga en $100.000 y el total pasa a $360.000 en tres, la 1 queda
+paga en $120.000. Es lo que significa corregir un importe cargado mal, y es por
+eso que la acción revalida `/dashboard` además de la lista.
+
+Dos cosas que la acción **no** hace, a propósito:
+
+- **No escribe `kind`.** El formulario lo manda porque comparte esquema con el
+  alta, pero un ingreso no se vuelve un egreso: cambiaría de pantalla y la
+  acción estaría revalidando la que la persona ya no está mirando. El `kind` que
+  decide qué revalidar sale de la fila, no del formulario.
+- **No toca los cambios de divisa.** `EDITABLE_KINDS` los deja afuera del WHERE,
+  así que un id de `exchange` sale por la misma rama que un id que no existe. Un
+  cambio no tiene cuotas ni categoría; reescribirlo con la forma de un
+  movimiento común dejaría a `/cambios` leyendo una fila que ya no es un cambio.
+
+El TC que muestra el formulario editando es el que se guardó —el del día de la
+operación—, no el sugerido de hoy, y viaja con coma decimal: `parseDecimalInput`
+lee un punto solitario seguido de tres dígitos como separador de miles, así que
+un TC de 1.234 puesto con punto volvería como 1234.
+
+### 11.2 Lo que se decidió no tocar
+
+- **Todo lo que queda de la sección 1**: el favicon (§1.4), el mensaje de error
+  de `saveSettings` (§1.3) y el dashboard, que se decidió dejar como está
+  (§1.1) — las dos lecturas conviven, cada bloque con su rótulo.
+- **Elegir la fecha de pago al marcar una cuota** (§2): sigue siendo hoy.
+- **Tema claro** (§2), **los colores de categoría a mano** (§3.5), **el agujero
+  del paginador** (§7.2) y **el tipo de cambio sin cota de negocio** (§3.3).
+- **El agujero de `movement-pagination.tsx` no creció con el filtro nuevo**: la
+  moneda entra por la misma barra y el mismo `queryRef`, así que hereda la
+  ventana de milisegundos que §10.1 ya declaró y no agrega ninguna.
+
+### 11.3 Lo que quedó sin verificar
+
+**Los doce tests nuevos de base no se corrieron.** `pnpm test:db` siembra y
+borra filas con ids fijos contra la base que diga `.env.local`, y el punto 4 de
+la sección 4 prohíbe correrlo contra producción: a qué base apunta esa cadena no
+es una decisión que se pueda tomar leyendo el código. Son los ocho de
+`updateMovement` y los cuatro de `unarchiveCategory`, cada uno en su propio
+describe. Todo lo que **sí** se pudo probar sin base está verde:
+`highestPaidNumber` con su tabla de casos, el formulario de edición, la barra de
+filtros y el manejador de categorías.
+
+El resto es el mismo techo de §3.4, §7.1, §8.2 y §9.2: la pestaña de preview
+queda en `visibilityState === "hidden"`, los Suspense no se revelan solos y nada
+que dependa de un click se puede probar ahí. Lo que **nadie miró funcionando**:
+
+1. **El diálogo de edición, entero.** Abrirlo desde una fila desplegada, cambiar
+   algo y guardar. Los tests montan `MovementForm` y `MovementList` directo; el
+   `Dialog` de Radix real, portado al `<body>` sobre una tabla, no.
+2. **El rechazo por cuota paga.** Hace falta un movimiento con cuotas, una
+   marcada, y bajar el plan. Sin base no hay forma de verlo.
+3. **La barra de filtros con seis campos.** El desplegable de moneda entra en
+   una fila que ya tenía cuatro; en pantallas angostas puede envolver distinto.
+   El esqueleto reserva el mismo ancho (`FIELD_WIDTH.currency`), así que si algo
+   se ve mal se va a ver mal igual antes y después de que lleguen los datos.
+4. **Desarchivar una categoría.** El botón, el error de nombre repetido cayendo
+   en la fila correcta, y la fila volviendo al bloque de activas.
