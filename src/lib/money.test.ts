@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   roundCents,
   convertToArs,
+  formatAxisPesos,
   formatMoney,
   parseAmountToCents,
   parseDecimalInput,
@@ -49,6 +50,21 @@ describe("formatMoney", () => {
 
   it("formatea negativos", () => {
     expect(formatMoney(-5000, "ARS")).toBe("-$ 50,00")
+  })
+})
+
+describe("formatAxisPesos", () => {
+  it("separa los miles como el resto de la app, sin símbolo ni decimales", () => {
+    expect(formatAxisPesos(1_200_000)).toBe("1.200.000")
+    expect(formatAxisPesos(0)).toBe("0")
+  })
+
+  it("recorta los decimales que trae la división por 100", () => {
+    expect(formatAxisPesos(1234.56)).toBe("1.235")
+  })
+
+  it("formatea negativos: la proyección puede quedar bajo cero", () => {
+    expect(formatAxisPesos(-45_000)).toBe("-45.000")
   })
 })
 
