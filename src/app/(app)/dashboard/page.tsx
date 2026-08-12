@@ -3,13 +3,8 @@ import { Suspense } from "react"
 import { BalanceCards } from "@/components/dashboard/balance-cards"
 import { CategoryPie, MonthlyBars, ProjectionChart } from "@/components/dashboard/charts"
 import { Upcoming } from "@/components/dashboard/upcoming"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { InfoHint } from "@/components/info-hint"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { buildDashboardView } from "@/lib/dashboard-view"
 import { addMonthsClamped, monthKey, todayInAr } from "@/lib/dates"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
@@ -24,6 +19,26 @@ import { requireSettings } from "@/server/session"
 
 const HORIZON_MONTHS = 6
 const HISTORY_MONTHS = 12
+
+/**
+ * El encabezado de una tarjeta de gráfico: el título, y el criterio con el que
+ * ese gráfico cuenta la plata detrás del ícono de ayuda.
+ *
+ * Ese criterio hay que explicarlo —los tres gráficos y las tarjetas de arriba
+ * miden "el mes" de dos maneras distintas— pero impreso arriba de cada gráfico
+ * ocupaba cuatro renglones de letra chica y empujaba el gráfico, que es lo que
+ * la tarjeta viene a mostrar, fuera de la primera pantalla.
+ */
+function ChartCardHeader({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <CardHeader>
+      <CardTitle className="flex items-center gap-1.5 text-base">
+        {title}
+        <InfoHint label={`Cómo se calcula: ${title}`}>{children}</InfoHint>
+      </CardTitle>
+    </CardHeader>
+  )
+}
 
 /**
  * Todo lo que hay debajo del título. Va aparte, detrás de un Suspense, para
@@ -119,16 +134,11 @@ async function DashboardBody() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card size="sm">
-          <CardHeader>
-            <CardTitle className="text-base">
-              Saldo proyectado al cierre de cada mes ({HORIZON_MONTHS} meses)
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Arranca de tu saldo de hoy consolidado en pesos y le va aplicando las cuotas
-              pendientes por su vencimiento. El primer punto ya tiene descontado lo que vence
-              este mes y lo que está atrasado: no es tu saldo de hoy.
-            </CardDescription>
-          </CardHeader>
+          <ChartCardHeader title={`Saldo proyectado a ${HORIZON_MONTHS} meses`}>
+            Arranca de tu saldo de hoy consolidado en pesos y le va aplicando las cuotas
+            pendientes por su vencimiento. El primer punto ya tiene descontado lo que vence
+            este mes y lo que está atrasado: no es tu saldo de hoy.
+          </ChartCardHeader>
           <CardContent>
             {view.projection === null ? (
               <p className="text-muted-foreground py-8 text-center text-sm">
@@ -142,16 +152,11 @@ async function DashboardBody() {
         </Card>
 
         <Card size="sm">
-          <CardHeader>
-            <CardTitle className="text-base">
-              Gastos que cargaste este mes, por categoría
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Cuenta el importe total de cada gasto en el mes de su fecha, aunque lo pagues en
-              cuotas más adelante. Un televisor de $1.200.000 en 12 cuotas entra entero acá, y
-              de a una cuota en &ldquo;Cobrado y pagado este mes&rdquo;.
-            </CardDescription>
-          </CardHeader>
+          <ChartCardHeader title="Gastos de este mes, por categoría">
+            Cuenta el importe total de cada gasto en el mes de su fecha, aunque lo pagues en
+            cuotas más adelante. Un televisor de $1.200.000 en 12 cuotas entra entero acá, y
+            de a una cuota en &ldquo;Cobrado y pagado este mes&rdquo;.
+          </ChartCardHeader>
           <CardContent>
             <CategoryPie data={view.pie} />
           </CardContent>
@@ -159,15 +164,10 @@ async function DashboardBody() {
       </div>
 
       <Card size="sm">
-        <CardHeader>
-          <CardTitle className="text-base">
-            Lo que cargaste en los últimos {HISTORY_MONTHS} meses
-          </CardTitle>
-          <CardDescription className="text-xs">
-            Con el mismo criterio que la torta: el importe total de cada movimiento en el mes
-            de su fecha, no lo que se pagó o se cobró cada mes.
-          </CardDescription>
-        </CardHeader>
+        <ChartCardHeader title={`Lo que cargaste en los últimos ${HISTORY_MONTHS} meses`}>
+          Con el mismo criterio que la torta: el importe total de cada movimiento en el mes
+          de su fecha, no lo que se pagó o se cobró cada mes.
+        </ChartCardHeader>
         <CardContent>
           <MonthlyBars data={view.bars} />
         </CardContent>
@@ -190,18 +190,21 @@ function DashboardSkeleton() {
     <div className="space-y-6" aria-hidden>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="h-[164px] animate-pulse rounded-xl border border-border" />
+          <div key={i} className="h-[116px] animate-pulse rounded-xl border border-border" />
         ))}
       </div>
       {/* La única que no tiene alto fijo: crece con la cantidad de
           vencimientos. 150px es lo que mide con uno. */}
       <div className="h-[150px] animate-pulse rounded-xl border border-border" />
+      {/* Las tres de gráfico miden lo mismo desde que el criterio de cálculo
+          dejó de imprimirse arriba del gráfico y pasó al ícono de ayuda: antes
+          cada una era más alta según cuántos renglones ocupaba su explicación. */}
       <div className="grid gap-4 lg:grid-cols-2">
         {[0, 1].map((i) => (
-          <div key={i} className="h-[340px] animate-pulse rounded-xl border border-border" />
+          <div key={i} className="h-[288px] animate-pulse rounded-xl border border-border" />
         ))}
       </div>
-      <div className="h-[308px] animate-pulse rounded-xl border border-border" />
+      <div className="h-[288px] animate-pulse rounded-xl border border-border" />
     </div>
   )
 }

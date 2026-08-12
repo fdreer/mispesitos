@@ -1,8 +1,9 @@
 import { Suspense } from "react"
 
 import { ExchangeForm } from "@/components/exchange-form"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { todayInAr } from "@/lib/dates"
+import { formatIsoForDisplay, todayInAr } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
 import { usdPosition } from "@/lib/position"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
@@ -87,16 +88,40 @@ async function CambiosBody() {
 
       <ExchangeForm buyRate={rate?.buyRate ?? null} sellRate={rate?.sellRate ?? null} today={today} />
 
-      <ul className="divide-y">
-        {exchanges.map((e) => (
-          <li key={e.id} className="flex items-center justify-between py-3">
-            <span>
-              {e.date} · {e.direction === "buy" ? "Compra" : "Venta"} a {Number(e.rate).toFixed(2)}
-            </span>
-            <span className="tabular-nums">{formatMoney(e.amountCents, "USD")}</span>
-          </li>
-        ))}
-      </ul>
+      {/* Adentro de una tarjeta, como el resto de los bloques de la app: antes
+          era una lista suelta colgando debajo del formulario, sin nada que
+          dijera dónde empezaba el historial ni qué era. */}
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle className="text-base">Operaciones</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {exchanges.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              Todavía no registraste ninguna compra ni venta.
+            </p>
+          ) : (
+            <ul className="divide-y">
+              {exchanges.map((e) => (
+                <li key={e.id} className="flex items-center justify-between gap-3 py-2.5">
+                  <span className="flex items-center gap-2">
+                    {/* El sentido de la operación como badge y no como texto
+                        corrido: es el único dato de la fila que se escanea, y
+                        en texto quedaba enterrado entre la fecha y el TC. */}
+                    <Badge variant={e.direction === "buy" ? "success" : "warning"}>
+                      {e.direction === "buy" ? "Compra" : "Venta"}
+                    </Badge>
+                    <span className="text-muted-foreground text-sm tabular-nums">
+                      {formatIsoForDisplay(e.date)} · a {Number(e.rate).toFixed(2)}
+                    </span>
+                  </span>
+                  <span className="tabular-nums">{formatMoney(e.amountCents, "USD")}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </>
   )
 }

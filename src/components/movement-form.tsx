@@ -32,7 +32,23 @@ type Props = {
   onSaved?: () => void
 }
 
+/**
+ * `amount` es lo que la persona ve y tipea: PESOS (o dólares), en el mismo
+ * formato que el campo "Importe" de más arriba. Antes esta fila mostraba
+ * centavos crudos —un gasto de $1.500,50 se editaba como "150050"— así que el
+ * mismo formulario pedía dos unidades distintas y la única señal de cuál era
+ * cuál estaba en un `aria-label` que nadie ve.
+ *
+ * Al servidor sigue viajando en centavos, por un campo oculto: el contrato de
+ * `createMovement` y el esquema de Zod no cambian, sólo cambia lo que se
+ * muestra. Ver `installmentCents` más abajo.
+ */
 type Row = { amount: string; dueDate: string }
+
+/** Centavos -> el texto que se muestra en la fila, en formato local. */
+function centsToInput(cents: number): string {
+  return (cents / 100).toFixed(2).replace(".", ",")
+}
 
 export function MovementForm({ kind, categories, suggestedRate, today, onSaved }: Props) {
   const [state, action, pending] = useActionState(createMovement, null)
@@ -43,6 +59,12 @@ export function MovementForm({ kind, categories, suggestedRate, today, onSaved }
   const [date, setDate] = useState(today)
   const [count, setCount] = useState(1)
   const [rows, setRows] = useState<Row[]>([{ amount: "", dueDate: today }])
+
+  // Los centavos de cada fila, derivados de lo tipeado. `null` cuando el texto
+  // todavía no es un número: eso hace que la suma no cierre y el botón quede
+  // deshabilitado, que es exactamente lo que tiene que pasar mientras una
+  // fila está a medio escribir.
+  const installmentCents = rows.map((r) => parseAmountToCents(r.amount))
 
   const totalCents = parseAmountToCents(amount) ?? 0
 
@@ -66,14 +88,20 @@ export function MovementForm({ kind, categories, suggestedRate, today, onSaved }
   if (planKey !== null && planKey !== appliedPlanKey) {
     setAppliedPlanKey(planKey)
     const planned = buildInstallments(totalCents, count, date)
-    setRows(planned.map((p) => ({ amount: String(p.amountCents), dueDate: p.dueDate })))
+    setRows(planned.map((p) => ({ amount: centsToInput(p.amountCents), dueDate: p.dueDate })))
   }
 
   const rowsSum = useMemo(
-    () => rows.reduce((acc, r) => acc + (Number(r.amount) || 0), 0),
+    () => installmentCents.reduce((acc: number, c) => acc + (c ?? 0), 0),
+    // `installmentCents` se deriva de `rows` en cada render, así que depender
+    // de `rows` —el estado del que sale— es lo que mantiene el memo honesto.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [rows],
   )
-  const sumMatches = rowsSum === totalCents
+  // Una fila a medio tipear (`null`) invalida la suma aunque el total dé:
+  // sin esto, borrar el importe de una cuota y que otra tuviera el sobrante
+  // dejaba enviar un plan con una cuota sin número.
+  const sumMatches = rowsSum === totalCents && installmentCents.every((c) => c !== null)
 
   // Mismo patrón: limpiar el formulario es un ajuste de estado disparado por
   // el resultado de la Server Action, no un efecto sobre un sistema externo.
@@ -215,13 +243,21 @@ export function MovementForm({ kind, categories, suggestedRate, today, onSaved }
           <p className="text-sm font-medium">Vencimientos</p>
           {rows.map((row, index) => (
             <div key={index} className="flex items-center gap-2">
-              <span className="text-muted-foreground w-8 text-sm">{index + 1}</span>
-              <Input
+              <span className="text-muted-foreground w-8 text-sm tabular-nums">{index + 1}</span>
+              {/* El que viaja: centavos, el formato que espera la acción. Vacío
+                  si la fila todavía no es un número — así el servidor rechaza
+                  con su propio mensaje en vez de recibir texto suelto. */}
+              <input
+                type="hidden"
                 name="installmentAmount"
-                inputMode="numeric"
+                value={installmentCents[index] ?? ""}
+              />
+              <Input
+                inputMode="decimal"
                 value={row.amount}
                 onChange={(e) => updateRow(index, { amount: e.target.value })}
-                aria-label={`Importe de la cuota ${index + 1} en centavos`}
+                aria-label={`Importe de la cuota ${index + 1}`}
+                aria-invalid={row.amount !== "" && installmentCents[index] === null}
               />
               <Input
                 name="installmentDueDate"

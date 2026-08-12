@@ -105,6 +105,29 @@ export function monthKey(date: IsoDate): string {
 }
 
 /**
+ * "YYYY-MM-DD" -> "DD/MM/YYYY", el orden en que se lee una fecha acá. Es sólo
+ * reordenar texto, no pasa por `Date` en ningún momento: no hay zona horaria
+ * de la que cuidarse.
+ *
+ * Vive acá y no en cada pantalla porque las fechas se muestran en cuatro
+ * lugares —la columna Fecha de la tabla, el vencimiento de cada cuota, la
+ * lista de operaciones de /cambios y el botón del filtro de período— y hasta
+ * ahora sólo el último la formateaba: los otros tres imprimían el ISO crudo,
+ * así que la misma fecha se leía "2026-08-11" en la tabla y "11/08/2026" en
+ * el filtro que la acotaba.
+ *
+ * Devuelve la entrada tal cual si no es un día válido, en vez de fabricar
+ * "undefined/undefined/": es texto para mostrar, y romper una pantalla entera
+ * por una fila con la fecha en un formato inesperado es peor que mostrarla
+ * como vino.
+ */
+export function formatIsoForDisplay(iso: string): string {
+  if (!isValidIsoDate(iso)) return iso
+  const [year, month, day] = iso.split("-")
+  return `${day}/${month}/${year}`
+}
+
+/**
  * Las fechas ISO se comparan como texto sin ambigüedad, por eso no hace falta parsear.
  */
 export function isOverdue(dueDate: IsoDate, today: IsoDate): boolean {

@@ -36,7 +36,9 @@ export function DeleteMovementButton({ id, description }: Props) {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    // `items-start`: queda en la columna Estado, sobre el mismo eje que el
+    // botón de cada cuota (ver `InstallmentTableRows`).
+    <div className="flex flex-col items-start gap-1">
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button type="button" variant="ghost" size="sm" disabled={pending}>
