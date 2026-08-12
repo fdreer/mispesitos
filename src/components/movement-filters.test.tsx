@@ -181,13 +181,17 @@ describe("MovementFilters", () => {
     expect(getPeriodoTrigger().textContent).toBe("Desde 01/03/2026")
   })
 
-  it("los desplegables muestran el filtro puesto sin necesidad de abrirlos", () => {
+  it("la barra muestra el filtro puesto sin necesidad de abrir nada", () => {
     // Radix resuelve el texto del trigger desde los items, que estando cerrado
     // viven en un DocumentFragment. Si eso se rompe, la barra queda en blanco y
     // deja de decir por qué está filtrada la tabla.
     montar({ status: "overdue", categoryId: "cat-2" })
 
-    expect(screen.getByLabelText("Estado").textContent).toBe("Vencido")
+    // Estado ya no es un desplegable sino un segmentado: las cuatro opciones
+    // están siempre a la vista, así que lo que dice cuál está puesta no es el
+    // texto del control sino qué segmento quedó presionado.
+    expect(screen.getByRole("radio", { name: "Vencido" }).getAttribute("data-state")).toBe("on")
+    expect(screen.getByRole("radio", { name: "Todos" }).getAttribute("data-state")).toBe("off")
     expect(screen.getByLabelText("Categoría").textContent).toBe("Ocio")
   })
 

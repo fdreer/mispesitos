@@ -7,7 +7,6 @@ import { es } from "date-fns/locale"
 import type { DateRange } from "react-day-picker"
 
 import { CategoryBadge } from "@/components/category-badge"
-import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
@@ -20,7 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { dateToIso, isoToDate } from "@/lib/dates"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { dateToIso, formatIsoForDisplay, isoToDate } from "@/lib/dates"
 import { cn } from "@/lib/utils"
 import {
   SEARCH_MAX,
@@ -77,16 +77,18 @@ function categoriaValue(categoryId: string, categories: Category[]): ReactNode |
 const TODAS = <span className="text-muted-foreground">Todas</span>
 
 /**
- * Una opción del desplegable de estado: el MISMO badge que pinta la tabla.
- * No es adorno — el filtro se elige mirando la tabla, así que la opción tiene
- * que verse igual que lo que va a quedar filtrado.
+ * El punto de color de cada estado en el segmentado. Reusa el mismo `Badge`
+ * que pinta la tabla (vía `StatusBadge`) pero sin texto: acá el texto va
+ * afuera, en el propio segmento, así que el badge queda reducido a su color.
+ * Es lo que convierte la fila de segmentos en la referencia de color de la
+ * tabla — se ve qué color es cada estado sin tener que abrir nada.
  */
-function OpcionEstado({ value }: { value: MovementStatus | "all" }) {
-  return value === "all" ? (
-    <span className="text-muted-foreground">Todos</span>
-  ) : (
-    <StatusBadge status={value}>{STATUS_LABELS[value]}</StatusBadge>
-  )
+const DOT_CLASS = "size-1.5 rounded-full"
+
+const DOT_COLOR: Record<MovementStatus, string> = {
+  pending: "bg-ember-orange",
+  paid: "bg-pulse-green",
+  overdue: "bg-coral-red",
 }
 
 /** Cuánto se espera a que la persona deje de tipear antes de navegar. */
@@ -113,7 +115,9 @@ const DEBOUNCE_MS = 400
 const FIELD_WIDTH = {
   search: "w-full sm:w-64",
   category: "w-40",
-  status: "w-32",
+  /* El segmentado se mide por su contenido —cuatro etiquetas fijas— así que
+   * no lleva ancho propio: dárselo lo recortaría o lo dejaría con aire. */
+  status: "w-auto",
   period: "w-56",
 } as const
 
@@ -147,16 +151,6 @@ const BAR_CLASS = "flex flex-wrap items-end gap-x-2 gap-y-3"
 const CALENDAR_YEARS_MARGIN = 10
 const CALENDAR_START_MONTH = new Date(new Date().getFullYear() - CALENDAR_YEARS_MARGIN, 0, 1)
 const CALENDAR_END_MONTH = new Date(new Date().getFullYear() + CALENDAR_YEARS_MARGIN, 11, 1)
-
-/**
- * "YYYY-MM-DD" -> "DD/MM/YYYY" para mostrar en el botón del picker. Es sólo
- * reordenar texto, no pasa por `Date` en ningún momento: no hay zona horaria
- * de la que cuidarse acá.
- */
-function formatIsoForDisplay(iso: string): string {
-  const [year, month, day] = iso.split("-")
-  return `${day}/${month}/${year}`
-}
 
 /**
  * Texto del botón que dispara el calendario. Cubre los cuatro casos que
@@ -515,30 +509,38 @@ export function MovementFilters({ basePath, query, categories }: Props) {
         </div>
       </div>
 
+      {/*
+        Segmentado y no desplegable: son cuatro opciones fijas y conocidas, así
+        que un `Select` cobraba dos clicks (abrir, elegir) y escondía tres de
+        las cuatro hasta abrirlo. Acá se ve el estado activo y los otros tres a
+        la vez, y cambiar de filtro es un solo click. De paso la fila funciona
+        como referencia de color de la tabla: el punto de cada segmento es el
+        mismo color que el badge de esa columna.
+
+        `type="single"` de Radix devuelve "" al deseleccionar el activo
+        (clickearlo de nuevo). Eso se mapea a "all" y no se descarta: apagar el
+        estado que estaba puesto es exactamente pedir "todos".
+      */}
       <div className={cn(FIELD_WIDTH.status, "space-y-1.5")}>
-        <Label htmlFor="filtro-estado" className={LABEL_CLASS}>
+        <Label id="filtro-estado-label" className={LABEL_CLASS}>
           Estado
         </Label>
-        {/* Mismo envoltorio y mismo motivo que en Categoría. */}
-        <div>
-          <Select
-            value={query.status}
-            onValueChange={(v) => go({ status: v as MovementStatus | "all" })}
-          >
-            <SelectTrigger id="filtro-estado" className="w-full">
-              <SelectValue>
-                <OpcionEstado value={query.status} />
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map((o) => (
-                <SelectItem key={o} value={o}>
-                  <OpcionEstado value={o} />
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <ToggleGroup
+          id="filtro-estado"
+          type="single"
+          spacing={0}
+          variant="outline"
+          value={query.status}
+          onValueChange={(v) => go({ status: (v || "all") as MovementStatus | "all" })}
+          aria-labelledby="filtro-estado-label"
+        >
+          {STATUS_OPTIONS.map((o) => (
+            <ToggleGroupItem key={o} value={o} className="data-[state=on]:text-paper">
+              {o !== "all" && <span className={cn(DOT_CLASS, DOT_COLOR[o])} />}
+              {o === "all" ? "Todos" : STATUS_LABELS[o]}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       </div>
 
       <div className={cn(FIELD_WIDTH.period, "space-y-1.5")}>
@@ -678,14 +680,21 @@ export function MovementFiltersSkeleton() {
   return (
     <div className={BAR_CLASS} aria-hidden>
       {[
-        { label: "Buscar", width: FIELD_WIDTH.search },
-        { label: "Categoría", width: FIELD_WIDTH.category },
-        { label: "Estado", width: FIELD_WIDTH.status },
-        { label: "Período", width: FIELD_WIDTH.period },
+        { label: "Buscar", width: FIELD_WIDTH.search, box: "w-full" },
+        { label: "Categoría", width: FIELD_WIDTH.category, box: "w-full" },
+        // El segmentado no tiene ancho de campo: reserva el que miden sus
+        // cuatro etiquetas fijas, medido sobre el control ya renderizado.
+        { label: "Estado", width: FIELD_WIDTH.status, box: "w-[309px]" },
+        { label: "Período", width: FIELD_WIDTH.period, box: "w-full" },
       ].map((f) => (
         <div key={f.label} className={cn(f.width, "space-y-1.5")}>
           <Label className={LABEL_CLASS}>{f.label}</Label>
-          <div className="h-8 w-full animate-pulse rounded-lg border border-input bg-white/[0.02]" />
+          <div
+            className={cn(
+              "h-8 animate-pulse rounded-lg border border-input bg-white/[0.02]",
+              f.box,
+            )}
+          />
         </div>
       ))}
     </div>

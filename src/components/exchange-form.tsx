@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { IsoDate } from "@/lib/dates"
 import { createExchange } from "@/server/actions/movements"
 
@@ -31,36 +32,32 @@ export function ExchangeForm({ buyRate, sellRate, today }: Props) {
     <form action={action} className="space-y-4 rounded-lg border p-4">
       <input type="hidden" name="direction" value={direction} />
 
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          aria-pressed={direction === "buy"}
-          onClick={() => setDirection("buy")}
-          className={
-            direction === "buy"
-              ? // El hover de `outline` pisa el relleno y la etiqueta del estado
-                // elegido, así que el elegido repite los suyos en hover.
-                "bg-accent text-paper hover:bg-accent hover:text-paper"
-              : "text-fog"
-          }
-        >
+      {/*
+        El mismo segmentado que el filtro de estado de /ingresos y /egresos, y
+        no dos botones con `aria-pressed` a mano: son dos opciones excluyentes
+        —exactamente lo que `ToggleGroup type="single"` modela— y la versión
+        anterior tenía que repetir sus propios colores en hover para que el
+        `outline` no le pisara el estado elegido.
+
+        `value` nunca puede quedar vacío: Radix manda "" al clickear el que ya
+        está activo, y acá eso no es "ninguno de los dos" sino "no cambiar" —
+        una operación es compra o venta, no puede no ser ninguna.
+      */}
+      <ToggleGroup
+        type="single"
+        spacing={0}
+        variant="outline"
+        value={direction}
+        onValueChange={(v) => v && setDirection(v as "buy" | "sell")}
+        aria-label="Sentido de la operación"
+      >
+        <ToggleGroupItem value="buy" className="data-[state=on]:text-paper">
           Comprar dólares
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          aria-pressed={direction === "sell"}
-          onClick={() => setDirection("sell")}
-          className={
-            direction === "sell"
-              ? "bg-accent text-paper hover:bg-accent hover:text-paper"
-              : "text-fog"
-          }
-        >
+        </ToggleGroupItem>
+        <ToggleGroupItem value="sell" className="data-[state=on]:text-paper">
           Vender dólares
-        </Button>
-      </div>
+        </ToggleGroupItem>
+      </ToggleGroup>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1">
