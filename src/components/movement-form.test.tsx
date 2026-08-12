@@ -40,7 +40,7 @@ describe("MovementForm", () => {
 
     // Con importe cargado, el plan de cuotas se genera en el render.
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
-    expect(screen.getByLabelText("Importe de la cuota 1 en centavos")).toBeTruthy()
+    expect(screen.getByLabelText("Importe de la cuota 1")).toBeTruthy()
 
     // Un <input type="date"> devuelve "" mientras la fecha está incompleta.
     // Antes del guard, esto tiraba desde addMonthsClamped y se llevaba puesta
@@ -50,7 +50,7 @@ describe("MovementForm", () => {
     ).not.toThrow()
 
     // Y el plan que ya estaba sigue en pantalla: no se pierde lo tipeado.
-    expect(screen.getByLabelText("Importe de la cuota 1 en centavos")).toBeTruthy()
+    expect(screen.getByLabelText("Importe de la cuota 1")).toBeTruthy()
   })
 
   it("regenera el plan cuando la fecha vuelve a ser válida", () => {
@@ -66,6 +66,47 @@ describe("MovementForm", () => {
     expect(vencimiento.value).toBe("2026-03-31")
   })
 
+  // Las filas de cuota se MUESTRAN en pesos y se ENVÍAN en centavos: son dos
+  // unidades para el mismo dato, y el único lugar donde se cruzan es este
+  // componente. Si la conversión se rompe, el formulario sigue andando y
+  // guarda importes cien veces más chicos o más grandes sin ningún error a la
+  // vista, así que la cobertura va acá y no en el parser.
+  it("las cuotas se muestran en pesos y viajan en centavos", () => {
+    const { container } = render(
+      <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+    )
+
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
+    fireEvent.change(screen.getByLabelText("Cuotas"), { target: { value: "2" } })
+
+    const visible1 = screen.getByLabelText<HTMLInputElement>("Importe de la cuota 1")
+    const visible2 = screen.getByLabelText<HTMLInputElement>("Importe de la cuota 2")
+    expect(visible1.value).toBe("500,00")
+    expect(visible2.value).toBe("500,00")
+
+    const enviados = [
+      ...container.querySelectorAll<HTMLInputElement>('input[type="hidden"][name="installmentAmount"]'),
+    ].map((i) => i.value)
+    expect(enviados).toEqual(["50000", "50000"])
+  })
+
+  it("una cuota editada a mano se reenvía en centavos", () => {
+    const { container } = render(
+      <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+    )
+
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
+    // El formato local, con coma decimal: es lo que la persona tipea.
+    fireEvent.change(screen.getByLabelText("Importe de la cuota 1"), {
+      target: { value: "1.000,50" },
+    })
+
+    const enviado = container.querySelector<HTMLInputElement>(
+      'input[type="hidden"][name="installmentAmount"]',
+    )
+    expect(enviado?.value).toBe("100050")
+  })
+
   it("no genera más de 120 filas de cuota aunque se tipee un número enorme", () => {
     render(
       <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
@@ -79,7 +120,7 @@ describe("MovementForm", () => {
 
     // El clamp es del estado, no del atributo `max` del input: `max` sólo
     // valida al hacer submit, y para entonces las 99.999 filas ya se pintaron.
-    expect(screen.queryByLabelText("Importe de la cuota 121 en centavos")).toBeNull()
-    expect(screen.getByLabelText("Importe de la cuota 120 en centavos")).toBeTruthy()
+    expect(screen.queryByLabelText("Importe de la cuota 121")).toBeNull()
+    expect(screen.getByLabelText("Importe de la cuota 120")).toBeTruthy()
   })
 })
