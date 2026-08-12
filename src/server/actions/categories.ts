@@ -59,7 +59,24 @@ export async function createCategory(
  * en @/server/actions/movements — validar que sea un UUID es el borde de
  * confianza mínimo, incluso cuando la RLS ya filtra por userId.
  */
-const archiveCategoryIdSchema = z.uuid("Esa categoría no existe.")
+const categoryIdSchema = z.uuid("Esa categoría no existe.")
+
+/**
+ * El UPDATE que comparten archivar y desarchivar: es la misma fila, la misma
+ * columna y los mismos dos filtros, y sólo cambia el booleano. Devuelve
+ * `false` cuando no tocó ninguna fila (id de otro usuario, o inexistente) para
+ * que cada llamador ponga su propio mensaje.
+ */
+async function setArchived(userId: string, id: string, archived: boolean): Promise<boolean> {
+  const updated = await withUser(userId, (tx) =>
+    tx
+      .update(category)
+      .set({ archived })
+      .where(and(eq(category.id, id), eq(category.userId, userId)))
+      .returning({ id: category.id }),
+  )
+  return updated.length > 0
+}
 
 /**
  * Se archiva en lugar de borrar: los movimientos históricos conservan su
@@ -68,24 +85,56 @@ const archiveCategoryIdSchema = z.uuid("Esa categoría no existe.")
 export async function archiveCategory(id: string): Promise<ActionResult> {
   const user = await requireUser()
 
-  const parsed = archiveCategoryIdSchema.safeParse(id)
+  const parsed = categoryIdSchema.safeParse(id)
   if (!parsed.success) {
     return failure("Esa categoría no existe.")
   }
 
   try {
-    const updated = await withUser(user.id, (tx) =>
-      tx
-        .update(category)
-        .set({ archived: true })
-        .where(and(eq(category.id, parsed.data), eq(category.userId, user.id)))
-        .returning({ id: category.id }),
-    )
-
-    if (updated.length === 0) return failure("No encontramos esa categoría.")
+    if (!(await setArchived(user.id, parsed.data, true))) {
+      return failure("No encontramos esa categoría.")
+    }
   } catch (error) {
     logDbError("archiveCategory", error)
     return failure("No pudimos archivar la categoría.")
+  }
+
+  revalidatePath("/", "layout")
+  return success()
+}
+
+/**
+ * El camino de vuelta. Puede fallar donde archivar nunca falla: el índice
+ * único `category_active_unique` es PARCIAL —sólo mira las activas, que es lo
+ * que permite archivar "Ocio" y volver a crearla— así que mientras ésta
+ * estuvo archivada se pudo crear otra activa con el mismo nombre y tipo.
+ * Desarchivarla ahora las dejaría a las dos activas y Postgres lo rechaza con
+ * 23505.
+ *
+ * Se distingue ese caso del resto por el mismo motivo que en `createCategory`:
+ * "ya tenés una con ese nombre" le dice a la persona qué hacer (renombrar una
+ * de las dos), y el genérico no. Qué pasa con la duplicada es una decisión de
+ * ella, no de la app: acá no se renombra ni se archiva nada por su cuenta.
+ */
+export async function unarchiveCategory(id: string): Promise<ActionResult> {
+  const user = await requireUser()
+
+  const parsed = categoryIdSchema.safeParse(id)
+  if (!parsed.success) {
+    return failure("Esa categoría no existe.")
+  }
+
+  try {
+    if (!(await setArchived(user.id, parsed.data, false))) {
+      return failure("No encontramos esa categoría.")
+    }
+  } catch (error) {
+    if (isUniqueViolation(error, "category_active_unique")) {
+      logDbError("unarchiveCategory: nombre repetido", error)
+      return failure("Ya tenés una categoría activa con ese nombre.")
+    }
+    logDbError("unarchiveCategory", error)
+    return failure("No pudimos desarchivar la categoría.")
   }
 
   revalidatePath("/", "layout")

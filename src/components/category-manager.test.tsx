@@ -9,11 +9,13 @@ import type { Category } from "@/server/queries"
 /** Las dos fronteras de siempre: las Server Actions y el router de Next. */
 const createCategory = vi.fn()
 const archiveCategory = vi.fn()
+const unarchiveCategory = vi.fn()
 const refresh = vi.fn()
 
 vi.mock("@/server/actions/categories", () => ({
   createCategory: (...args: unknown[]) => createCategory(...args),
   archiveCategory: (...args: unknown[]) => archiveCategory(...args),
+  unarchiveCategory: (...args: unknown[]) => unarchiveCategory(...args),
 }))
 
 vi.mock("next/navigation", () => ({
@@ -36,6 +38,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   createCategory.mockResolvedValue({ ok: true })
   archiveCategory.mockResolvedValue({ ok: true })
+  unarchiveCategory.mockResolvedValue({ ok: true })
 })
 
 afterEach(cleanup)
@@ -111,6 +114,47 @@ describe("CategoryManager", () => {
     })
 
     expect(screen.queryByText("No pudimos archivarla.")).toBeNull()
+  })
+
+  /*
+   * Archivar era irreversible desde la interfaz (§1.2 de PENDIENTES): la
+   * columna y el índice único parcial ya lo permitían, faltaba el camino de
+   * vuelta.
+   */
+  it("una archivada ofrece desarchivar, y una activa no", () => {
+    montar([categoria("c1", "Supermercado"), categoria("c2", "Nafta", true)])
+
+    expect(screen.getAllByRole("button", { name: "Desarchivar" })).toHaveLength(1)
+  })
+
+  it("desarchivar manda el id de esa categoría", async () => {
+    montar([categoria("c2", "Nafta", true)])
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Desarchivar" }))
+    })
+
+    expect(unarchiveCategory).toHaveBeenCalledWith("c2")
+  })
+
+  /*
+   * El único error que desarchivar puede dar y archivar no: mientras estaba
+   * archivada se pudo crear otra activa con el mismo nombre y tipo (para eso
+   * el índice único es parcial). La base lo rechaza y el mensaje tiene que
+   * caer en la fila que se intentó desarchivar.
+   */
+  it("el choque de nombre al desarchivar se muestra en esa fila", async () => {
+    unarchiveCategory.mockResolvedValue({
+      ok: false,
+      message: "Ya tenés una categoría activa con ese nombre.",
+    })
+    montar([categoria("c2", "Nafta", true), categoria("c3", "Peaje", true)])
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole("button", { name: "Desarchivar" })[0])
+    })
+
+    expect(screen.getAllByText("Ya tenés una categoría activa con ese nombre.")).toHaveLength(1)
   })
 
   it("el error de crear una categoría se muestra", async () => {

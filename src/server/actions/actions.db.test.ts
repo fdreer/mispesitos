@@ -7,7 +7,11 @@ import { revalidatePath } from "next/cache"
 import { db, sqlClient, withUser } from "@/db/client"
 import { category, installment, movement, user, userSettings } from "@/db/schema"
 import { DEFAULT_CATEGORIES } from "@/lib/default-categories"
-import { archiveCategory, createCategory } from "@/server/actions/categories"
+import {
+  archiveCategory,
+  createCategory,
+  unarchiveCategory,
+} from "@/server/actions/categories"
 import {
   createExchange,
   createMovement,
@@ -1407,6 +1411,74 @@ describe("archiveCategory", () => {
     expect(message).toBe("No pudimos archivar la categoría.")
     expect(message).not.toBe("No encontramos esa categoría.")
     expect(etiquetas).toEqual(["archiveCategory"])
+    expect(rutasRevalidadas()).toEqual([])
+  })
+})
+
+describe("unarchiveCategory", () => {
+  it("devuelve la categoría a las activas", async () => {
+    comoUsuario(USUARIO_A)
+    await createCategory(null, formulario({ name: "Para desarchivar", kind: "expense" }))
+    const [fila] = await categoriaLlamada(USUARIO_A, "Para desarchivar")
+    expect(await archiveCategory(fila.id)).toEqual({ ok: true })
+
+    expect(await unarchiveCategory(fila.id)).toEqual({ ok: true })
+
+    const [despues] = await categoriaLlamada(USUARIO_A, "Para desarchivar")
+    expect(despues).toMatchObject({ id: fila.id, archived: false })
+  })
+
+  /**
+   * El modo de falla que archivar no tiene: el índice único es PARCIAL, así
+   * que mientras ésta estuvo archivada el nombre quedó libre y se pudo crear
+   * otra activa igual. Desarchivarla dejaría dos activas con el mismo nombre y
+   * tipo, y Postgres lo rechaza con 23505.
+   */
+  it("con el nombre ya tomado por una activa se rechaza con su propio mensaje, y la fila sigue archivada", async () => {
+    comoUsuario(USUARIO_A)
+    await createCategory(null, formulario({ name: "Disputada", kind: "expense" }))
+    const [original] = await categoriaLlamada(USUARIO_A, "Disputada")
+    expect(await archiveCategory(original.id)).toEqual({ ok: true })
+    expect(await createCategory(null, formulario({ name: "Disputada", kind: "expense" }))).toEqual({
+      ok: true,
+    })
+
+    const { resultado, etiquetas } = await conErroresDeConsola(() =>
+      unarchiveCategory(original.id),
+    )
+
+    expect(rechazo(resultado).message).toBe("Ya tenés una categoría activa con ese nombre.")
+    expect(etiquetas).toEqual(["unarchiveCategory: nombre repetido"])
+    const disputadas = await categoriaLlamada(USUARIO_A, "Disputada")
+    expect(disputadas.filter((c) => c.archived).map((c) => c.id)).toEqual([original.id])
+    expect(disputadas.filter((c) => !c.archived)).toHaveLength(1)
+  })
+
+  it("una categoría ajena responde igual que una que no existe, y no se toca", async () => {
+    comoUsuario(USUARIO_A)
+
+    const inexistente = await unarchiveCategory(randomUUID())
+    const ajena = await unarchiveCategory(CAT_B)
+
+    expect(inexistente).toEqual({ ok: false, message: "No encontramos esa categoría." })
+    expect(ajena).toEqual(inexistente)
+  })
+
+  /**
+   * La otra mitad del test de arriba: que exista un mensaje para el nombre
+   * repetido no puede convertirse en el mensaje de cualquier falla de la base.
+   * Mismo criterio —y misma palanca— que `createCategory`.
+   */
+  it("si la base falla por otra cosa, el mensaje no es el del nombre repetido", async () => {
+    comoUsuario(USUARIO_QUE_LA_BASE_NO_PUEDE_LEER)
+
+    const { resultado, etiquetas } = await conErroresDeConsola(() =>
+      unarchiveCategory(randomUUID()),
+    )
+
+    const { message } = rechazo(resultado)
+    expect(message).toBe("No pudimos desarchivar la categoría.")
+    expect(etiquetas).toEqual(["unarchiveCategory"])
     expect(rutasRevalidadas()).toEqual([])
   })
 })
