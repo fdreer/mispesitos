@@ -14,6 +14,7 @@ describe("parseMovementQuery", () => {
     expect(parseMovementQuery({})).toEqual({
       search: "",
       categoryId: "all",
+      currency: "all",
       status: "all",
       from: "",
       to: "",
@@ -26,6 +27,7 @@ describe("parseMovementQuery", () => {
       parseMovementQuery({
         search: "kiosco",
         categoryId: "cat-1",
+        currency: "USD",
         status: "overdue",
         from: "2026-01-01",
         to: "2026-12-31",
@@ -34,6 +36,7 @@ describe("parseMovementQuery", () => {
     ).toEqual({
       search: "kiosco",
       categoryId: "cat-1",
+      currency: "USD",
       status: "overdue",
       from: "2026-01-01",
       to: "2026-12-31",
@@ -43,6 +46,13 @@ describe("parseMovementQuery", () => {
 
   it("un estado inventado cae en 'all' en vez de filtrar por nada", () => {
     expect(parseMovementQuery({ status: "borracho" }).status).toBe("all")
+  })
+
+  it("una moneda inventada cae en 'all', igual que el estado", () => {
+    // Las dos son enumeraciones cerradas y la URL la escribe cualquiera:
+    // ?currency=EUR no puede dejar la lista vacía sin explicación.
+    expect(parseMovementQuery({ currency: "EUR" }).currency).toBe("all")
+    expect(parseMovementQuery({ currency: "ars" }).currency).toBe("all")
   })
 
   it("una fecha que no es ISO se descarta", () => {
@@ -100,9 +110,10 @@ describe("hayFiltrosActivos", () => {
     expect(hayFiltrosActivos(parseMovementQuery({}))).toBe(false)
   })
 
-  it("cualquiera de los cinco campos alcanza para contar como filtro activo", () => {
+  it("cualquiera de los seis campos alcanza para contar como filtro activo", () => {
     expect(hayFiltrosActivos(parseMovementQuery({ search: "kiosco" }))).toBe(true)
     expect(hayFiltrosActivos(parseMovementQuery({ categoryId: "cat-1" }))).toBe(true)
+    expect(hayFiltrosActivos(parseMovementQuery({ currency: "USD" }))).toBe(true)
     expect(hayFiltrosActivos(parseMovementQuery({ status: "paid" }))).toBe(true)
     expect(hayFiltrosActivos(parseMovementQuery({ from: "2026-01-01" }))).toBe(true)
     expect(hayFiltrosActivos(parseMovementQuery({ to: "2026-12-31" }))).toBe(true)
@@ -118,6 +129,7 @@ describe("movementFiltersFromQuery", () => {
     expect(movementFiltersFromQuery(parseMovementQuery({}))).toEqual({
       search: undefined,
       categoryId: undefined,
+      currency: undefined,
       from: undefined,
       to: undefined,
     })
@@ -127,6 +139,7 @@ describe("movementFiltersFromQuery", () => {
     const query = parseMovementQuery({
       search: "kiosco",
       categoryId: "cat-1",
+      currency: "USD",
       from: "2026-01-01",
       to: "2026-12-31",
     })
@@ -134,6 +147,7 @@ describe("movementFiltersFromQuery", () => {
     expect(movementFiltersFromQuery(query)).toEqual({
       search: "kiosco",
       categoryId: "cat-1",
+      currency: "USD",
       from: "2026-01-01",
       to: "2026-12-31",
     })
@@ -178,6 +192,10 @@ describe("buildMovementHref", () => {
     expect(buildMovementHref("/ingresos", conFiltros, { page: 4 })).toBe(
       "/ingresos?search=kiosco&status=paid&page=4",
     )
+  })
+
+  it("escribe la moneda cuando está puesta", () => {
+    expect(buildMovementHref("/egresos", vacia, { currency: "USD" })).toBe("/egresos?currency=USD")
   })
 
   it("codifica el buscador", () => {
