@@ -4,6 +4,7 @@ import {
   PAGE_SIZE,
   buildMovementHref,
   hayFiltrosActivos,
+  movementFiltersFromQuery,
   paginate,
   parseMovementQuery,
 } from "@/lib/movement-query"
@@ -109,6 +110,38 @@ describe("hayFiltrosActivos", () => {
 
   it("la página sola no cuenta como filtro activo", () => {
     expect(hayFiltrosActivos(parseMovementQuery({ page: "3" }))).toBe(false)
+  })
+})
+
+describe("movementFiltersFromQuery", () => {
+  it("una query pelada no manda ningún filtro a la consulta", () => {
+    expect(movementFiltersFromQuery(parseMovementQuery({}))).toEqual({
+      search: undefined,
+      categoryId: undefined,
+      from: undefined,
+      to: undefined,
+    })
+  })
+
+  it("manda los que están puestos, con el mismo nombre que espera la consulta", () => {
+    const query = parseMovementQuery({
+      search: "kiosco",
+      categoryId: "cat-1",
+      from: "2026-01-01",
+      to: "2026-12-31",
+    })
+
+    expect(movementFiltersFromQuery(query)).toEqual({
+      search: "kiosco",
+      categoryId: "cat-1",
+      from: "2026-01-01",
+      to: "2026-12-31",
+    })
+  })
+
+  it("el estado nunca viaja: no es una columna, se deriva de las cuotas", () => {
+    const filtros = movementFiltersFromQuery(parseMovementQuery({ status: "paid" }))
+    expect("status" in filtros).toBe(false)
   })
 })
 

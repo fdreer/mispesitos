@@ -16,6 +16,10 @@ vi.mock("next/link", () => ({
       {children}
     </a>
   ),
+  // `LinkPending` (dentro de cada enlace) lo consume. Fuera de Next el hook no
+  // tiene de dónde sacar el estado: acá se responde "nada pendiente", que es
+  // el estado en el que este componente se dibuja siempre en los tests.
+  useLinkStatus: () => ({ pending: false }),
 }))
 
 function montar(page: number, totalPages: number, raw: Record<string, string> = {}) {
