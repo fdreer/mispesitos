@@ -340,8 +340,22 @@ el dashboard (1.1), desarchivar categorías (1.2), el mensaje de error de
 
 ### 6.2 La cobertura de componentes sigue siendo parcial
 
-Después de la tarea 1 hay tests de `MovementForm` y de nada más. `ExchangeForm`,
-`SettingsForm`, `CategoryManager` y `AuthForm` siguen sin una sola prueba.
+~~Después de la tarea 1 hay tests de `MovementForm` y de nada más. `ExchangeForm`,
+`SettingsForm`, `CategoryManager` y `AuthForm` siguen sin una sola prueba.~~
+Cerrado el 2026-08-12: los cuatro tienen su archivo al lado
+(`exchange-form.test.tsx`, `settings-form.test.tsx`,
+`category-manager.test.tsx`, `auth-form.test.tsx`). Qué se fijó en cada uno:
+
+| Componente | Lo que sostienen los tests |
+|---|---|
+| `ExchangeForm` | el TC sugerido cambia al pasar de compra a venta (es lo que el `key={direction}` viene a garantizar), el sentido nunca queda vacío, la fecha sale del calendario al campo oculto, y el error se muestra sin refrescar |
+| `SettingsForm` | el "Guardado." aparece y se apaga por los TRES caminos distintos: el `onChange` del form, el `onSelect` del calendario y el `onValueChange` del Select. Con `redirectTo` no sale y navega |
+| `CategoryManager` | activas y archivadas separadas, el error de archivar cae en la fila que falló y no en la de al lado, y no sobrevive al intento siguiente |
+| `AuthForm` | login y registro mandan lo que corresponde, el error se muestra (con mensaje o con el genérico), no navega, y el camino de Google deja de ser mudo cuando falla |
+
+Los que siguen sin test propio son los de sólo presentación
+(`CategoryBadge`, `StatusBadge`, `InfoHint`, `BalanceCards`) y las pantallas de
+`src/app/**`.
 
 Los tres huecos que esta sección declaraba se cerraron el 2026-08-12
 (`src/components/installment-paid-button.test.tsx`, más dos describes nuevos en
@@ -472,14 +486,21 @@ cuenta con más de 20 movimientos; la de prueba tiene cero:
   un cambio de filtro navega a la URL anterior y descarta ese filtro. Es un
   server component: no puede ver el ref del cliente sin duplicar estado, que es
   justo lo que el §3.1 no quiere. Ventana chica, pero está.
-- **Qué cuenta como "sin filtro" vive en cuatro lugares.** `buildMovementHref`
-  decide qué omitir de la URL; `movement-screen.tsx` decide qué mandar como
-  `undefined` a `listMovements`; y `hayFiltrosActivos` decide qué cuenta como
-  filtrado. Agregar un sexto filtro —moneda es el candidato obvio— obliga a
-  tocar los tres, y olvidarse de uno no falla: se porta mal en silencio.
-- **La regla de §7.4 del spec no la cumple el paginador.** "Cualquier control
-  nuevo que navegue en vez de mutar estado local" tendría que dar feedback de
-  pendiente. `MovementPagination` no puede: es un server component.
+- ~~**Qué cuenta como "sin filtro" vive en cuatro lugares.**~~ Resuelto el
+  2026-08-12 con `FILTER_DEFAULTS` (`src/lib/movement-query.ts`): cada filtro
+  con su valor de "sin filtro", en una sola tabla. De ahí salen las tres
+  decisiones que antes se repetían —qué se escribe en la URL
+  (`buildMovementHref`), qué cuenta como pantalla filtrada (`hayFiltrosActivos`)
+  y qué viaja a la consulta (`movementFiltersFromQuery`, que reemplaza al objeto
+  que armaba a mano `movement-screen.tsx`)—. Agregar un sexto filtro sigue
+  pidiendo tocar `MovementQuery`, el parser y la barra; lo que ya no puede pasar
+  es que uno de esos tres se olvide y la pantalla se porte mal en silencio.
+- ~~**La regla de §7.4 del spec no la cumple el paginador.**~~ Resuelto el
+  2026-08-12 con `LinkPending` (`src/components/link-pending.tsx`), un
+  envoltorio de cliente que usa `useLinkStatus` de `next/link`: el estado lo
+  provee el propio `Link`, así que el paginador sigue siendo un server component
+  y el enlace clickeado se atenúa mientras la navegación viaja. Sólo se atenúa
+  ese enlace: el hook informa del `Link` más cercano y nada más.
 
 ---
 
@@ -600,3 +621,45 @@ Lo que **nadie miró funcionando**:
    saldo de ocho cifras hay que verlo en pantalla.
 2. **El dashboard con datos** después del cambio de consulta. La cuenta de
    prueba no tiene movimientos, así que la torta y las barras salen vacías.
+
+---
+
+## 10. La tercera tanda del 2026-08-12
+
+Lo que quedaba en el documento sin necesitar una decisión: dos deudas de §7.2 y
+el hueco de cobertura de §6.2.
+
+| Qué | Dónde | Sección |
+|---|---|---|
+| "Sin filtro" se define una sola vez (`FILTER_DEFAULTS`) y de ahí salen la URL, el mensaje de lista vacía y los filtros de la consulta | `src/lib/movement-query.ts`, `src/components/movement-screen.tsx` | §7.2 |
+| El paginador avisa que tomó el click (`LinkPending` + `useLinkStatus`) | `src/components/link-pending.tsx`, `src/components/movement-pagination.tsx`, `src/components/ui/pagination.tsx` | §7.2, §7.4 del spec |
+| Los cuatro componentes que no tenían una sola prueba | `exchange-form`, `settings-form`, `category-manager`, `auth-form` (`.test.tsx`) | §6.2 |
+
+La suite pasó de 357 a 388 tests. `pnpm typecheck`, `pnpm lint` y `pnpm build`
+limpios.
+
+De los tests nuevos, dos cubren cosas que §8.2 dejó anotadas como "nadie las
+miró funcionando" y que ahora al menos las sostiene una prueba: el "Guardado."
+apagándose por sus tres caminos, y el error de archivado en la fila correcta.
+Sigue sin verificarse en un navegador de verdad — es un techo de entorno, no de
+cobertura.
+
+### 10.1 Lo que se decidió no tocar
+
+- **El agujero de `movement-pagination.tsx`** (§7.2): clickear una página
+  mientras viaja un cambio de filtro navega a la URL anterior. Taparlo pide
+  compartir el `queryRef` del cliente entre la barra y el paginador, o sea subir
+  estado y duplicar lo que la URL ya dice — justo lo que la §3.1 del spec no
+  quiere. La ventana es de milisegundos y el resultado es un filtro perdido, no
+  un dato mal.
+- **El sexto filtro (moneda)**, que §2 sigue listando como deuda declarada de la
+  v1: es alcance nuevo. Lo que sí cambió es que ahora agregarlo es tocar tres
+  lugares declarados en vez de cuatro repartidos.
+- **Todo lo de la sección 1**, que sigue esperando una decisión.
+
+### 10.2 Lo que quedó sin verificar en el navegador
+
+El paginador atenuado. Hace falta una cuenta con más de 20 movimientos para que
+`MovementPagination` dibuje un solo píxel, y la de prueba tiene cero: sigue
+siendo el punto 1 de §7.1. `useLinkStatus` sólo reporta `pending` durante una
+navegación real, así que en los tests siempre se dibuja apagado.
