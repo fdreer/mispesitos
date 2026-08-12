@@ -11,7 +11,7 @@ import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import {
   listCategories,
   listExchanges,
-  listMovements,
+  listMovementRows,
   listPaidInstallments,
   listPendingInstallments,
 } from "@/server/queries"
@@ -70,6 +70,9 @@ async function DashboardBody() {
    * @/lib/dashboard-view), que vienen completas. Un plan de hace tres años con
    * cuotas que todavía vencen sigue apareciendo en "Vencimientos" y sigue
    * enlazando bien, aunque su movimiento quede afuera de acá.
+   *
+   * Y por `listMovementRows`, no `listMovements`: `MovementRow` no lleva
+   * cuotas, así que traerlas era traer filas que el mapeo de abajo tiraba.
    */
   const historyFrom = `${monthKey(addMonthsClamped(today, -(HISTORY_MONTHS - 1)))}-01`
 
@@ -77,7 +80,7 @@ async function DashboardBody() {
     listPaidInstallments(user.id),
     listExchanges(user.id),
     listPendingInstallments(user.id),
-    listMovements(user.id, { from: historyFrom }),
+    listMovementRows(user.id, { from: historyFrom }),
     // "expense" + archivadas incluidas: la torta de egresos por categoría
     // tiene que poder resolver el nombre de un movimiento viejo cuya
     // categoría ya se archivó.

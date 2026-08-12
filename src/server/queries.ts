@@ -19,8 +19,11 @@ export type Settings = typeof userSettings.$inferSelect
 /**
  * Memoizada por request, mismo motivo que `getOptionalUser` (@/server/session):
  * `requireSettings()` la llama desde el layout de (app) y otra vez desde cada
- * página, y cada llamada abre su propia transacción. Es la única consulta de la
- * app que se repite tal cual dentro del mismo request.
+ * página, y cada llamada abre su propia transacción.
+ *
+ * Es la consulta que más se repite dentro de un mismo request, y desde que
+ * `listUsdPositionEvents` (más abajo) también pasa por acá en vez de
+ * seleccionar la fila por su cuenta, /cambios la resuelve una sola vez.
  */
 export const getSettings = cache(async (userId: string): Promise<Settings | null> => {
   const rows = await withUser(userId, (tx) =>
@@ -137,10 +140,29 @@ async function conCuotas(
 }
 
 /**
- * TODOS los movimientos que pasan el filtro, con sus cuotas. Sin tope: quien
- * llame acá necesita la lista entera —el dashboard, que agrega sobre ella, y
+ * TODOS los movimientos que pasan el filtro, SIN sus cuotas. Es lo que necesita
+ * el dashboard: agrega sobre el importe total de cada movimiento y su estado lo
+ * saca de `listPendingInstallments`, así que las cuotas que traía `listMovements`
+ * se serializaban para tirarse en el mapeo de la página —con 200 movimientos a
+ * doce cuotas, ~2.400 filas por carga—.
+ */
+export async function listMovementRows(
+  userId: string,
+  filters: MovementFilters = {},
+): Promise<Movement[]> {
+  return withUser(userId, (tx) =>
+    tx
+      .select()
+      .from(movement)
+      .where(and(...movementConditions(userId, filters)))
+      .orderBy(...MOVEMENT_ORDER),
+  )
+}
+
+/**
+ * Lo mismo, con las cuotas colgadas. Sin tope: el único llamador que queda es
  * la lista filtrada por estado, que no puede recortar en SQL (ver
- * `listMovementsPage`)—.
+ * `listMovementsPage`).
  */
 export async function listMovements(
   userId: string,
@@ -283,22 +305,24 @@ export async function listExchanges(userId: string) {
  * poder probarla sin tocar la base.
  */
 export async function listUsdPositionEvents(userId: string): Promise<PositionEvent[]> {
+  // Por `getSettings` y no por un select propio: /cambios ya la pidió —el
+  // layout de (app) y la página pasan por `requireSettings()`—, así que el
+  // memo de request la resuelve sin volver a la base. Antes esta función abría
+  // su propia transacción para leer la misma fila.
+  const row = await getSettings(userId)
+
+  // requireSettings() exige onboarding completo antes de llegar acá: en la
+  // práctica esta fila siempre existe. Sin ella no hay saldo inicial que
+  // sembrar ni piso de fecha que aplicar.
+  if (!row) return []
+
+  const settings = {
+    usdCents: row.initialBalanceUsdCents,
+    rate: row.initialBalanceUsdRate,
+    date: row.initialBalanceDate,
+  }
+
   return withUser(userId, async (tx) => {
-    const [settings] = await tx
-      .select({
-        usdCents: userSettings.initialBalanceUsdCents,
-        rate: userSettings.initialBalanceUsdRate,
-        date: userSettings.initialBalanceDate,
-      })
-      .from(userSettings)
-      .where(eq(userSettings.userId, userId))
-      .limit(1)
-
-    // requireSettings() exige onboarding completo antes de llegar acá: en la
-    // práctica esta fila siempre existe. Sin ella no hay saldo inicial que
-    // sembrar ni piso de fecha que aplicar.
-    if (!settings) return []
-
     const exchanges = await tx
       .select({
         date: movement.date,
@@ -342,12 +366,13 @@ export async function listUsdPositionEvents(userId: string): Promise<PositionEve
         direction: assertExchangeDirection(e.direction),
       })),
       usdInstallments.map((i) => ({
-        // `paid_date` no puede ser nulo en una cuota pagada, y la consulta ya
-        // filtró por `paid = true`: lo garantiza la CHECK
-        // `installment_paid_date_required_when_paid` (migración 0009), no este `!`.
-        // El `gte` de arriba ya descartaba esas filas en silencio; ahora
-        // directamente no pueden existir.
-        date: i.date!,
+        // Mismo invariante que en `listPaidInstallments`, y por el mismo helper:
+        // la consulta ya filtró `paid = true`, y con `paid = true` la CHECK
+        // `installment_paid_date_required_when_paid` (migración 0009) exige
+        // `paid_date`. El `!` que había acá se apoyaba además en que el `gte`
+        // de arriba nunca matchea un nulo: el día que ese filtro se relajara,
+        // en vez de fallar el assert entraba un `undefined` a ordenar.
+        date: assertPaidDate(i.date),
         usdCents: i.usdCents,
         rate: i.rate,
         kind: assertInstallmentMovementKind(i.kind),
