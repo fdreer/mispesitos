@@ -90,7 +90,16 @@ function NavLinks({
           <Link
             key={link.href}
             href={link.href}
-            onClick={onNavigate}
+            /*
+             * Un click en Chromium deja el link enfocado, y la navegación de
+             * Next no lo saca: sin este blur, `focus-within:w-56` se queda
+             * prendido para siempre después del primer click, y el riel no
+             * se contrae más aunque el cursor se vaya.
+             */
+            onClick={(e) => {
+              e.currentTarget.blur()
+              onNavigate?.()
+            }}
             aria-current={active ? "page" : undefined}
             className={cn(
               ITEM_BASE,
@@ -178,8 +187,13 @@ export function AppSidebar() {
         la tabla entera cada vez que el cursor lo roza de paso.
 
         Ya no hay botón de colapsar: el ancho lo decide el cursor (o el foco).
+
+        `isolate` en el propio <aside>, no sólo `z-30` en el panel de adentro:
+        así el riel forma su propio contexto de apilamiento pase lo que pase
+        arriba, y ningún elemento de página (cards, gráficos, lo que sea)
+        puede terminar pintándose por encima de él.
       */}
-      <aside className="sticky top-0 hidden h-screen w-14 shrink-0 self-start lg:block">
+      <aside className="sticky top-0 z-30 isolate hidden h-screen w-14 shrink-0 self-start lg:block">
         <div
           className={cn(
             "group/rail absolute inset-y-0 left-0 z-30 flex w-14 flex-col overflow-hidden",
@@ -195,7 +209,10 @@ export function AppSidebar() {
             <Button
               type="button"
               variant="ghost"
-              onClick={handleSignOut}
+              onClick={(e) => {
+                e.currentTarget.blur()
+                handleSignOut()
+              }}
               disabled={pending}
               className={cn("w-full text-fog", RAIL_COLLAPSED, RAIL_EXPANDED)}
             >

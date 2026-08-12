@@ -33,8 +33,14 @@ const CATEGORIAS = [
 afterEach(cleanup)
 
 describe("MovementForm", () => {
-  it("no revienta cuando se borra la fecha con un importe ya cargado", () => {
-    render(
+  // Ya no hay forma de dejar `date` a medio completar: `DateField` (el
+  // Popover + Calendar que reemplazó al <input type="date"> nativo) sólo
+  // puede producir un día real, elegido del calendario. El guard que
+  // protegía contra la cadena vacía de un date input nativo a medio tipear
+  // se sacó junto con él (ver el comentario de `planKey` en movement-form.tsx).
+
+  it("regenera el plan cuando la fecha cambia", () => {
+    const { container } = render(
       <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
     )
 
@@ -42,28 +48,13 @@ describe("MovementForm", () => {
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
     expect(screen.getByLabelText("Importe de la cuota 1")).toBeTruthy()
 
-    // Un <input type="date"> devuelve "" mientras la fecha está incompleta.
-    // Antes del guard, esto tiraba desde addMonthsClamped y se llevaba puesta
-    // la pantalla entera.
-    expect(() =>
-      fireEvent.change(screen.getByLabelText("Fecha"), { target: { value: "" } }),
-    ).not.toThrow()
+    fireEvent.click(screen.getByRole("button", { name: /^Fecha:/ }))
+    fireEvent.click(screen.getByRole("button", { name: "jueves, 20 de agosto de 2026" }))
 
-    // Y el plan que ya estaba sigue en pantalla: no se pierde lo tipeado.
-    expect(screen.getByLabelText("Importe de la cuota 1")).toBeTruthy()
-  })
-
-  it("regenera el plan cuando la fecha vuelve a ser válida", () => {
-    render(
-      <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+    const vencimiento = container.querySelector<HTMLInputElement>(
+      'input[type="hidden"][name="installmentDueDate"]',
     )
-
-    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
-    fireEvent.change(screen.getByLabelText("Fecha"), { target: { value: "" } })
-    fireEvent.change(screen.getByLabelText("Fecha"), { target: { value: "2026-03-31" } })
-
-    const vencimiento = screen.getByLabelText("Vencimiento de la cuota 1") as HTMLInputElement
-    expect(vencimiento.value).toBe("2026-03-31")
+    expect(vencimiento?.value).toBe("2026-08-20")
   })
 
   // Las filas de cuota se MUESTRAN en pesos y se ENVÍAN en centavos: son dos

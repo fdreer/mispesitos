@@ -16,7 +16,7 @@ type Props = {
  * ícono de ayuda sólo en las que tienen algo que aclarar. Una sola definición
  * para que los cuatro títulos no puedan separarse en tamaño o color.
  */
-function BalanceHeader({ title, hint }: { title: string; hint?: React.ReactNode }) {
+export function BalanceHeader({ title, hint }: { title: string; hint?: React.ReactNode }) {
   return (
     <CardHeader className="pb-1">
       <CardTitle className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
@@ -31,12 +31,12 @@ function BalanceHeader({ title, hint }: { title: string; hint?: React.ReactNode 
  * El número, con el mismo tamaño y la misma alineación en las cuatro. Es lo
  * único que se viene a mirar acá, así que es lo único que se lee de lejos.
  */
-function BalanceAmount({ children }: { children: React.ReactNode }) {
+export function BalanceAmount({ children }: { children: React.ReactNode }) {
   return <p className="text-xl tabular-nums">{children}</p>
 }
 
 /** La línea de contexto: un solo renglón, siempre debajo del número. */
-function BalanceNote({ children }: { children: React.ReactNode }) {
+export function BalanceNote({ children }: { children: React.ReactNode }) {
   return <p className="text-muted-foreground text-xs">{children}</p>
 }
 

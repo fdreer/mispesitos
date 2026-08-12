@@ -2,15 +2,16 @@ import "server-only"
 
 import { cache } from "react"
 
-import { and, asc, desc, eq, gte, ilike, inArray, lte } from "drizzle-orm"
+import { and, asc, count, desc, eq, gte, ilike, inArray, lte } from "drizzle-orm"
 
-import { withUser } from "@/db/client"
+import { withUser, type Tx } from "@/db/client"
 import { category, installment, movement, userSettings } from "@/db/schema"
 import {
   assertExchangeDirection,
   assertInstallmentMovementKind,
   assertPaidDate,
 } from "@/lib/movement-asserts"
+import { PAGE_SIZE, type Page } from "@/lib/movement-query"
 import { buildUsdPositionEvents, type PositionEvent } from "@/lib/position"
 
 export type Settings = typeof userSettings.$inferSelect
@@ -85,48 +86,121 @@ function escapeLike(term: string): string {
   return term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")
 }
 
+function movementConditions(userId: string, filters: MovementFilters) {
+  const conditions = [eq(movement.userId, userId)]
+  if (filters.kind) conditions.push(eq(movement.kind, filters.kind))
+  if (filters.categoryId) conditions.push(eq(movement.categoryId, filters.categoryId))
+  if (filters.currency) conditions.push(eq(movement.currency, filters.currency))
+  if (filters.from) conditions.push(gte(movement.date, filters.from))
+  if (filters.to) conditions.push(lte(movement.date, filters.to))
+  if (filters.search) {
+    conditions.push(ilike(movement.description, `%${escapeLike(filters.search)}%`))
+  }
+  return conditions
+}
+
+/**
+ * El orden de las dos listas. El `id` al final no lo pide ninguna pantalla: es
+ * el desempate que hace determinista al LIMIT/OFFSET de `listMovementsPage`.
+ * Sin él, dos movimientos del mismo día cargados en la misma transacción
+ * comparten `(date, created_at)` y Postgres puede devolverlos en distinto orden
+ * en cada consulta — o sea, la misma fila en dos páginas y otra en ninguna.
+ */
+const MOVEMENT_ORDER = [desc(movement.date), desc(movement.createdAt), desc(movement.id)]
+
+/** Le cuelga a cada movimiento sus cuotas, ordenadas por número. */
+async function conCuotas(
+  tx: Tx,
+  movements: Movement[],
+): Promise<MovementWithInstallments[]> {
+  if (movements.length === 0) return []
+
+  const installments = await tx
+    .select()
+    .from(installment)
+    .where(
+      inArray(
+        installment.movementId,
+        movements.map((m) => m.id),
+      ),
+    )
+    .orderBy(asc(installment.number))
+
+  const byMovement = new Map<string, Installment[]>()
+  for (const row of installments) {
+    const list = byMovement.get(row.movementId) ?? []
+    list.push(row)
+    byMovement.set(row.movementId, list)
+  }
+
+  return movements.map((m) => ({ ...m, installments: byMovement.get(m.id) ?? [] }))
+}
+
+/**
+ * TODOS los movimientos que pasan el filtro, con sus cuotas. Sin tope: quien
+ * llame acá necesita la lista entera —el dashboard, que agrega sobre ella, y
+ * la lista filtrada por estado, que no puede recortar en SQL (ver
+ * `listMovementsPage`)—.
+ */
 export async function listMovements(
   userId: string,
   filters: MovementFilters = {},
 ): Promise<MovementWithInstallments[]> {
   return withUser(userId, async (tx) => {
-    const conditions = [eq(movement.userId, userId)]
-    if (filters.kind) conditions.push(eq(movement.kind, filters.kind))
-    if (filters.categoryId) conditions.push(eq(movement.categoryId, filters.categoryId))
-    if (filters.currency) conditions.push(eq(movement.currency, filters.currency))
-    if (filters.from) conditions.push(gte(movement.date, filters.from))
-    if (filters.to) conditions.push(lte(movement.date, filters.to))
-    if (filters.search) {
-      conditions.push(ilike(movement.description, `%${escapeLike(filters.search)}%`))
-    }
+    const movements = await tx
+      .select()
+      .from(movement)
+      .where(and(...movementConditions(userId, filters)))
+      .orderBy(...MOVEMENT_ORDER)
+
+    return conCuotas(tx, movements)
+  })
+}
+
+/**
+ * Una página de movimientos, recortada por la base y no en memoria.
+ *
+ * Es la consulta de /ingresos y /egresos cuando NO hay filtro de estado, que es
+ * la vista con la que se entra a las dos pantallas. `listMovements` traía cada
+ * movimiento que matchea el WHERE más todas sus cuotas para mostrar veinte: con
+ * 5.000 movimientos son 5.000 filas y sus cuotas por carga. Acá el `count(*)`
+ * lo resuelve el índice y el SELECT trae exactamente las veinte filas de la
+ * página, así que el costo deja de crecer con el historial.
+ *
+ * NO sirve para el filtro de estado: el estado no es una columna, se deriva de
+ * las cuotas (`getMovementStatus`), y un LIMIT en SQL no sabe cuántas filas van
+ * a sobrevivir a un filtro que se aplica después. Esa rama sigue trayendo todo
+ * y cortando en memoria con `paginate`.
+ *
+ * El clamp de la página es el mismo criterio que `paginate` (@/lib/movement-query):
+ * pedir una página que ya no existe —pasa siempre que un filtro achica la lista
+ * con el `?page=` viejo en la URL— devuelve la última, no una tabla en blanco.
+ */
+export async function listMovementsPage(
+  userId: string,
+  filters: MovementFilters,
+  page: number,
+): Promise<Page<MovementWithInstallments>> {
+  return withUser(userId, async (tx) => {
+    const conditions = movementConditions(userId, filters)
+
+    const [total] = await tx
+      .select({ value: count() })
+      .from(movement)
+      .where(and(...conditions))
+
+    const totalPages = Math.max(1, Math.ceil((total?.value ?? 0) / PAGE_SIZE))
+    const current = Math.min(Math.max(1, page), totalPages)
 
     const movements = await tx
       .select()
       .from(movement)
       .where(and(...conditions))
-      .orderBy(desc(movement.date), desc(movement.createdAt))
+      .orderBy(...MOVEMENT_ORDER)
+      .limit(PAGE_SIZE)
+      .offset((current - 1) * PAGE_SIZE)
 
-    if (movements.length === 0) return []
-
-    const installments = await tx
-      .select()
-      .from(installment)
-      .where(
-        inArray(
-          installment.movementId,
-          movements.map((m) => m.id),
-        ),
-      )
-      .orderBy(asc(installment.number))
-
-    const byMovement = new Map<string, Installment[]>()
-    for (const row of installments) {
-      const list = byMovement.get(row.movementId) ?? []
-      list.push(row)
-      byMovement.set(row.movementId, list)
-    }
-
-    return movements.map((m) => ({ ...m, installments: byMovement.get(m.id) ?? [] }))
+    return { items: await conCuotas(tx, movements), page: current, totalPages }
   })
 }
 
@@ -175,27 +249,24 @@ export async function listPendingInstallments(userId: string) {
 }
 
 /**
- * Cambios de divisa, para saldo y posición.
+ * Cambios de divisa, para saldo y posición. Trae TODOS, sin piso de fecha: los
+ * dos llamadores necesitan la lista completa y cada uno decide el corte.
+ * `computeBalances` (@/lib/balance) lo aplica en memoria para el dashboard, y
+ * /cambios parte la lista en dos —las que mueven sus tarjetas y las anteriores
+ * al saldo inicial, que muestra aparte para que se puedan ver y borrar—.
  *
- * `from` es opcional y existe para /cambios: las tres tarjetas de esa pantalla
- * salen de `listUsdPositionEvents`, que corta en `initialBalanceDate`. Sin el
- * mismo corte en la lista, una operación anterior al saldo inicial se veía en
- * la lista sin mover ninguna de las tarjetas de arriba.
- *
- * El dashboard lo llama SIN `from` a propósito: `computeBalances` (@/lib/balance)
- * aplica su propio corte en memoria, y ese corte es el que está testeado.
+ * Un corte por fecha en el WHERE le sacaría a los dos esa decisión, y en
+ * /cambios dejaba las operaciones anteriores al saldo inicial invisibles en
+ * toda la app.
  */
-export async function listExchanges(userId: string, from?: string) {
-  return withUser(userId, (tx) => {
-    const conditions = [eq(movement.userId, userId), eq(movement.kind, "exchange")]
-    if (from) conditions.push(gte(movement.date, from))
-
-    return tx
+export async function listExchanges(userId: string) {
+  return withUser(userId, (tx) =>
+    tx
       .select()
       .from(movement)
-      .where(and(...conditions))
-      .orderBy(asc(movement.date))
-  })
+      .where(and(eq(movement.userId, userId), eq(movement.kind, "exchange")))
+      .orderBy(asc(movement.date)),
+  )
 }
 
 /**

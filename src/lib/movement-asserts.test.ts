@@ -6,6 +6,7 @@ import {
   assertCurrency,
   assertExchangeDirection,
   assertInstallmentMovementKind,
+  assertPaidDate,
 } from "@/lib/movement-asserts"
 
 /**
@@ -130,5 +131,34 @@ describe("assertCurrency", () => {
     expect(() =>
       computeBalances({ ...settings }, [{ ...cuotaRota, currency: assertCurrency("EUR") }], []),
     ).toThrow(/currency inesperada/)
+  })
+})
+
+describe("assertPaidDate", () => {
+  it("deja pasar una fecha", () => {
+    expect(assertPaidDate("2026-08-10")).toBe("2026-08-10")
+  })
+
+  /**
+   * El `throw` es todo el punto de la función, y era la única parte sin cubrir
+   * de este archivo. Un null acá no es un dato faltante más: es la CHECK
+   * `installment_paid_date_required_when_paid` (migración 0009) dejando de
+   * sostenerse mientras `listPaidInstallments` ya filtró `paid = true`.
+   */
+  it("revienta con null en vez de devolverlo", () => {
+    expect(() => assertPaidDate(null)).toThrow(/sin paidDate/)
+  })
+
+  it("el mensaje dice qué llegó, para poder ir a buscar la fila", () => {
+    expect(() => assertPaidDate(null)).toThrow(/null/)
+  })
+
+  /**
+   * No valida el formato, y es a propósito: la columna es `date`, así que lo
+   * que llega ya es un día real. El assert cubre el hueco del tipo —el
+   * `string | null` de Drizzle—, no el contenido.
+   */
+  it("no se mete con el formato: la columna date ya lo garantiza", () => {
+    expect(assertPaidDate("")).toBe("")
   })
 })
