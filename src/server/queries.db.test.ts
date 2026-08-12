@@ -865,23 +865,12 @@ describe("listExchanges", () => {
 
   it("no aplica el corte de la fecha del saldo inicial", async () => {
     // A diferencia de listUsdPositionEvents, acá el cambio anterior al saldo
-    // inicial TIENE que venir: el corte por fecha lo hace computeBalances con
-    // la lista completa. Un filtro de fecha en la consulta le sacaría al
-    // dashboard la posibilidad de decidirlo.
+    // inicial TIENE que venir: el corte por fecha lo hacen los llamadores con
+    // la lista completa —computeBalances para el dashboard, y /cambios para
+    // separar las operaciones anteriores al saldo inicial, que muestra aparte
+    // para que se puedan borrar—. Un filtro de fecha en la consulta se lo
+    // sacaría a los dos, y a /cambios le dejaría esas filas invisibles.
     expect(ids(await listExchanges(USUARIO_A))).toContain(MOV.cambioViejo)
-  })
-
-  it("con piso de fecha deja afuera lo anterior a ese día", async () => {
-    // El llamado que hace /cambios: el mismo corte que listUsdPositionEvents
-    // aplica para las tres tarjetas de esa pantalla.
-    const desde = ids(await listExchanges(USUARIO_A, SALDO_INICIAL_A))
-
-    expect(desde).not.toContain(MOV.cambioViejo)
-    // El del día exacto SÍ entra: el corte es `>=`, igual que el de
-    // listUsdPositionEvents. Un `gt` acá volvería a abrir la brecha entre las
-    // dos pantallas que ese otro describe protege.
-    expect(desde).toContain(MOV.cambioBorde)
-    expect(desde).toContain(MOV.cambioVenta)
   })
 
   it("no trae cambios de otro usuario", async () => {

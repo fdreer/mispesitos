@@ -16,7 +16,12 @@ import {
 import { BASE_PATHS } from "@/lib/movement-routes"
 import { getMovementStatus } from "@/lib/movement-status"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
-import { listCategories, listMovements, type Category } from "@/server/queries"
+import {
+  listCategories,
+  listMovements,
+  listMovementsPage,
+  type Category,
+} from "@/server/queries"
 import { requireSettings } from "@/server/session"
 import { cn } from "@/lib/utils"
 
@@ -120,10 +125,8 @@ async function BarraDeFiltros({ kind, query }: { kind: Kind; query: MovementQuer
 }
 
 /**
- * La parte cara de la pantalla: `listMovements` se trae los movimientos que
- * pasan el filtro MÁS todas sus cuotas, sin LIMIT (ver más abajo por qué no
- * puede tenerlo). Es la única consulta de acá que crece con el historial, y
- * por eso es la que va detrás de su propio Suspense.
+ * La parte cara de la pantalla: es la única consulta de acá que crece con el
+ * historial, y por eso es la que va detrás de su propio Suspense.
  *
  * La misma lista completa de categorías que pide `BarraDeFiltros`: la tabla
  * arma el nombre de la categoría de CADA movimiento —viejo incluido—, así que
@@ -137,27 +140,40 @@ async function ListaConPaginacion({ kind, query }: { kind: Kind; query: Movement
   const { user } = await requireSettings()
   const today = todayInAr()
 
-  const [categories, movements] = await Promise.all([
+  const filters = {
+    kind,
+    search: query.search || undefined,
+    categoryId: query.categoryId === "all" ? undefined : query.categoryId,
+    from: query.from || undefined,
+    to: query.to || undefined,
+  }
+
+  /**
+   * Dos caminos, y la diferencia es de dónde sale el recorte.
+   *
+   * El estado no es columna de la base: se deriva de las cuotas. Un LIMIT en
+   * SQL no sabría cuántas filas van a sobrevivir a ese filtro, así que con un
+   * estado elegido hay que traer todo lo que matchea el WHERE y cortar en
+   * memoria.
+   *
+   * Sin estado —la vista con la que se entra a estas dos pantallas— no hay
+   * nada que filtrar después, y ahí sí la base puede devolver las veinte filas
+   * de la página y nada más. Era el caso que traía todo el historial para
+   * pintar veinte renglones.
+   */
+  const [categories, pagina] = await Promise.all([
     listCategories(user.id, kind, true),
-    listMovements(user.id, {
-      kind,
-      search: query.search || undefined,
-      categoryId: query.categoryId === "all" ? undefined : query.categoryId,
-      from: query.from || undefined,
-      to: query.to || undefined,
-    }),
+    query.status === "all"
+      ? listMovementsPage(user.id, filters, query.page)
+      : listMovements(user.id, filters).then((movements) =>
+          paginate(
+            movements.filter((m) => getMovementStatus(m.installments, today) === query.status),
+            query.page,
+          ),
+        ),
   ])
 
-  // El estado no es columna de la base: se deriva de las cuotas. Por eso se
-  // filtra acá y no en el WHERE, y por eso la paginación va después y no con
-  // un LIMIT: un LIMIT en la consulta no sabría cuántas filas van a sobrevivir
-  // a este filtro.
-  const filtered =
-    query.status === "all"
-      ? movements
-      : movements.filter((m) => getMovementStatus(m.installments, today) === query.status)
-
-  const { items, page, totalPages } = paginate(filtered, query.page)
+  const { items, page, totalPages } = pagina
 
   return (
     <>

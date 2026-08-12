@@ -283,4 +283,59 @@ describe("buildDashboardView", () => {
     expect(view.upcoming).toHaveLength(1)
     expect(view.upcoming[0].status).toBe("pending")
   })
+
+  /**
+   * El brazo de los cambios de divisa. Era el único tramo del borde de la plata
+   * de este archivo sin una sola prueba: todos los demás casos pasan
+   * `exchanges: []`, así que ni el `assertExchangeDirection` ni el
+   * `Number(e.rate)` de acá tenían nada que los fijara.
+   */
+  describe("cambios de divisa", () => {
+    // El TC llega como el `numeric` de Postgres, o sea STRING con sus cuatro
+    // decimales. Es lo que hace imprescindible el `Number(e.rate)`: sin él la
+    // multiplicación de `convertToArs` opera sobre texto.
+    const COMPRA = { date: "2026-08-06", amountCents: 10_000, rate: "1450.5000" }
+
+    it("una compra saca pesos y suma dólares, con el TC leído como número", () => {
+      const view = buildDashboardView({
+        ...BASE,
+        exchanges: [{ ...COMPRA, direction: "buy" }],
+      })
+
+      // 100 dólares a 1450,50 son $145.050: el saldo en pesos queda en rojo
+      // porque el saldo inicial de la base es de $1.000.
+      expect(view.arsCents).toBe(100_000 - 14_505_000)
+      expect(view.usdCents).toBe(10_000)
+      // Y el consolidado los valúa al TC de hoy (1500), no al de la compra.
+      expect(view.consolidatedArsCents).toBe(100_000 - 14_505_000 + 15_000_000)
+    })
+
+    it("una venta hace exactamente lo contrario", () => {
+      const view = buildDashboardView({
+        ...BASE,
+        exchanges: [{ ...COMPRA, direction: "sell" }],
+      })
+
+      expect(view.arsCents).toBe(100_000 + 14_505_000)
+      expect(view.usdCents).toBe(-10_000)
+    })
+
+    /**
+     * El motivo del assert, escrito como test: con un `as`, un cambio sin
+     * dirección cae en el `else` de `computeBalances` y se cuenta EN SILENCIO
+     * como una venta —suma pesos, resta dólares—, o sea lo contrario de lo que
+     * pasó si era una compra. Acá no hay resultado, hay una excepción.
+     */
+    it("revienta con un cambio sin dirección en vez de contarlo como venta", () => {
+      expect(() =>
+        buildDashboardView({ ...BASE, exchanges: [{ ...COMPRA, direction: null }] }),
+      ).toThrow(/direction inesperada/)
+    })
+
+    it("revienta con una dirección que no es ninguna de las dos", () => {
+      expect(() =>
+        buildDashboardView({ ...BASE, exchanges: [{ ...COMPRA, direction: "compra" }] }),
+      ).toThrow(/direction inesperada/)
+    })
+  })
 })

@@ -1,5 +1,7 @@
 "use client"
 
+import { useEffect } from "react"
+
 import { Button } from "@/components/ui/button"
 
 /**
@@ -12,6 +14,10 @@ import { Button } from "@/components/ui/button"
  *
  * El mensaje del error NO se muestra: puede traer detalles de la base. Va a
  * la consola del navegador, que es donde sirve.
+ *
+ * Este boundary cubre las páginas del grupo (app) pero no el layout de su
+ * propio segmento: para eso está `src/app/global-error.tsx`, con el mismo
+ * cuerpo.
  */
 export default function AppError({
   error,
@@ -20,7 +26,12 @@ export default function AppError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
-  console.error(error)
+  // En un efecto y no en el cuerpo del render: el cuerpo corre en cada
+  // re-render, y dos veces bajo StrictMode en desarrollo, así que el mismo
+  // error se logueaba varias veces.
+  useEffect(() => {
+    console.error(error)
+  }, [error])
 
   return (
     <div className="space-y-4 py-16 text-center">

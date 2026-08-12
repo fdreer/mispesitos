@@ -338,25 +338,23 @@ el dashboard (1.1), desarchivar categorías (1.2), el mensaje de error de
 Después de la tarea 1 hay tests de `MovementForm` y de nada más. `ExchangeForm`,
 `SettingsForm`, `CategoryManager` y `AuthForm` siguen sin una sola prueba.
 
-Duele más en dos lugares nuevos:
+Los tres huecos que esta sección declaraba se cerraron el 2026-08-12
+(`src/components/installment-paid-button.test.tsx`, más dos describes nuevos en
+`dashboard-view.test.ts` y `movement-asserts.test.ts`):
 
-- **`InstallmentRows` no tiene archivo de test.** Toda la lógica de concurrencia
-  que trajo la tarea 8 —el `Set` de cuotas en vuelo, el `finally` que libera una
-  fila cuando la promesa se rechaza— no tiene ninguna cobertura automática. Se
-  leyó y es correcta, pero una regresión sólo aparece a mano. Testearla necesita
-  un doble de la Server Action que se pueda resolver a voluntad y timers falsos:
-  es una tarea propia, no un ajuste.
-- **El camino de los cambios de divisa en `buildDashboardView` nunca se
-  ejercita.** Los tests pasan `exchanges: []` en todos los casos, así que
-  `assertExchangeDirection` y la conversión `Number(e.rate)` de ese brazo no
-  tienen nada que los fije. Es el único tramo del borde de la plata en ese
-  archivo sin red.
-- **`assertPaidDate` no tiene test propio**, a diferencia de sus tres hermanos.
-  Su `throw` es todo el punto de la función y es la única parte sin cubrir de
-  `movement-asserts.ts`.
-
-La infraestructura ya está puesta, así que agregarlos es escribir el test y nada
-más.
+- **La concurrencia de las cuotas.** El `Set` de ids en vuelo que esta sección
+  nombraba ya no existe: separar `InstallmentPaidButton` le dio a cada botón su
+  propio `useTransition`, y ahí vive ahora esa lógica. Se testea lo que esa
+  independencia promete —marcar una cuota no deshabilita las otras, un error se
+  muestra y libera el botón, y el error de un intento no sobrevive al
+  siguiente— con un doble de la Server Action que se resuelve a voluntad. No
+  hicieron falta timers falsos.
+- **El brazo de los cambios de divisa de `buildDashboardView`.** Compra, venta,
+  el TC leído como número desde el `numeric` que Postgres entrega como string, y
+  las dos direcciones inválidas que tienen que reventar en vez de contarse como
+  venta.
+- **`assertPaidDate`.** El `throw`, el mensaje, y el hecho deliberado de que no
+  valide el formato.
 
 ### 6.3 Sin verificación por imagen
 
@@ -369,31 +367,6 @@ Ninguno toca plata mal calculada, aislamiento entre usuarios ni un crash. Se
 dejan anotados con su escenario, para que el próximo que los encuentre no tenga
 que volver a razonarlos.
 
-- **`/ajustes`: el "Guardado." sobrevive al cambio siguiente.** El `state` de
-  `useActionState` vive hasta el próximo submit. Guardás, después editás
-  "¿Cuántos pesos tenés hoy?", y el cartel verde sigue en pantalla al lado de un
-  campo sin guardar. En una app de finanzas es la señal equivocada sobre el campo
-  equivocado. El arreglo tiene la forma del `handledState` que ya usa
-  `MovementForm`: una marca de "sucio" que apague el mensaje ante cualquier
-  cambio.
-- **Un cambio de divisa anterior al saldo inicial ahora es invisible y no se
-  puede borrar.** La tarea 6 le puso piso de fecha a la lista de `/cambios` para
-  que coincida con sus tarjetas, y eso está bien. Pero los cambios no aparecen ni
-  en `/ingresos` ni en `/egresos`, y `/cambios` no tiene botón de borrar: una
-  operación cargada con la fecha mal tipeada antes desaparecía de las cuentas y
-  al menos se veía; ahora no se ve en ningún lado y queda una fila en `movement`
-  que va a reaparecer en todos los saldos el día que se mueva la fecha del saldo
-  inicial. Salidas posibles: avisar en la pantalla cuántas operaciones quedaron
-  por debajo del piso, o darle a esa lista el botón de borrar que ya tienen las
-  otras.
-- **No hay `global-error.tsx`.** El `error.tsx` que trajo la tarea 1 cubre las
-  páginas del grupo `(app)` pero no el layout de su propio segmento. Un fallo de
-  base adentro de `requireSettings()` —justo la llamada que la tarea 3
-  memoizó— sigue dando el "Application error" pelado de Next. El arreglo es un
-  `src/app/global-error.tsx` con el mismo cuerpo.
-- **El `console.error` de `error.tsx` corre en el cuerpo del render**, o sea en
-  cada re-render y dos veces bajo StrictMode en desarrollo. Va en un `useEffect`
-  con `[error]`.
 - **`logDbError` es una garantía sólo de las Server Actions.** Ninguna función de
   `src/server/queries.ts` tiene `try`/`catch`, así que un fallo de Drizzle
   durante el render lo loguea Next en crudo, con su `Failed query: … params: …`.
@@ -483,15 +456,15 @@ cuenta con más de 20 movimientos; la de prueba tiene cero:
 
 ### 7.2 Deuda técnica que la auditoría dejó abierta
 
-- **La vista sin filtros trae todo para mostrar 20.** `listMovements` busca cada
-  movimiento que matchea el WHERE **y todas sus cuotas**, y recién después se
-  cortan 20. Con ~5.000 movimientos eso son ~5.000 filas más sus cuotas para
-  pintar 20. **No es una regresión**: `main` traía exactamente lo mismo y además
-  lo renderizaba entero, así que la rama mejora. Pero el §3.4 del spec justifica
-  el corte en memoria diciendo que el filtrado SQL ya recortó lo que se trae, y
-  eso no vale para la vista sin filtrar, que es donde se cae parado. Cuando
-  `status === "all"` la consulta podría ser `LIMIT`/`OFFSET` más un `count(*)`;
-  sólo la rama con estado necesita traer todo.
+- ~~**La vista sin filtros trae todo para mostrar 20.**~~ Resuelto el 2026-08-12
+  con `listMovementsPage` (`src/server/queries.ts`): cuando `status === "all"` el
+  recorte lo hace la base con `LIMIT`/`OFFSET` más un `count(*)`, y el costo deja
+  de crecer con el historial. La rama con estado sigue trayendo todo y cortando
+  con `paginate`, y no puede ser de otra manera: el estado se deriva de las
+  cuotas, así que un LIMIT en SQL no sabe cuántas filas van a sobrevivir al
+  filtro. El `orderBy` de las dos listas ganó un desempate por `id`: sin él, dos
+  movimientos con el mismo `(date, created_at)` podían salir en distinto orden en
+  cada consulta y el OFFSET repetía una fila y se comía otra.
 - **`movement-pagination.tsx` tiene el agujero que se le tapó a la barra.** Arma
   sus enlaces desde la prop `query`, así que clickear una página mientras viaja
   un cambio de filtro navega a la URL anterior y descarta ese filtro. Es un
@@ -505,3 +478,61 @@ cuenta con más de 20 movimientos; la de prueba tiene cero:
 - **La regla de §7.4 del spec no la cumple el paginador.** "Cualquier control
   nuevo que navegue en vez de mutar estado local" tendría que dar feedback de
   pendiente. `MovementPagination` no puede: es un server component.
+
+---
+
+## 8. La tanda crítica del 2026-08-12
+
+Cinco cosas de este documento que rompían, mentían o dejaban un dato atrapado,
+más los tres tests que faltaban. Ninguna necesitaba una decisión de negocio: las
+que sí la necesitan siguen abiertas en la sección 1.
+
+| Qué | Dónde |
+|---|---|
+| El boundary de último recurso, que faltaba | `src/app/global-error.tsx` |
+| El `console.error` movido a un `useEffect` | `src/app/(app)/error.tsx` |
+| El "Guardado." que ahora se apaga al primer cambio | `src/components/settings-form.tsx` |
+| Las operaciones anteriores al saldo inicial: visibles, rotuladas y borrables | `src/app/(app)/cambios/page.tsx` |
+| La página recortada por la base cuando no hay filtro de estado | `src/server/queries.ts`, `src/components/movement-screen.tsx` |
+
+La suite pasó de 341 a 354 tests. `pnpm typecheck` y `pnpm lint` limpios.
+
+### 8.1 Lo que se decidió no arreglar en esta tanda
+
+- **El dashboard sigue trayendo cuotas que descarta** (§6.4). Es la otra mitad
+  de la optimización que empezó la tarea 4 y toca una pantalla distinta.
+- **El mensaje de error de `saveSettings`** (§1.3) y todo lo demás de la sección
+  1: son decisiones, no arreglos.
+- **`listUsdPositionEvents` lee `user_settings` dos veces** (§6.4).
+
+### 8.2 Lo que quedó sin verificar en el navegador
+
+El mismo techo de §3.4 y §7.1: la pestaña de preview queda en
+`visibilityState === "hidden"`, `requestAnimationFrame` no dispara y los
+Suspense no se revelan solos. Forzando el reveal a mano se lee el HTML del
+servidor pero no corren los layout effects, así que nada que dependa de un click
+se puede probar ahí.
+
+Lo que **sí** se comprobó: las tres rutas tocadas responden 200 y pintan lo que
+tienen que pintar —`/cambios` con sus tres tarjetas y el formulario, `/ingresos`
+con "Todavía no cargaste nada acá." por el camino nuevo de `listMovementsPage`,
+`/ingresos?status=pending&page=3` con "Ningún movimiento entra en el filtro." por
+el camino viejo, y `/ajustes` con su formulario entero—.
+
+Lo que **nadie miró funcionando**, todo por la misma razón: la cuenta de prueba
+no tiene un solo movimiento ni un solo cambio de divisa cargado.
+
+1. **El bloque de operaciones anteriores al saldo inicial.** Nunca se dibujó: hace
+   falta un cambio de divisa fechado antes de `initialBalanceDate`. Sin verificar
+   el rótulo, el atenuado y que el botón de borrar de esas filas saque la fila.
+2. **El botón de borrar en las filas normales de `/cambios`.**
+3. **El "Guardado." apagándose.** Guardar en `/ajustes`, ver el cartel, tocar un
+   campo y que desaparezca. Los tres caminos que lo apagan son distintos: el
+   `onChange` del form para los inputs de texto, el `onSelect` del calendario y
+   el `onValueChange` del Select.
+4. **La paginación real contra `listMovementsPage`**, que sigue siendo el punto 1
+   de §7.1 y ahora además cambió de consulta: hace falta una cuenta con más de 20
+   movimientos para ver que las páginas 2 y 3 traen filas distintas y que ninguna
+   se repite.
+5. **`global-error.tsx`.** Para verlo hay que romper el layout de `(app)` a
+   propósito.
