@@ -107,12 +107,14 @@ que ya registró, pero no se pueden correr dos veces a mano.
 
 ### 3.3 Detalles de interfaz
 
-- **Los importes de las cuotas se editan en centavos crudos.** El total se tipea
-  en pesos ("1.234,56") y el plan de cuotas se muestra y se edita en centavos
-  ("41152"). La unidad sólo aparece en la etiqueta accesible del campo.
-- **Los ejes de los gráficos salen sin formatear**, en formato numérico inglés,
-  mientras el resto de la app usa formato argentino. Los tooltips sí están
-  formateados.
+- ~~**Los importes de las cuotas se editan en centavos crudos.**~~ Resuelto el
+  2026-08-11 (commit `cb03182`): la fila muestra y acepta pesos, y al servidor
+  siguen viajando centavos por un campo oculto.
+- ~~**Los ejes de los gráficos salen sin formatear.**~~ Resuelto el 2026-08-12
+  con `formatAxisPesos` (`src/lib/money.ts`), que los tres gráficos le pasan al
+  `tickFormatter` del eje Y: separadores de miles argentinos y sin decimales,
+  sin símbolo de moneda —lo dice el título de la tarjeta y lo repite el tooltip—.
+  El eje X sigue mostrando la clave del mes cruda ("2026-08").
 - **El tipo de cambio no tiene un límite de negocio**, sólo el de la columna
   (`numeric(12,4)`: hasta 8 dígitos enteros y 4 decimales). Se rechaza lo que la
   columna no admite, con un mensaje del campo, pero nada impide cargar un dólar a
@@ -281,23 +283,26 @@ Todo esto salió de la revisión final de branch y se dejó afuera a propósito:
   de la nav, y dos de la landing). Tailwind no le cuelga tracking ni interlineado
   a un tamaño arbitrario, así que esos cuatro son los únicos textos del sistema
   con tracking 0. La diferencia es de unos 0,13px por caracter.
-- **Cortarle a Tailwind el escaneo de `docs/`.** Hoy el CSS de producción compila
-  `text-emerald-600`, `max-w-5xl` y `font-bold` —tres clases que el rediseño
-  borró del código— porque el plan y el spec las citan en sus bloques de código y
-  Tailwind 4 escanea el proyecto entero. Se arregla con
-  `@import "tailwindcss" source(none);` más un `@source` apuntando a `src/`.
-- **Dos comentarios equivocados en `globals.css`.** El que explica la separación
-  en dos bloques `@theme` afirma que `@theme inline` no emite la variable a
-  `:root`; sí la emite. Y `--accent` está anotado "Slate" cuando la paleta de este
-  proyecto llama Graphite a ese valor.
+- ~~**Cortarle a Tailwind el escaneo de `docs/`.**~~ Resuelto el 2026-08-12:
+  `globals.css` abre con `@import "tailwindcss" source(none);` más
+  `@source "../"`. `pnpm build` confirma que `text-emerald-600`, `max-w-5xl` y
+  `font-bold` ya no salen en el CSS, y que `bg-card`, `text-mist` y
+  `rounded-xl` siguen saliendo.
+- ~~**Dos comentarios equivocados en `globals.css`.**~~ Corregidos el
+  2026-08-12: `@theme inline` sí emite la variable a `:root` —lo que hace es
+  copiar el valor adentro de la utilidad, así que la variable deja de ser el
+  punto de control—, y `--accent` quedó anotado Graphite.
 - **La píldora y el botón del hero de la landing comparten nombre accesible**
   ("Crear cuenta") y destino. Es el patrón habitual de una landing; si molesta, se
   diferencia con `aria-label` o cambiando el texto de uno de los dos.
-- **`charts.tsx` mezcla constantes con nombre y hexadecimales sueltos** en el
-  array `COLORS`, aunque los tres sueltos también tienen nombre en la paleta
-  (`--color-ash`, `--color-iris-violet`, `--color-lavender`).
-- **La barra activa de la nav se apila sobre el hairline** en vez de fundirse con
-  él: son 3px de línea bajo la sección activa, no 2. Se resuelve con `-mb-px`.
+- ~~**`charts.tsx` mezcla constantes con nombre y hexadecimales sueltos**~~ en el
+  array `COLORS`. Ya no aplica: ese array no existe más —el color de cada
+  porción de la torta sale de `categoryColor`— y los cuatro colores que quedan
+  en el archivo son constantes con nombre.
+- ~~**La barra activa de la nav se apila sobre el hairline.**~~ Ya no aplica: la
+  nav dejó de ser una barra horizontal con subrayado. Es el riel lateral de
+  `app-sidebar.tsx`, donde lo activo se marca con fondo (`bg-accent`) y color de
+  etiqueta, sin ninguna línea que se apile contra el borde.
 
 ### 5.3 Lo que hay que mirar la próxima vez que se abra el dashboard
 
@@ -367,40 +372,37 @@ Ninguno toca plata mal calculada, aislamiento entre usuarios ni un crash. Se
 dejan anotados con su escenario, para que el próximo que los encuentre no tenga
 que volver a razonarlos.
 
-- **`logDbError` es una garantía sólo de las Server Actions.** Ninguna función de
-  `src/server/queries.ts` tiene `try`/`catch`, así que un fallo de Drizzle
-  durante el render lo loguea Next en crudo, con su `Failed query: … params: …`.
-  Ahí los parámetros son ids de usuario y fechas, no valores de filas —los INSERT
-  donde los parámetros SÍ son la fila pasan todos por Server Actions y están
-  cubiertos—, pero el comentario del helper se lee como si la garantía fuera
-  global.
-- **El dashboard sigue pagando cuotas que descarta.** La tarea 4 dejó
-  `MovementRow` sin cuotas, pero la página sigue llamando `listMovements`, cuya
-  segunda consulta trae todas las cuotas de todos los movimientos de la ventana
-  para que el mapeo de la página las tire. Con 200 movimientos en doce meses a
-  doce cuotas son ~2400 filas traídas y serializadas por carga. Sigue siendo
-  mucho mejor que traer toda la historia: es una optimización que quedó a mitad
-  de camino, no una regresión.
-- **`/cambios` lee `user_settings` dos veces.** `listUsdPositionEvents` abre su
-  propia transacción y vuelve a seleccionar la fila del usuario, así que el
-  `cache()` de la tarea 3 dedupeó sólo la mitad. El comentario de `getSettings`
-  afirma ser "la única consulta de la app que se repite tal cual dentro del mismo
-  request", y eso ya no es exacto.
-- **`listUsdPositionEvents` conserva un `i.date!`** sobre el mismo invariante que
-  `assertPaidDate` centralizó. Hoy es seguro sólo de casualidad: su filtro
-  `gte(installment.paidDate, …)` no puede matchear un nulo. El día que ese filtro
-  se mueva o se relaje, el `!` produce `undefined` en un `PositionEvent.date` y
-  el orden de `usdPosition` empieza a reventar en vez de que falle el assert.
+- ~~**`logDbError` es una garantía sólo de las Server Actions.**~~ El hecho sigue
+  siendo cierto —ninguna función de `src/server/queries.ts` tiene `try`/`catch`,
+  así que un fallo de Drizzle durante el render lo loguea Next en crudo— pero
+  desde el 2026-08-12 el comentario del helper lo dice con todas las letras en
+  vez de leerse como una garantía global. Los parámetros de esas consultas son
+  ids de usuario y fechas; los INSERT donde los parámetros SÍ son la fila pasan
+  todos por Server Actions.
+- ~~**El dashboard sigue pagando cuotas que descarta.**~~ Resuelto el 2026-08-12
+  con `listMovementRows` (`src/server/queries.ts`), que es la misma consulta sin
+  el `conCuotas`. `MovementRow` no lleva cuotas desde la tarea 4, así que la
+  segunda consulta traía ~2.400 filas por carga (200 movimientos a doce cuotas)
+  para que el mapeo de la página las tirara.
+- ~~**`/cambios` lee `user_settings` dos veces.**~~ Resuelto el 2026-08-12:
+  `listUsdPositionEvents` lee el saldo inicial por `getSettings` en vez de
+  seleccionar la fila por su cuenta, así que el `cache()` de la tarea 3 la
+  dedupea entera.
+- ~~**`listUsdPositionEvents` conserva un `i.date!`.**~~ Resuelto el 2026-08-12:
+  pasa por `assertPaidDate`, igual que `listPaidInstallments`. Antes era seguro
+  sólo de casualidad —su filtro `gte(installment.paidDate, …)` no matchea un
+  nulo—, así que el día que ese filtro se relajara entraba un `undefined` a
+  ordenar en vez de fallar el assert.
 - **`installmentInput.amountCents` sigue admitiendo cero.** La cota `> 0` de la
   tarea 11 quedó sobre el importe total del movimiento. No se encontró ningún
   escenario que produzca plata mal: `installmentsSumMatches` obliga a que las
   partes sumen un total que ahora es mayor a cero, así que lo peor que sale es
   una fila de 0 centavos en un plan de 120 cuotas para un movimiento de un peso.
-- **Los tipos exportados de `dashboard-view.ts` están de más, salvo uno.** De los
-  siete, sólo `DashboardInput` lo importa alguien fuera del módulo. `UpcomingItem`
-  además está redeclarado campo por campo como `Item` en `upcoming.tsx`, su único
-  consumidor: dos definiciones de una misma forma que el compilador no va a
-  mantener sincronizadas.
+- ~~**Los tipos exportados de `dashboard-view.ts` están de más, salvo uno.**~~
+  Resuelto el 2026-08-12: quedan exportados dos, `DashboardInput` (que importa
+  su test) y `UpcomingItem` (que ahora importa `upcoming.tsx`, donde estaba
+  redeclarado campo por campo como `Item`). Los otros cinco son internos del
+  módulo.
 - **La medición de cobertura de la sección 3.4 es una foto.** Los números son
   exactos hoy y van a estar viejos apenas se agregue un test.
 
@@ -501,9 +503,11 @@ La suite pasó de 341 a 354 tests. `pnpm typecheck` y `pnpm lint` limpios.
 
 - **El dashboard sigue trayendo cuotas que descarta** (§6.4). Es la otra mitad
   de la optimización que empezó la tarea 4 y toca una pantalla distinta.
+  *(Hecho en la tanda siguiente, ver §9.)*
 - **El mensaje de error de `saveSettings`** (§1.3) y todo lo demás de la sección
   1: son decisiones, no arreglos.
 - **`listUsdPositionEvents` lee `user_settings` dos veces** (§6.4).
+  *(Hecho en la tanda siguiente, ver §9.)*
 
 ### 8.2 Lo que quedó sin verificar en el navegador
 
@@ -536,3 +540,63 @@ no tiene un solo movimiento ni un solo cambio de divisa cargado.
    se repite.
 5. **`global-error.tsx`.** Para verlo hay que romper el layout de `(app)` a
    propósito.
+
+---
+
+## 9. La segunda tanda del 2026-08-12
+
+Ocho puntos de este documento que no necesitaban ninguna decisión de negocio:
+dos de consultas que traían de más, uno de un `!` que se apoyaba en un filtro,
+uno de formato, dos de CSS y dos de comentarios que prometían lo que no era.
+Además, cuatro entradas que ya no aplicaban: el código las había resuelto o
+reemplazado y el documento seguía anotándolas.
+
+| Qué | Dónde | Sección |
+|---|---|---|
+| El dashboard dejó de traer las cuotas que descartaba (`listMovementRows`) | `src/server/queries.ts`, `src/app/(app)/dashboard/page.tsx` | §6.4 |
+| `listUsdPositionEvents` lee el saldo inicial por `getSettings`, memoizado | `src/server/queries.ts` | §6.4 |
+| El `i.date!` pasó a `assertPaidDate` | `src/server/queries.ts` | §6.4 |
+| Los ejes de los gráficos, en formato argentino (`formatAxisPesos`) | `src/lib/money.ts`, `src/components/dashboard/charts.tsx` | §3.3 |
+| Tailwind dejó de escanear `docs/` | `src/app/globals.css` | §5.2 |
+| Los dos comentarios equivocados de `globals.css` | `src/app/globals.css` | §5.2 |
+| El alcance real de `logDbError`, escrito en su comentario | `src/lib/log-db-error.ts` | §6.4 |
+| Cinco tipos de `dashboard-view.ts` dejaron de exportarse; `Upcoming` importa `UpcomingItem` en vez de redeclararlo | `src/lib/dashboard-view.ts`, `src/components/dashboard/upcoming.tsx` | §6.4 |
+
+La suite pasó de 354 a 357 tests (los tres nuevos son de `formatAxisPesos`).
+`pnpm typecheck`, `pnpm lint` y `pnpm build` limpios.
+
+### 9.1 Lo que se decidió no tocar
+
+- **Todo lo de la sección 1**, que sigue esperando una decisión: caja vs.
+  devengado en el dashboard, desarchivar categorías, el mensaje de error de
+  `saveSettings` y el favicon.
+- **`installmentInput.amountCents` sigue admitiendo cero** (§6.4). Subirlo a
+  `> 0` rompe un caso legítimo y raro —un peso en 120 cuotas, donde el reparto
+  genera filas de cero centavos— y el propio §6.4 ya dice que no hay escenario
+  que produzca plata mal. Cambiarlo pide tocar antes `buildInstallments`, que es
+  quien reparte.
+- **El eje X de los gráficos** sigue mostrando `2026-08` en vez de `ago 26`.
+  Nadie lo anotó como defecto; es la forma en que `monthKey` devuelve el mes.
+- **El tipo de cambio sin cota de negocio** (§3.3). La cota de la columna ya
+  está y da un mensaje del campo; poner un techo tipo "un dólar no vale más de
+  X" es una regla inventada, o sea una decisión.
+
+### 9.2 Lo que quedó sin verificar en el navegador
+
+El mismo techo de §3.4, §7.1 y §8.2: la pestaña de preview queda en
+`visibilityState === "hidden"`, así que los Suspense no se revelan y Recharts
+—que mide su contenedor en un layout effect— no llega a dibujar un solo tick.
+
+Lo que **sí** se comprobó: `pnpm build` compila, el CSS de producción ya no
+trae `text-emerald-600`, `max-w-5xl` ni `font-bold` y sí sigue trayendo
+`bg-card`, `text-mist` y `rounded-xl`; y con el servidor de desarrollo, `/login`
+sigue pintando Void de fondo, Mist de texto, Inter y 12px de radio de tarjeta
+—o sea que `source(none)` no se comió nada—, y `/cambios` responde 200.
+
+Lo que **nadie miró funcionando**:
+
+1. **Los ejes con el formato nuevo.** El formateo en sí está testeado
+   (`src/lib/money.test.ts`), pero que el eje entre en los 80px de ancho con un
+   saldo de ocho cifras hay que verlo en pantalla.
+2. **El dashboard con datos** después del cambio de consulta. La cuenta de
+   prueba no tiene movimientos, así que la torta y las barras salen vacías.

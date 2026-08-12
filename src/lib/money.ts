@@ -36,6 +36,21 @@ export function formatMoney(cents: number, currency: Currency): string {
 }
 
 /**
+ * Un tick de eje de gráfico. Recibe PESOS enteros, no centavos: es la unidad
+ * que los gráficos grafican (ver `toPesos` en @/components/dashboard/charts).
+ *
+ * Sin símbolo de moneda —el título de la tarjeta ya dice de qué habla y el
+ * tooltip lo repite con `formatMoney`— pero con los separadores de acá: los
+ * ejes salían con el formato del default de Recharts ("1200000") mientras el
+ * resto de la app escribe "1.200.000".
+ */
+const AXIS_FORMATTER = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 })
+
+export function formatAxisPesos(pesos: number): string {
+  return AXIS_FORMATTER.format(pesos)
+}
+
+/**
  * Deja un solo separador decimal —el punto— o devuelve null si la combinación
  * de puntos y comas no es ninguno de los formatos que se aceptan.
  */

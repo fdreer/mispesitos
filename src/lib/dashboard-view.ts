@@ -34,7 +34,7 @@ import type { MovementStatus } from "@/lib/movement-status"
  * (migración 0009) exige `paid_date` no nulo. El compilador sostiene ahora lo
  * que antes sostenía sólo un comentario al lado de un `!`.
  */
-export type PaidRow = {
+type PaidRow = {
   paidDate: IsoDate
   amountCents: number
   currency: string
@@ -43,7 +43,7 @@ export type PaidRow = {
 }
 
 /** Movimiento de tipo exchange. */
-export type ExchangeRow = {
+type ExchangeRow = {
   date: IsoDate
   amountCents: number
   rate: string
@@ -51,7 +51,7 @@ export type ExchangeRow = {
 }
 
 /** Cuota impaga, del join con su movimiento. */
-export type PendingRow = {
+type PendingRow = {
   id: string
   number: number
   dueDate: IsoDate
@@ -67,7 +67,7 @@ export type PendingRow = {
  * Movimiento, sin sus cuotas: el armado ya no las necesita. El estado de cada
  * enlace sale de `pending`, que es la lista completa de cuotas impagas.
  */
-export type MovementRow = {
+type MovementRow = {
   id: string
   date: IsoDate
   kind: string
@@ -95,6 +95,11 @@ export type DashboardInput = {
   historyMonths: number
 }
 
+/**
+ * Una fila de la tarjeta de vencimientos. Exportado porque `Upcoming`
+ * (@/components/dashboard/upcoming) lo consume: antes lo redeclaraba campo por
+ * campo, dos definiciones de la misma forma que el compilador no sincroniza.
+ */
 export type UpcomingItem = {
   id: string
   number: number
@@ -107,7 +112,7 @@ export type UpcomingItem = {
   status: MovementStatus
 }
 
-export type DashboardView = {
+type DashboardView = {
   arsCents: number
   usdCents: number
   consolidatedArsCents: number | null

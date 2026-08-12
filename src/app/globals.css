@@ -1,4 +1,12 @@
-@import "tailwindcss";
+/*
+ * `source(none)` más el `@source` de abajo: sin eso Tailwind 4 escanea el
+ * proyecto entero, `docs/` incluido, y compila en el CSS de producción las
+ * clases que el plan y el spec citan en sus bloques de código —`font-bold`,
+ * `text-emerald-600`, `max-w-5xl`— aunque el rediseño las haya borrado del
+ * código. Lo que se escanea es lo que se escribe: `src/`.
+ */
+@import "tailwindcss" source(none);
+@source "../";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
@@ -96,14 +104,17 @@
 }
 
 /*
- * Bloque aparte, y sin `inline`, a propósito. `@theme inline` copia el valor
- * adentro de la utilidad y NO emite la variable a `:root`. Seis clases de
- * `button.tsx` y `select.tsx` leen `--radius-md` en crudo, dentro de un
- * `rounded-[min(var(--radius-md),10px)]`: si la variable no se emite, ese
- * `var()` queda sin resolver y esos botones pierden el radio.
+ * Bloque aparte, y sin `inline`, a propósito. `@theme inline` sí emite la
+ * variable a `:root` —eso lo hacen los dos—, pero adentro de las utilidades
+ * copia el VALOR en vez de dejar el `var()`, así que la variable deja de ser
+ * el punto de control: redefinirla más abajo (en `:root`, en un `.dark`, en un
+ * contenedor) no cambia nada de lo ya compilado.
  *
- * Todo lo que sigue son valores literales que alguien puede leer con `var()`,
- * así que van acá.
+ * De arriba eso es lo que se quiere: los tokens semánticos se resuelven contra
+ * los literales de `:root` una sola vez. Acá abajo van los valores literales
+ * que el sistema define y alguien puede querer redefinir —o leer con `var()`,
+ * como el `rounded-[min(var(--radius-md),10px)]` de `button.tsx` y
+ * `select.tsx`—, así que van sin `inline`.
  */
 @theme {
     /*
@@ -181,7 +192,7 @@
     --secondary-foreground: #d0d6e0; /* Mist */
     --muted: #161718; /* Obsidian */
     --muted-foreground: #8a8f98; /* Fog */
-    --accent: #23252a; /* Slate — la superficie del hover */
+    --accent: #23252a; /* Graphite — la superficie del hover */
     --accent-foreground: #ffffff; /* Paper */
     --destructive: #eb5757; /* Coral Red */
     --border: #23252a; /* Graphite */

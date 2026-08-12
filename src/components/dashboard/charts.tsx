@@ -12,7 +12,7 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart"
 import { categoryColor } from "@/lib/category-color"
-import { formatMoney } from "@/lib/money"
+import { formatAxisPesos, formatMoney } from "@/lib/money"
 
 /*
  * La paleta del sistema, repetida acá en hexadecimal a propósito: Recharts
@@ -79,7 +79,13 @@ export function ProjectionChart({
       <LineChart data={data.map((d) => ({ month: d.month, saldo: toPesos(d.arsCents) }))}>
         <CartesianGrid vertical={false} stroke="var(--border)" />
         <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} tick={AXIS_TICK} />
-        <YAxis width={80} tickLine={false} axisLine={false} tick={AXIS_TICK} />
+        <YAxis
+          width={80}
+          tickLine={false}
+          axisLine={false}
+          tick={AXIS_TICK}
+          tickFormatter={formatAxisPesos}
+        />
         <ChartTooltip content={<ChartTooltipContent formatter={moneyTooltipFormatter} />} />
         <Line
           type="monotone"
@@ -147,7 +153,13 @@ export function MonthlyBars({
       >
         <CartesianGrid vertical={false} stroke="var(--border)" />
         <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} tick={AXIS_TICK} />
-        <YAxis width={80} tickLine={false} axisLine={false} tick={AXIS_TICK} />
+        <YAxis
+          width={80}
+          tickLine={false}
+          axisLine={false}
+          tick={AXIS_TICK}
+          tickFormatter={formatAxisPesos}
+        />
         <ChartTooltip content={<ChartTooltipContent formatter={moneyTooltipFormatter} />} />
         <ChartLegend content={<ChartLegendContent />} />
         {/* Acá el verde y el rojo son datos, no cuerpo de texto: la regla de
