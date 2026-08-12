@@ -301,6 +301,25 @@ describe("MovementFilters", () => {
     expect(push).toHaveBeenCalledWith("/egresos?status=paid")
   })
 
+  it("elegir una moneda navega con ese filtro", () => {
+    montar()
+
+    fireEvent.click(screen.getByLabelText("Moneda"))
+    fireEvent.click(screen.getByText("USD"))
+
+    expect(push).toHaveBeenCalledWith("/egresos?currency=USD")
+  })
+
+  it("la moneda que viene de la URL se ve sin abrir el desplegable", () => {
+    // Mismo motivo que el test de Categoría: estando cerrado, los items de
+    // Radix viven en un DocumentFragment, así que el texto lo tiene que poner
+    // el `children` del SelectValue o el control queda mudo en el HTML del
+    // servidor.
+    montar({ currency: "USD" })
+
+    expect(screen.getByLabelText("Moneda").textContent).toBe("USD")
+  })
+
   // Finding 1 (auditoría de rama): `go()` armaba el próximo href desde la
   // prop `query`, que no se actualiza hasta que el viaje al servidor
   // commitea. Un segundo cambio de filtro disparado ANTES de ese commit
@@ -379,6 +398,7 @@ describe("MovementFilters", () => {
 
     expect(screen.getByLabelText("Buscar").id).toBe("filtro-buscar")
     expect(screen.getByLabelText("Categoría").id).toBe("filtro-categoria")
+    expect(screen.getByLabelText("Moneda").id).toBe("filtro-moneda")
     expect(screen.getByLabelText("Estado").id).toBe("filtro-estado")
     // No con `getByLabelText`: ver el comentario de `getPeriodoTrigger` más
     // arriba (hallazgo D de esta auditoría).

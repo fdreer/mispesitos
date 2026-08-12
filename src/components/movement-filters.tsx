@@ -23,12 +23,14 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { dateToIso, formatIsoForDisplay, isoToDate } from "@/lib/dates"
 import { cn } from "@/lib/utils"
 import {
+  CURRENCY_VALUES,
   SEARCH_MAX,
   STATUS_VALUES,
   buildMovementHref,
   hayFiltrosActivos,
   parseMovementQuery,
   type MovementQuery,
+  type QueryCurrency,
 } from "@/lib/movement-query"
 import type { MovementStatus } from "@/lib/movement-status"
 import type { Category } from "@/server/queries"
@@ -43,6 +45,15 @@ const STATUS_LABELS: Record<MovementStatus, string> = {
 }
 
 const STATUS_OPTIONS: (MovementStatus | "all")[] = ["all", ...STATUS_VALUES]
+
+/**
+ * "ARS" y "USD" ya son las etiquetas: son los códigos que la app muestra en
+ * todas partes (el desplegable de carga de `movement-form.tsx` usa los mismos)
+ * así que no hay nada que traducir. La lista sale de `CURRENCY_VALUES`, mismo
+ * criterio que el estado: el desplegable no puede ofrecer una moneda que el
+ * parser no entienda.
+ */
+const CURRENCY_OPTIONS: (QueryCurrency | "all")[] = ["all", ...CURRENCY_VALUES]
 
 /**
  * El texto que va adentro del `SelectValue` de cada desplegable, calculado
@@ -115,6 +126,9 @@ const DEBOUNCE_MS = 400
 const FIELD_WIDTH = {
   search: "w-full sm:w-64",
   category: "w-40",
+  /* Más angosto que Categoría: su contenido más largo son tres caracteres
+     ("ARS"/"USD"/"Todas"), no un nombre de categoría. */
+  currency: "w-28",
   /* El segmentado se mide por su contenido —cuatro etiquetas fijas— así que
    * no lleva ancho propio: dárselo lo recortaría o lo dejaría con aire. */
   status: "w-auto",
@@ -509,6 +523,38 @@ export function MovementFilters({ basePath, query, categories }: Props) {
         </div>
       </div>
 
+      {/* Desplegable y no segmentado como Estado: acá las tres opciones no
+          traen ninguna referencia de color que valga la pena tener a la vista
+          —la tabla no pinta la moneda, la escribe adentro del importe— así que
+          no hay motivo para gastar el ancho que cuesta un segmentado. Misma
+          estructura que Categoría, envoltorio incluido: ver el comentario de
+          ese div. */}
+      <div className={cn(FIELD_WIDTH.currency, "space-y-1.5")}>
+        <Label htmlFor="filtro-moneda" className={LABEL_CLASS}>
+          Moneda
+        </Label>
+        <div>
+          <Select
+            value={query.currency}
+            onValueChange={(v) => go({ currency: v as QueryCurrency | "all" })}
+          >
+            <SelectTrigger id="filtro-moneda" className="w-full">
+              {/* Mismo motivo que en Categoría: sin `children`, Radix resuelve
+                  el texto porteando el item elegido, y en el HTML del servidor
+                  ese portal todavía no existe. */}
+              <SelectValue>{query.currency === "all" ? TODAS : query.currency}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {CURRENCY_OPTIONS.map((o) => (
+                <SelectItem key={o} value={o}>
+                  {o === "all" ? TODAS : o}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       {/*
         Segmentado y no desplegable: son cuatro opciones fijas y conocidas, así
         que un `Select` cobraba dos clicks (abrir, elegir) y escondía tres de
@@ -682,6 +728,7 @@ export function MovementFiltersSkeleton() {
       {[
         { label: "Buscar", width: FIELD_WIDTH.search, box: "w-full" },
         { label: "Categoría", width: FIELD_WIDTH.category, box: "w-full" },
+        { label: "Moneda", width: FIELD_WIDTH.currency, box: "w-full" },
         // El segmentado no tiene ancho de campo: reserva el que miden sus
         // cuatro etiquetas fijas, medido sobre el control ya renderizado.
         { label: "Estado", width: FIELD_WIDTH.status, box: "w-[309px]" },

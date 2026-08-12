@@ -58,6 +58,24 @@ export function buildInstallments(
 }
 
 /**
+ * El número de cuota paga más alto de un movimiento, o 0 si no hay ninguna
+ * paga.
+ *
+ * Existe para `updateMovement` (@/server/actions/movements), que rehace el plan
+ * entero: si el plan nuevo tiene menos cuotas que este número, la edición
+ * borraría el registro de un pago que sí ocurrió. Es el número más alto y no la
+ * cantidad de pagas porque las cuotas se pueden marcar en cualquier orden —
+ * pagar la 1 y la 5 de un plan de 12 es normal—, así que "hay dos pagas" no
+ * dice nada sobre cuál es el plan más chico que las conserva.
+ *
+ * Vive acá y no en la Server Action para poder probarse sin abrir una conexión
+ * a Postgres: importar `@/server/actions/movements` arrastra `@/db/client`.
+ */
+export function highestPaidNumber(installments: { number: number; paid: boolean }[]): number {
+  return installments.reduce((max, i) => (i.paid && i.number > max ? i.number : max), 0)
+}
+
+/**
  * Invariante de la sección 4 del spec: la suma de las cuotas es igual al total
  * del movimiento. Se valida en cada alta y en cada edición.
  */

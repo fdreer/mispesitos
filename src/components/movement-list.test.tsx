@@ -14,7 +14,18 @@ import type { MovementWithInstallments } from "@/server/queries"
 vi.mock("@/server/actions/movements", () => ({
   setInstallmentPaid: async () => ({ ok: true }),
   deleteMovement: async () => ({ ok: true }),
+  // Las dos del formulario de edición, que ahora cuelga de la misma fila.
+  createMovement: async () => ({ ok: true }),
+  updateMovement: async () => ({ ok: true }),
 }))
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: () => {}, push: () => {} }),
+}))
+
+/** Radix (el Select y el Dialog de shadcn) usa dos APIs que jsdom no trae. */
+Element.prototype.hasPointerCapture ??= () => false
+Element.prototype.scrollIntoView ??= () => {}
 
 afterEach(cleanup)
 
@@ -145,5 +156,29 @@ describe("MovementList", () => {
     expect(celdas(filas[1])[2]).toBe("Cuota 1 · vencida")
     // La que ya está pagada no se marca, aunque su vencimiento también pasó.
     expect(celdas(filas[2])[2]).toBe("Cuota 2")
+  })
+
+  /*
+   * Editar vive en la misma fila de cierre que borrar, y sólo aparece con las
+   * cuotas desplegadas: es una acción del movimiento, no de la tabla.
+   */
+  it("editar abre el formulario con el movimiento ya cargado", () => {
+    render(
+      <MovementList
+        movements={[MOVIMIENTO]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="vacío"
+      />,
+    )
+
+    expect(screen.queryByRole("button", { name: "Editar" })).toBeNull()
+
+    fireEvent.click(screen.getByText("Proyecto"))
+    fireEvent.click(screen.getByRole("button", { name: "Editar" }))
+
+    expect(screen.getByRole("dialog").textContent).toContain("Editar ingreso")
+    expect(screen.getByLabelText<HTMLInputElement>("Descripción").value).toBe("Proyecto")
+    expect(screen.getByLabelText<HTMLInputElement>("Importe").value).toBe("2000,00")
   })
 })

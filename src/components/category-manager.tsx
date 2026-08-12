@@ -8,7 +8,11 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { archiveCategory, createCategory } from "@/server/actions/categories"
+import {
+  archiveCategory,
+  createCategory,
+  unarchiveCategory,
+} from "@/server/actions/categories"
 import type { Category } from "@/server/queries"
 
 export function CategoryManager({
@@ -21,7 +25,10 @@ export function CategoryManager({
   const router = useRouter()
   const [state, action, pending] = useActionState(createCategory, null)
   const [archiving, startTransition] = useTransition()
-  const [archiveError, setArchiveError] = useState<{ id: string; message: string } | null>(null)
+  // El error del último intento de archivar o desarchivar, con la fila donde
+  // pasó: los dos caminos usan el mismo estado porque nunca hay dos en vuelo
+  // (`archiving` deshabilita todos los botones mientras uno viaja).
+  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null)
 
   useEffect(() => {
     if (state?.ok) router.refresh()
@@ -35,13 +42,15 @@ export function CategoryManager({
   // Mismo patrón que DeleteMovementButton/InstallmentRows: la Server Action
   // devuelve un ActionResult que hay que mirar, nunca descartar con `void` —
   // si archivar falla, el usuario tiene que enterarse en vez de ver la
-  // categoría seguir ahí sin explicación.
-  function handleArchive(id: string) {
-    setArchiveError(null)
+  // categoría seguir ahí sin explicación. Vale igual para desarchivar, que
+  // además tiene un modo de falla propio (el nombre chocado, ver
+  // `unarchiveCategory`).
+  function handleArchivedToggle(id: string, archived: boolean) {
+    setRowError(null)
     startTransition(async () => {
-      const result = await archiveCategory(id)
+      const result = archived ? await unarchiveCategory(id) : await archiveCategory(id)
       if (!result.ok) {
-        setArchiveError({ id, message: result.message })
+        setRowError({ id, message: result.message })
       }
     })
   }
@@ -76,8 +85,10 @@ export function CategoryManager({
        * vez de desaparecer: eran invisibles desde toda la interfaz, así que la
        * única señal de que archivar había funcionado era que la fila se
        * esfumaba, y no había forma de saber qué categorías existían de antes.
-       * Siguen sin ofrecerse al cargar un movimiento —para eso se archivan— y
-       * por eso tampoco llevan el botón de archivar, que ya no aplica.
+       * Siguen sin ofrecerse al cargar un movimiento —para eso se archivan—,
+       * pero desde acá se pueden volver a activar: archivar era irreversible
+       * desde la interfaz y la única salida era crear otra con el mismo nombre,
+       * que dejaba dos filas donde tenía que haber una.
        */}
         {/* El mismo badge de color que la categoría tiene en la tabla de
             movimientos y en el filtro: esta pantalla es donde se la crea, así
@@ -91,12 +102,12 @@ export function CategoryManager({
                   size="sm"
                   variant="ghost"
                   disabled={archiving}
-                  onClick={() => handleArchive(c.id)}
+                  onClick={() => handleArchivedToggle(c.id, false)}
                 >
                   Archivar
                 </Button>
-                {archiveError?.id === c.id && (
-                  <p className="text-destructive text-xs">{archiveError.message}</p>
+                {rowError?.id === c.id && (
+                  <p className="text-destructive text-xs">{rowError.message}</p>
                 )}
               </span>
             </li>
@@ -114,7 +125,22 @@ export function CategoryManager({
           {archivadas.map((c) => (
             <li key={c.id} className="flex min-h-9 items-center justify-between gap-2 py-1.5">
               <CategoryBadge name={c.name} className="opacity-50" />
-              <Badge variant="outline">Archivada</Badge>
+              <span className="flex flex-col items-end gap-1">
+                <span className="flex items-center gap-2">
+                  <Badge variant="outline">Archivada</Badge>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={archiving}
+                    onClick={() => handleArchivedToggle(c.id, true)}
+                  >
+                    Desarchivar
+                  </Button>
+                </span>
+                {rowError?.id === c.id && (
+                  <p className="text-destructive text-xs">{rowError.message}</p>
+                )}
+              </span>
             </li>
           ))}
         </ul>

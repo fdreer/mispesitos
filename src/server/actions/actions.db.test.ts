@@ -7,12 +7,17 @@ import { revalidatePath } from "next/cache"
 import { db, sqlClient, withUser } from "@/db/client"
 import { category, installment, movement, user, userSettings } from "@/db/schema"
 import { DEFAULT_CATEGORIES } from "@/lib/default-categories"
-import { archiveCategory, createCategory } from "@/server/actions/categories"
+import {
+  archiveCategory,
+  createCategory,
+  unarchiveCategory,
+} from "@/server/actions/categories"
 import {
   createExchange,
   createMovement,
   deleteMovement,
   setInstallmentPaid,
+  updateMovement,
 } from "@/server/actions/movements"
 import type { ActionResult } from "@/server/actions/result"
 import { saveSettings } from "@/server/actions/settings"
@@ -1065,6 +1070,229 @@ describe("deleteMovement", () => {
 // setInstallmentPaid
 // --------------------------------------------------------------------------
 
+// --------------------------------------------------------------------------
+// updateMovement
+// --------------------------------------------------------------------------
+
+/**
+ * Da de alta un movimiento de tres cuotas y devuelve su fila. Cada test de
+ * `updateMovement` arranca del suyo: comparten usuario y tabla, así que ninguno
+ * puede depender de lo que dejó el anterior.
+ */
+async function altaDeTresCuotas(descripcion: string) {
+  expect(
+    await createMovement(
+      null,
+      formulario({
+        ...ALTA_VALIDA,
+        description: descripcion,
+        currency: "ARS",
+        rate: "1",
+        amountCents: "1.200",
+        installmentAmount: ["40000", "40000", "40000"],
+        installmentDueDate: ["2026-05-03", "2026-06-15", "2026-07-20"],
+      }),
+    ),
+  ).toEqual({ ok: true })
+
+  const [fila] = await movimientosPorDescripcion(USUARIO_A, descripcion)
+  return fila
+}
+
+/** Los campos de un formulario de edición sobre un movimiento ya existente. */
+const edicion = (id: string, campos: Record<string, CampoDeFormulario> = {}) =>
+  formulario({
+    id,
+    kind: "expense",
+    description: "Editado",
+    categoryId: CAT_A_COMIDA,
+    date: "2026-05-03",
+    currency: "ARS",
+    rate: "1",
+    amountCents: "1.200",
+    installmentAmount: ["40000", "40000", "40000"],
+    installmentDueDate: ["2026-05-03", "2026-06-15", "2026-07-20"],
+    ...campos,
+  })
+
+describe("updateMovement", () => {
+  it("guarda los campos nuevos y rehace el plan de cuotas", async () => {
+    comoUsuario(USUARIO_A)
+    const fila = await altaDeTresCuotas("Para editar")
+    // Otra categoría del MISMO tipo: la FK compuesta de `movement` lleva `kind`
+    // adentro, así que mudar un egreso a una categoría de ingresos no es un
+    // caso que esta acción pueda producir (la base lo rechaza).
+    expect(await createCategory(null, formulario({ name: "Electro", kind: "expense" }))).toEqual({
+      ok: true,
+    })
+    const [electro] = await categoriaLlamada(USUARIO_A, "Electro")
+
+    const resultado = await updateMovement(
+      null,
+      edicion(fila.id, {
+        description: "Heladera nueva",
+        categoryId: electro.id,
+        date: "2026-06-01",
+        amountCents: "900",
+        installmentAmount: ["45000", "45000"],
+        installmentDueDate: ["2026-06-01", "2026-07-01"],
+      }),
+    )
+
+    expect(resultado).toEqual({ ok: true })
+
+    const [despues] = await movimientosPorDescripcion(USUARIO_A, "Heladera nueva")
+    expect(despues).toMatchObject({
+      id: fila.id,
+      description: "Heladera nueva",
+      categoryId: electro.id,
+      date: "2026-06-01",
+      amountCents: 90_000,
+    })
+
+    const cuotas = await cuotasDe(USUARIO_A, fila.id)
+    expect(cuotas.map((c) => ({ number: c.number, amountCents: c.amountCents, dueDate: c.dueDate })))
+      .toEqual([
+        { number: 1, amountCents: 45_000, dueDate: "2026-06-01" },
+        { number: 2, amountCents: 45_000, dueDate: "2026-07-01" },
+      ])
+  })
+
+  /**
+   * Lo que separa editar de "borrar y volver a cargar": el plan se rehace
+   * entero, pero lo que ya se pagó no se desmarca solo. El emparejamiento es
+   * por NÚMERO de cuota.
+   */
+  it("conserva el pago de las cuotas que sobreviven, emparejando por número", async () => {
+    comoUsuario(USUARIO_A)
+    const fila = await altaDeTresCuotas("Con una paga")
+    const cuotas = await cuotasDe(USUARIO_A, fila.id)
+    expect(await setInstallmentPaid(cuotas[1].id, true)).toEqual({ ok: true })
+    const [pagada] = await cuotaPorId(USUARIO_A, cuotas[1].id)
+
+    expect(await updateMovement(null, edicion(fila.id))).toEqual({ ok: true })
+
+    const despues = await cuotasDe(USUARIO_A, fila.id)
+    expect(despues.map((c) => ({ number: c.number, paid: c.paid, paidDate: c.paidDate }))).toEqual([
+      { number: 1, paid: false, paidDate: null },
+      { number: 2, paid: true, paidDate: pagada.paidDate },
+      { number: 3, paid: false, paidDate: null },
+    ])
+    // Filas nuevas, mismo dato: el reemplazo no puede depender de que los ids
+    // se conserven.
+    expect(despues.every((c) => c.movementId === fila.id)).toBe(true)
+  })
+
+  /**
+   * El único caso donde editar puede hacer desaparecer plata: bajar el plan
+   * por debajo del número de una cuota ya paga. Se rechaza ANTES de escribir
+   * nada, en vez de perder el registro del pago en silencio.
+   */
+  it("no deja bajar el plan por debajo de la cuota paga más alta, y no toca nada", async () => {
+    comoUsuario(USUARIO_A)
+    const fila = await altaDeTresCuotas("Con la tercera paga")
+    const cuotas = await cuotasDe(USUARIO_A, fila.id)
+    expect(await setInstallmentPaid(cuotas[2].id, true)).toEqual({ ok: true })
+
+    const resultado = await updateMovement(
+      null,
+      edicion(fila.id, {
+        description: "No tendría que guardarse",
+        amountCents: "800",
+        installmentAmount: ["40000", "40000"],
+        installmentDueDate: ["2026-05-03", "2026-06-15"],
+      }),
+    )
+
+    expect(rechazo(resultado).message).toContain("La cuota 3 está paga")
+    expect(await movimientosPorDescripcion(USUARIO_A, "No tendría que guardarse")).toEqual([])
+    expect(await cuotasDe(USUARIO_A, fila.id)).toHaveLength(3)
+    const [despues] = await movimientosPorDescripcion(USUARIO_A, "Con la tercera paga")
+    expect(despues.amountCents).toBe(120_000)
+  })
+
+  it("una cuota paga que sigue existiendo no bloquea la edición", async () => {
+    comoUsuario(USUARIO_A)
+    const fila = await altaDeTresCuotas("Bajar sin tocar la paga")
+    const cuotas = await cuotasDe(USUARIO_A, fila.id)
+    expect(await setInstallmentPaid(cuotas[0].id, true)).toEqual({ ok: true })
+
+    const resultado = await updateMovement(
+      null,
+      edicion(fila.id, {
+        amountCents: "800",
+        installmentAmount: ["40000", "40000"],
+        installmentDueDate: ["2026-05-03", "2026-06-15"],
+      }),
+    )
+
+    expect(resultado).toEqual({ ok: true })
+    const despues = await cuotasDe(USUARIO_A, fila.id)
+    expect(despues).toHaveLength(2)
+    expect(despues[0].paid).toBe(true)
+  })
+
+  it("un movimiento ajeno o inexistente responde igual, y no se toca", async () => {
+    comoUsuario(USUARIO_A)
+
+    const inexistente = await updateMovement(null, edicion(randomUUID()))
+    const ajeno = await updateMovement(null, edicion(MOV_B))
+
+    expect(rechazo(inexistente).message).toBe("Ese movimiento no existe.")
+    expect(ajeno).toEqual(inexistente)
+
+    const [deB] = await movimientosPorDescripcion(USUARIO_B, "Gasto de B")
+    expect(deB).toMatchObject({ description: "Gasto de B", amountCents: 555_00 })
+  })
+
+  /**
+   * Un cambio de divisa no tiene cuotas ni categoría: reescribirlo con la
+   * forma de un movimiento común dejaría a /cambios leyendo una fila que ya no
+   * es un cambio. El WHERE lo deja afuera, así que sale por la misma rama que
+   * un id que no existe.
+   */
+  it("un cambio de divisa no se puede editar por acá", async () => {
+    comoUsuario(USUARIO_A)
+    expect(
+      await createExchange(
+        null,
+        formulario({ direction: "buy", date: "2026-04-01", usdCents: "100", rate: "1000" }),
+      ),
+    ).toEqual({ ok: true })
+    const [cambio] = await cambiosDe(USUARIO_A)
+
+    const resultado = await updateMovement(null, edicion(cambio.id))
+
+    expect(rechazo(resultado).message).toBe("Ese movimiento no existe.")
+    const [despues] = await cambiosDe(USUARIO_A)
+    expect(despues).toMatchObject({ kind: "exchange", direction: "buy", amountCents: 100_00 })
+  })
+
+  it("un id que no es un UUID se rechaza sin tocar la base", async () => {
+    comoUsuario(USUARIO_A)
+
+    expect(rechazo(await updateMovement(null, edicion("movimiento-cualquiera"))).message).toBe(
+      "Ese movimiento no existe.",
+    )
+    expect(rutasRevalidadas()).toEqual([])
+  })
+
+  it("un plan que no suma el total se rechaza en el campo de las cuotas", async () => {
+    comoUsuario(USUARIO_A)
+    const fila = await altaDeTresCuotas("Suma que no cierra")
+
+    const resultado = await updateMovement(
+      null,
+      edicion(fila.id, { installmentAmount: ["40000", "40000", "39999"] }),
+    )
+
+    expect(rechazo(resultado).fieldErrors?.installments).toEqual([
+      "La suma de las cuotas no coincide con el importe total.",
+    ])
+    expect(await cuotasDe(USUARIO_A, fila.id)).toHaveLength(3)
+  })
+})
+
 describe("setInstallmentPaid", () => {
   /** Cuota propia de A, recién creada por la acción (así el id es un UUID real). */
   let cuotaDeA: string
@@ -1407,6 +1635,74 @@ describe("archiveCategory", () => {
     expect(message).toBe("No pudimos archivar la categoría.")
     expect(message).not.toBe("No encontramos esa categoría.")
     expect(etiquetas).toEqual(["archiveCategory"])
+    expect(rutasRevalidadas()).toEqual([])
+  })
+})
+
+describe("unarchiveCategory", () => {
+  it("devuelve la categoría a las activas", async () => {
+    comoUsuario(USUARIO_A)
+    await createCategory(null, formulario({ name: "Para desarchivar", kind: "expense" }))
+    const [fila] = await categoriaLlamada(USUARIO_A, "Para desarchivar")
+    expect(await archiveCategory(fila.id)).toEqual({ ok: true })
+
+    expect(await unarchiveCategory(fila.id)).toEqual({ ok: true })
+
+    const [despues] = await categoriaLlamada(USUARIO_A, "Para desarchivar")
+    expect(despues).toMatchObject({ id: fila.id, archived: false })
+  })
+
+  /**
+   * El modo de falla que archivar no tiene: el índice único es PARCIAL, así
+   * que mientras ésta estuvo archivada el nombre quedó libre y se pudo crear
+   * otra activa igual. Desarchivarla dejaría dos activas con el mismo nombre y
+   * tipo, y Postgres lo rechaza con 23505.
+   */
+  it("con el nombre ya tomado por una activa se rechaza con su propio mensaje, y la fila sigue archivada", async () => {
+    comoUsuario(USUARIO_A)
+    await createCategory(null, formulario({ name: "Disputada", kind: "expense" }))
+    const [original] = await categoriaLlamada(USUARIO_A, "Disputada")
+    expect(await archiveCategory(original.id)).toEqual({ ok: true })
+    expect(await createCategory(null, formulario({ name: "Disputada", kind: "expense" }))).toEqual({
+      ok: true,
+    })
+
+    const { resultado, etiquetas } = await conErroresDeConsola(() =>
+      unarchiveCategory(original.id),
+    )
+
+    expect(rechazo(resultado).message).toBe("Ya tenés una categoría activa con ese nombre.")
+    expect(etiquetas).toEqual(["unarchiveCategory: nombre repetido"])
+    const disputadas = await categoriaLlamada(USUARIO_A, "Disputada")
+    expect(disputadas.filter((c) => c.archived).map((c) => c.id)).toEqual([original.id])
+    expect(disputadas.filter((c) => !c.archived)).toHaveLength(1)
+  })
+
+  it("una categoría ajena responde igual que una que no existe, y no se toca", async () => {
+    comoUsuario(USUARIO_A)
+
+    const inexistente = await unarchiveCategory(randomUUID())
+    const ajena = await unarchiveCategory(CAT_B)
+
+    expect(inexistente).toEqual({ ok: false, message: "No encontramos esa categoría." })
+    expect(ajena).toEqual(inexistente)
+  })
+
+  /**
+   * La otra mitad del test de arriba: que exista un mensaje para el nombre
+   * repetido no puede convertirse en el mensaje de cualquier falla de la base.
+   * Mismo criterio —y misma palanca— que `createCategory`.
+   */
+  it("si la base falla por otra cosa, el mensaje no es el del nombre repetido", async () => {
+    comoUsuario(USUARIO_QUE_LA_BASE_NO_PUEDE_LEER)
+
+    const { resultado, etiquetas } = await conErroresDeConsola(() =>
+      unarchiveCategory(randomUUID()),
+    )
+
+    const { message } = rechazo(resultado)
+    expect(message).toBe("No pudimos desarchivar la categoría.")
+    expect(etiquetas).toEqual(["unarchiveCategory"])
     expect(rutasRevalidadas()).toEqual([])
   })
 })

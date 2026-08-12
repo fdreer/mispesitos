@@ -13,6 +13,21 @@ export const PAGE_SIZE = 20
  */
 export const STATUS_VALUES: readonly MovementStatus[] = ["pending", "paid", "overdue"]
 
+/**
+ * Las dos monedas que la app maneja, con el mismo criterio que `STATUS_VALUES`:
+ * el desplegable de moneda (`movement-filters.tsx`) arma sus opciones de acá,
+ * así que no puede ofrecer una moneda que el parser no entienda.
+ *
+ * Es la misma lista que el enum `currency` de @/lib/schemas, pero no se importa
+ * de ahí: ese esquema valida lo que ENTRA a la base y arrastra todo Zod; esto
+ * es lo que se lee de una URL. Si algún día hay una tercera moneda hay que
+ * tocar los dos, y el typecheck lo va a decir — `MovementFilters["currency"]`
+ * (@/server/queries) es el tipo que las une.
+ */
+export const CURRENCY_VALUES = ["ARS", "USD"] as const
+
+export type QueryCurrency = (typeof CURRENCY_VALUES)[number]
+
 /** El mismo tope que `movementSchema` le pone a la descripción. */
 export const SEARCH_MAX = 200
 
@@ -21,6 +36,7 @@ export type MovementQuery = {
   search: string
   /** Id de categoría, o "all". */
   categoryId: string
+  currency: QueryCurrency | "all"
   status: MovementStatus | "all"
   /** ISO yyyy-mm-dd, o "" si no hay borde. */
   from: string
@@ -43,6 +59,7 @@ export type MovementQuery = {
 export const FILTER_DEFAULTS = {
   search: "",
   categoryId: "all",
+  currency: "all",
   status: "all",
   from: "",
   to: "",
@@ -65,6 +82,7 @@ function one(raw: string | string[] | undefined): string {
  * `?status=borracho` no puede dejar la lista vacía ni tumbar la pantalla.
  */
 export function parseMovementQuery(raw: RawParams): MovementQuery {
+  const currency = one(raw.currency)
   const status = one(raw.status)
   const from = one(raw.from)
   const to = one(raw.to)
@@ -73,6 +91,9 @@ export function parseMovementQuery(raw: RawParams): MovementQuery {
   return {
     search: one(raw.search).trim().slice(0, SEARCH_MAX),
     categoryId: one(raw.categoryId) || FILTER_DEFAULTS.categoryId,
+    currency: (CURRENCY_VALUES as readonly string[]).includes(currency)
+      ? (currency as QueryCurrency)
+      : FILTER_DEFAULTS.currency,
     status: (STATUS_VALUES as readonly string[]).includes(status)
       ? (status as MovementStatus)
       : FILTER_DEFAULTS.status,
@@ -103,6 +124,7 @@ export function hayFiltrosActivos(query: MovementQuery): boolean {
 export function movementFiltersFromQuery(query: MovementQuery): {
   search?: string
   categoryId?: string
+  currency?: QueryCurrency
   from?: string
   to?: string
 } {
@@ -112,6 +134,9 @@ export function movementFiltersFromQuery(query: MovementQuery): {
   return {
     search: puesto("search"),
     categoryId: puesto("categoryId"),
+    // El cast lo permite el propio `puesto`: devuelve `undefined` justo cuando
+    // el valor es "all", así que lo que sobrevive sólo puede ser una moneda.
+    currency: puesto("currency") as QueryCurrency | undefined,
     from: puesto("from"),
     to: puesto("to"),
   }

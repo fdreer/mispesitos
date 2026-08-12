@@ -22,8 +22,9 @@ import {
 import { dateToIso, formatIsoForDisplay, isoToDate, type IsoDate } from "@/lib/dates"
 import { buildInstallments, MAX_INSTALLMENTS } from "@/lib/installments"
 import { formatMoney, parseAmountToCents } from "@/lib/money"
-import { createMovement } from "@/server/actions/movements"
-import type { Category } from "@/server/queries"
+import { assertCurrency } from "@/lib/movement-asserts"
+import { createMovement, updateMovement } from "@/server/actions/movements"
+import type { Category, MovementWithInstallments } from "@/server/queries"
 
 /**
  * Un solo picker para la fecha principal y cada vencimiento de cuota: mismo
@@ -94,6 +95,14 @@ type Props = {
   suggestedRate: number | null
   /** Hoy según el reloj de Buenos Aires, calculado en el servidor. */
   today: IsoDate
+  /**
+   * El movimiento que se está editando, con sus cuotas. Ausente = alta.
+   *
+   * Es lo único que distingue los dos modos: de acá salen los valores
+   * iniciales, el campo oculto con el id, y a cuál de las dos Server Actions
+   * va el formulario.
+   */
+  movement?: MovementWithInstallments
   /** Se dispara junto con `router.refresh()` al guardar. El modal la usa para cerrarse solo. */
   onSaved?: () => void
 }
@@ -116,15 +125,59 @@ function centsToInput(cents: number): string {
   return (cents / 100).toFixed(2).replace(".", ",")
 }
 
-export function MovementForm({ kind, categories, suggestedRate, today, onSaved }: Props) {
-  const [state, action, pending] = useActionState(createMovement, null)
+/**
+ * El `numeric(12,4)` que devuelve Postgres ("1450.0000") al texto que va en el
+ * campo del tipo de cambio.
+ *
+ * La coma no es cosmética: `parseDecimalInput` (@/lib/money) lee un punto
+ * solitario seguido de exactamente tres dígitos como separador de MILES, así
+ * que un TC de 1.234 puesto con punto volvería como 1234. Con coma decimal no
+ * hay ninguna lectura ambigua, y es además cómo escribe decimales el resto del
+ * formulario (ver `centsToInput`).
+ */
+function rateToInput(rate: string): string {
+  return String(Number(rate)).replace(".", ",")
+}
+
+/**
+ * La clave que decide si hay que regenerar el plan de cuotas. Sale de acá y no
+ * de una plantilla escrita dos veces porque el modo edición la necesita ANTES
+ * del primer render —para sembrar `appliedPlanKey` con el plan que ya está
+ * guardado— y si las dos formas se separaran, editar un movimiento pisaría sus
+ * vencimientos reales con un plan recién generado en el primer render.
+ */
+function planKeyOf(totalCents: number, count: number, date: IsoDate): string {
+  return `${totalCents}|${count}|${date}`
+}
+
+export function MovementForm({
+  kind,
+  categories,
+  suggestedRate,
+  today,
+  movement,
+  onSaved,
+}: Props) {
+  const [state, action, pending] = useActionState(
+    movement ? updateMovement : createMovement,
+    null,
+  )
   const router = useRouter()
 
-  const [amount, setAmount] = useState("")
-  const [currency, setCurrency] = useState<"ARS" | "USD">("ARS")
-  const [date, setDate] = useState(today)
-  const [count, setCount] = useState(1)
-  const [rows, setRows] = useState<Row[]>([{ amount: "", dueDate: today }])
+  const [amount, setAmount] = useState(movement ? centsToInput(movement.amountCents) : "")
+  const [currency, setCurrency] = useState<"ARS" | "USD">(
+    movement ? assertCurrency(movement.currency) : "ARS",
+  )
+  const [date, setDate] = useState(movement?.date ?? today)
+  const [count, setCount] = useState(movement?.installments.length ?? 1)
+  const [rows, setRows] = useState<Row[]>(
+    movement
+      ? movement.installments.map((i) => ({
+          amount: centsToInput(i.amountCents),
+          dueDate: i.dueDate,
+        }))
+      : [{ amount: "", dueDate: today }],
+  )
 
   // Los centavos de cada fila, derivados de lo tipeado. `null` cuando el texto
   // todavía no es un número: eso hace que la suma no cierre y el botón quede
@@ -145,8 +198,16 @@ export function MovementForm({ kind, categories, suggestedRate, today, onSaved }
   // `date` sale siempre de `DateField` —nunca de tipeo libre—, así que
   // siempre es un día real: a diferencia del viejo `<input type="date">`, acá
   // no hay estado intermedio a medio completar que proteger.
-  const planKey = totalCents > 0 ? `${totalCents}|${count}|${date}` : null
-  const [appliedPlanKey, setAppliedPlanKey] = useState<string | null>(null)
+  const planKey = totalCents > 0 ? planKeyOf(totalCents, count, date) : null
+  // Sembrado con el plan que ya está guardado cuando se edita: sin esto el
+  // primer render vería `null !== planKey` y regeneraría las cuotas con
+  // `buildInstallments`, pisando los vencimientos e importes reales —incluidos
+  // los de las cuotas ya pagas— antes de que nadie tocara nada.
+  const [appliedPlanKey, setAppliedPlanKey] = useState<string | null>(
+    movement
+      ? planKeyOf(movement.amountCents, movement.installments.length, movement.date)
+      : null,
+  )
   if (planKey !== null && planKey !== appliedPlanKey) {
     setAppliedPlanKey(planKey)
     const planned = buildInstallments(totalCents, count, date)
@@ -170,8 +231,13 @@ export function MovementForm({ kind, categories, suggestedRate, today, onSaved }
   const [handledState, setHandledState] = useState<ActionResult | null>(null)
   if (state?.ok && state !== handledState) {
     setHandledState(state)
-    setAmount("")
-    setCount(1)
+    // Sólo al dar de alta: vaciar el formulario deja listo el próximo. Editando
+    // no hay próximo —el diálogo se cierra— y borrarlo se vería como que los
+    // datos se perdieron si algo dejara el diálogo abierto.
+    if (!movement) {
+      setAmount("")
+      setCount(1)
+    }
   }
 
   // `router.refresh()` sí es un efecto legítimo: notifica al router, no
@@ -189,6 +255,10 @@ export function MovementForm({ kind, categories, suggestedRate, today, onSaved }
 
   return (
     <form action={action} className="space-y-4 rounded-lg border p-4">
+      {/* Sólo editando. `updateMovement` lo valida como UUID y filtra además
+          por usuario, igual que borrar: que el id viaje por el formulario no
+          lo hace más confiable que cualquier otro campo. */}
+      {movement && <input type="hidden" name="id" value={movement.id} />}
       <input type="hidden" name="kind" value={kind} />
       <input type="hidden" name="currency" value={currency} />
       <input type="hidden" name="amountCents" value={amount} />
@@ -204,12 +274,26 @@ export function MovementForm({ kind, categories, suggestedRate, today, onSaved }
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1">
           <Label htmlFor="description">Descripción</Label>
-          <Input id="description" name="description" required maxLength={200} />
+          <Input
+            id="description"
+            name="description"
+            required
+            maxLength={200}
+            defaultValue={movement?.description ?? ""}
+          />
         </div>
 
         <div className="space-y-1">
           <Label htmlFor="categoryId">Categoría</Label>
-          <Select name="categoryId" required defaultValue={categories[0]?.id}>
+          {/* Editando arranca en la del movimiento, que puede ser una archivada:
+              la lista que llega en ese caso las incluye (ver `MovementList`).
+              Sin eso, abrir el diálogo de un movimiento viejo lo movía de
+              categoría con sólo guardarlo. */}
+          <Select
+            name="categoryId"
+            required
+            defaultValue={movement?.categoryId ?? categories[0]?.id}
+          >
             <SelectTrigger id="categoryId" className="w-full">
               <SelectValue />
             </SelectTrigger>
@@ -263,18 +347,28 @@ export function MovementForm({ kind, categories, suggestedRate, today, onSaved }
       {currency === "USD" && (
         <div className="space-y-1">
           <Label htmlFor="rateVisible">Tipo de cambio</Label>
+          {/* Editando gana el TC con el que se guardó: es el del día de la
+              operación, y el sugerido de hoy no tiene nada que ver con ella.
+              Sólo si el movimiento estaba en pesos y se lo pasa a dólares acá
+              mismo no hay TC anterior, y ahí sí vale el sugerido. */}
           <Input
             id="rateVisible"
             name="rate"
             inputMode="decimal"
-            defaultValue={suggestedRate ?? ""}
+            defaultValue={
+              movement && movement.currency === "USD"
+                ? rateToInput(movement.rate)
+                : (suggestedRate ?? "")
+            }
             required
           />
-          <p className="text-muted-foreground text-xs">
-            {suggestedRate
-              ? "Sugerido de hoy. Cambialo si operaste a otro valor."
-              : "No pudimos traer la cotización. Escribila a mano."}
-          </p>
+          {!movement && (
+            <p className="text-muted-foreground text-xs">
+              {suggestedRate
+                ? "Sugerido de hoy. Cambialo si operaste a otro valor."
+                : "No pudimos traer la cotización. Escribila a mano."}
+            </p>
+          )}
         </div>
       )}
 
@@ -339,7 +433,7 @@ export function MovementForm({ kind, categories, suggestedRate, today, onSaved }
       {state && !state.ok && <p className="text-destructive text-sm">{state.message}</p>}
 
       <Button type="submit" disabled={pending || !sumMatches || totalCents <= 0}>
-        {pending ? "Guardando…" : "Guardar"}
+        {pending ? "Guardando…" : movement ? "Guardar cambios" : "Guardar"}
       </Button>
     </form>
   )

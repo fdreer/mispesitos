@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import { MovementForm } from "@/components/movement-form"
 
@@ -11,8 +11,11 @@ import { MovementForm } from "@/components/movement-form"
  * la Server Action importa `@/db/client`, que abre una conexión a Postgres
  * apenas se lo importa; y `useRouter` necesita el router de Next.
  */
+const updateMovement = vi.fn(async () => ({ ok: true }))
+
 vi.mock("@/server/actions/movements", () => ({
   createMovement: async () => ({ ok: true }),
+  updateMovement: (...args: unknown[]) => updateMovement(...(args as [])),
 }))
 
 vi.mock("next/navigation", () => ({
@@ -113,5 +116,138 @@ describe("MovementForm", () => {
     // valida al hacer submit, y para entonces las 99.999 filas ya se pintaron.
     expect(screen.queryByLabelText("Importe de la cuota 121")).toBeNull()
     expect(screen.getByLabelText("Importe de la cuota 120")).toBeTruthy()
+  })
+})
+
+/**
+ * Un movimiento de $1.200,00 en tres cuotas con vencimientos que NO son los
+ * que `buildInstallments` generaría desde su fecha (la 2 y la 3 están corridas
+ * a mano) y con la 1 ya paga. Esas dos cosas son lo que distingue "editar" de
+ * "volver a cargar": si el formulario regenera el plan al abrirse, los
+ * vencimientos vuelven a ser los automáticos y nadie se entera.
+ */
+const MOVIMIENTO = {
+  id: "11111111-1111-4111-8111-111111111111",
+  userId: "u",
+  kind: "expense",
+  description: "Heladera",
+  categoryId: "cat-1",
+  date: "2026-05-03",
+  currency: "ARS",
+  amountCents: 120_000,
+  rate: "1.0000",
+  direction: null,
+  createdAt: new Date("2026-05-03T12:00:00Z"),
+  updatedAt: new Date("2026-05-03T12:00:00Z"),
+  installments: [
+    {
+      id: "i1",
+      movementId: "11111111-1111-4111-8111-111111111111",
+      userId: "u",
+      number: 1,
+      amountCents: 40_000,
+      dueDate: "2026-05-03",
+      paid: true,
+      paidDate: "2026-05-04",
+    },
+    {
+      id: "i2",
+      movementId: "11111111-1111-4111-8111-111111111111",
+      userId: "u",
+      number: 2,
+      amountCents: 40_000,
+      dueDate: "2026-06-15",
+      paid: false,
+      paidDate: null,
+    },
+    {
+      id: "i3",
+      movementId: "11111111-1111-4111-8111-111111111111",
+      userId: "u",
+      number: 3,
+      amountCents: 40_000,
+      dueDate: "2026-07-20",
+      paid: false,
+      paidDate: null,
+    },
+  ],
+}
+
+function editar() {
+  return render(
+    <MovementForm
+      kind="expense"
+      categories={CATEGORIAS}
+      suggestedRate={null}
+      today="2026-08-10"
+      movement={MOVIMIENTO}
+    />,
+  )
+}
+
+describe("MovementForm editando", () => {
+  it("precarga los campos del movimiento, no los de un alta", () => {
+    editar()
+
+    expect(screen.getByLabelText<HTMLInputElement>("Descripción").value).toBe("Heladera")
+    expect(screen.getByLabelText<HTMLInputElement>("Importe").value).toBe("1200,00")
+    expect(screen.getByLabelText<HTMLInputElement>("Cuotas").value).toBe("3")
+    expect(screen.getByRole("button", { name: /^Fecha:/ }).textContent).toContain("03/05/2026")
+  })
+
+  /*
+   * El corazón de esta pantalla. `buildInstallments` desde el 03/05 daría
+   * 03/06 y 03/07; los vencimientos guardados son 15/06 y 20/07. Si el primer
+   * render regenera el plan —que es lo que hace si `appliedPlanKey` arranca en
+   * null— las fechas movidas a mano se pierden en silencio al abrir el
+   * diálogo, sin que nadie haya tocado nada.
+   */
+  it("no regenera el plan al abrirse: los vencimientos guardados sobreviven", () => {
+    const { container } = editar()
+
+    const vencimientos = [
+      ...container.querySelectorAll<HTMLInputElement>(
+        'input[type="hidden"][name="installmentDueDate"]',
+      ),
+    ].map((i) => i.value)
+
+    expect(vencimientos).toEqual(["2026-05-03", "2026-06-15", "2026-07-20"])
+  })
+
+  it("cambiar la cantidad de cuotas sí regenera el plan", () => {
+    const { container } = editar()
+
+    fireEvent.change(screen.getByLabelText("Cuotas"), { target: { value: "2" } })
+
+    const importes = [
+      ...container.querySelectorAll<HTMLInputElement>(
+        'input[type="hidden"][name="installmentAmount"]',
+      ),
+    ].map((i) => i.value)
+
+    expect(importes).toEqual(["60000", "60000"])
+  })
+
+  it("manda el id del movimiento, que es lo que updateMovement necesita", () => {
+    const { container } = editar()
+
+    const id = container.querySelector<HTMLInputElement>('input[type="hidden"][name="id"]')
+    expect(id?.value).toBe(MOVIMIENTO.id)
+  })
+
+  it("guarda por updateMovement y no por createMovement", async () => {
+    const { container } = editar()
+
+    await act(async () => {
+      fireEvent.submit(container.querySelector("form")!)
+    })
+
+    expect(updateMovement).toHaveBeenCalledTimes(1)
+  })
+
+  it("el botón dice que guarda cambios, no que da de alta", () => {
+    editar()
+
+    expect(screen.getByRole("button", { name: "Guardar cambios" })).toBeTruthy()
   })
 })
