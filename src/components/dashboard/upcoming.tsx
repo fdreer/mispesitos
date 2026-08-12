@@ -2,23 +2,11 @@ import Link from "next/link"
 
 import { InstallmentRows } from "@/components/installment-rows"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import type { UpcomingItem } from "@/lib/dashboard-view"
 import type { IsoDate } from "@/lib/dates"
 import { BASE_PATHS } from "@/lib/movement-routes"
-import type { MovementStatus } from "@/lib/movement-status"
 
-type Item = {
-  id: string
-  number: number
-  dueDate: string
-  amountCents: number
-  description: string
-  currency: "ARS" | "USD"
-  kind: "income" | "expense"
-  /** Estado del MOVIMIENTO entero, no de esta cuota: es el que filtra la lista. */
-  status: MovementStatus
-}
-
-export function Upcoming({ items, today }: { items: Item[]; today: IsoDate }) {
+export function Upcoming({ items, today }: { items: UpcomingItem[]; today: IsoDate }) {
   return (
     <Card size="sm">
       <CardHeader>

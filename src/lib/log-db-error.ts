@@ -10,6 +10,13 @@
  *
  * Mismo camino que recorre `isUniqueViolation` (@/lib/db-errors) para llegar al
  * código, y por el mismo motivo.
+ *
+ * Alcance: las Server Actions, que son las únicas que envuelven su consulta en
+ * un `try`/`catch` y llaman acá. Las de @/server/queries no, así que un fallo
+ * durante el render lo loguea Next en crudo, con el dump de la consulta. Ahí
+ * los parámetros son ids de usuario y fechas —los INSERT donde los parámetros
+ * SON la fila pasan todos por Server Actions—, pero no es esta función la que
+ * lo garantiza.
  */
 
 /** Marca del `message` que arma Drizzle para el dump de la consulta. */
