@@ -29,6 +29,29 @@ export type MovementQuery = {
   page: number
 }
 
+/**
+ * Cada filtro con el valor que significa "sin filtro". Es LA lista: de acá
+ * salen las tres decisiones que antes vivían cada una por su cuenta —qué se
+ * escribe en la URL (`buildMovementHref`), qué cuenta como pantalla filtrada
+ * (`hayFiltrosActivos`) y qué viaja a la consulta (`movementFiltersFromQuery`)—
+ * y que ya no pueden discrepar entre sí. Agregar un filtro nuevo sigue pidiendo
+ * tocar `MovementQuery`, el parser y la barra, pero olvidarse de uno de estos
+ * tres lugares —que era lo que fallaba en silencio— ya no es posible.
+ *
+ * `page` no está: no es un filtro, es dónde estás parado dentro del resultado.
+ */
+export const FILTER_DEFAULTS = {
+  search: "",
+  categoryId: "all",
+  status: "all",
+  from: "",
+  to: "",
+} as const
+
+type FilterKey = keyof typeof FILTER_DEFAULTS
+
+const FILTER_KEYS = Object.keys(FILTER_DEFAULTS) as FilterKey[]
+
 type RawParams = Record<string, string | string[] | undefined>
 
 /** Next entrega string[] cuando el parámetro viene repetido en la URL. */
@@ -49,12 +72,12 @@ export function parseMovementQuery(raw: RawParams): MovementQuery {
 
   return {
     search: one(raw.search).trim().slice(0, SEARCH_MAX),
-    categoryId: one(raw.categoryId) || "all",
+    categoryId: one(raw.categoryId) || FILTER_DEFAULTS.categoryId,
     status: (STATUS_VALUES as readonly string[]).includes(status)
       ? (status as MovementStatus)
-      : "all",
-    from: isValidIsoDate(from) ? from : "",
-    to: isValidIsoDate(to) ? to : "",
+      : FILTER_DEFAULTS.status,
+    from: isValidIsoDate(from) ? from : FILTER_DEFAULTS.from,
+    to: isValidIsoDate(to) ? to : FILTER_DEFAULTS.to,
     page: Number.isInteger(page) && page > 0 ? page : 1,
   }
 }
@@ -62,18 +85,36 @@ export function parseMovementQuery(raw: RawParams): MovementQuery {
 /**
  * Si hay algún filtro puesto (la página no cuenta). `movement-screen.tsx`
  * la usa para elegir el mensaje de lista vacía y `movement-filters.tsx` para
- * decidir si ofrece "Limpiar" — antes cada uno la recalculaba por su cuenta
- * con la misma lista de cinco campos, y agregar un filtro nuevo era editarla
- * en los dos lugares sin que ninguno avisara si te olvidabas de uno.
+ * decidir si ofrece "Limpiar".
  */
 export function hayFiltrosActivos(query: MovementQuery): boolean {
-  return (
-    query.search !== "" ||
-    query.categoryId !== "all" ||
-    query.status !== "all" ||
-    query.from !== "" ||
-    query.to !== ""
-  )
+  return FILTER_KEYS.some((k) => query[k] !== FILTER_DEFAULTS[k])
+}
+
+/**
+ * Los filtros que entiende la consulta (`listMovements`, `listMovementsPage`),
+ * con `undefined` donde no hay filtro. `kind` no sale de acá: lo pone la
+ * pantalla, no la URL.
+ *
+ * El estado tampoco viaja, y no es un olvido: no es una columna de la base,
+ * se deriva de las cuotas. Quien filtra por estado corta en memoria después
+ * (ver `ListaConPaginacion` en `movement-screen.tsx`).
+ */
+export function movementFiltersFromQuery(query: MovementQuery): {
+  search?: string
+  categoryId?: string
+  from?: string
+  to?: string
+} {
+  const puesto = <K extends FilterKey>(k: K) =>
+    query[k] === FILTER_DEFAULTS[k] ? undefined : query[k]
+
+  return {
+    search: puesto("search"),
+    categoryId: puesto("categoryId"),
+    from: puesto("from"),
+    to: puesto("to"),
+  }
 }
 
 export type Page<T> = {
@@ -119,11 +160,9 @@ export function buildMovementHref(
   }
 
   const params = new URLSearchParams()
-  if (next.search) params.set("search", next.search)
-  if (next.categoryId !== "all") params.set("categoryId", next.categoryId)
-  if (next.status !== "all") params.set("status", next.status)
-  if (next.from) params.set("from", next.from)
-  if (next.to) params.set("to", next.to)
+  for (const k of FILTER_KEYS) {
+    if (next[k] !== FILTER_DEFAULTS[k]) params.set(k, next[k])
+  }
   if (next.page > 1) params.set("page", String(next.page))
 
   const qs = params.toString()

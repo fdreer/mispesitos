@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button"
 import { todayInAr, type IsoDate } from "@/lib/dates"
 import {
   hayFiltrosActivos,
+  movementFiltersFromQuery,
   paginate,
   parseMovementQuery,
   type MovementQuery,
@@ -140,13 +141,10 @@ async function ListaConPaginacion({ kind, query }: { kind: Kind; query: Movement
   const { user } = await requireSettings()
   const today = todayInAr()
 
-  const filters = {
-    kind,
-    search: query.search || undefined,
-    categoryId: query.categoryId === "all" ? undefined : query.categoryId,
-    from: query.from || undefined,
-    to: query.to || undefined,
-  }
+  // Qué cuenta como "sin filtro" lo decide `FILTER_DEFAULTS`
+  // (@/lib/movement-query), no esta pantalla: es la misma tabla de la que
+  // salen la URL y el mensaje de lista vacía.
+  const filters = { kind, ...movementFiltersFromQuery(query) }
 
   /**
    * Dos caminos, y la diferencia es de dónde sale el recorte.
