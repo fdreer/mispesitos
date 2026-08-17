@@ -60,6 +60,20 @@ const FULL_LABEL = "max-w-32 opacity-100"
 const ITEM_BASE =
   "flex items-center rounded-lg py-2 text-[13px] whitespace-nowrap transition-all"
 
+function Brand({ rail }: { rail: boolean }) {
+  return (
+    <div
+      className={cn(
+        "flex items-center overflow-hidden transition-all",
+        rail ? cn("h-14 border-b border-graphite", RAIL_COLLAPSED, RAIL_EXPANDED) : "gap-2",
+      )}
+    >
+      <img src="/brand/mark.svg" alt="Mis Pesitos" className="h-8 w-auto shrink-0" />
+      <span className={rail ? RAIL_LABEL : "font-heading text-sm font-medium text-paper"}>Mis Pesitos</span>
+    </div>
+  )
+}
+
 /**
  * Los links de navegación, compartidos entre el riel de escritorio y el drawer
  * de mobile: mismo orden, mismos íconos, mismo estado activo.
@@ -151,7 +165,7 @@ export function AppSidebar() {
           ancho fijo no dejaban lugar para el contenido (con 375px de viewport,
           apenas 151px libres). */}
       <header className="sticky top-0 z-40 flex items-center justify-between border-b border-graphite bg-carbon px-4 py-3 lg:hidden">
-        <span className="font-heading text-sm font-medium text-paper">Mis Pesitos</span>
+        <Brand rail={false} />
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger asChild>
             <Button type="button" variant="ghost" size="icon-sm">
@@ -201,7 +215,8 @@ export function AppSidebar() {
             "hover:w-56 hover:shadow-xl focus-within:w-56 focus-within:shadow-xl",
           )}
         >
-          <div className="flex-1 pt-4">
+          <Brand rail />
+          <div className="flex-1 pt-3">
             <NavLinks pathname={pathname} rail />
           </div>
 
