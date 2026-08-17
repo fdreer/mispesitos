@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
-import { CalendarIcon, SearchIcon, XIcon } from "lucide-react"
+import { CalendarIcon, SearchIcon, SlidersHorizontal, XIcon } from "lucide-react"
 import { es } from "date-fns/locale"
 import type { DateRange } from "react-day-picker"
 
@@ -12,6 +12,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Sheet, SheetClose, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
   Select,
   SelectContent,
@@ -166,6 +167,16 @@ const CALENDAR_YEARS_MARGIN = 10
 const CALENDAR_START_MONTH = new Date(new Date().getFullYear() - CALENDAR_YEARS_MARGIN, 0, 1)
 const CALENDAR_END_MONTH = new Date(new Date().getFullYear() + CALENDAR_YEARS_MARGIN, 11, 1)
 
+function activeFilterCount(query: MovementQuery): number {
+  return [
+    Boolean(query.search),
+    query.categoryId !== "all",
+    query.currency !== "all",
+    query.status !== "all",
+    Boolean(query.from || query.to),
+  ].filter(Boolean).length
+}
+
 /**
  * Texto del botón que dispara el calendario. Cubre los cuatro casos que
  * `MovementQuery` permite: sin rango, sólo piso, sólo techo, o los dos. Del
@@ -243,6 +254,7 @@ export function MovementFilters({ basePath, query, categories }: Props) {
   const { push } = useRouter()
   const [search, setSearch] = useState(query.search)
   const [pending, startTransition] = useTransition()
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   // Rango en BORRADOR mientras el popover del período está abierto. Esto NO
   // es un espejo del filtro comprometido (lo que la arquitectura prohíbe):
   // `query.from`/`query.to` siguen siendo la única fuente para el texto del
@@ -488,7 +500,167 @@ export function MovementFilters({ basePath, query, categories }: Props) {
         </div>
       </div>
 
-      <div className={cn(FIELD_WIDTH.category, "space-y-1.5")}>
+      <div className="flex w-full items-end gap-2 md:hidden">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <Label htmlFor="filtro-mobile-estado" className={LABEL_CLASS}>
+            Estado actual
+          </Label>
+          <Select
+            value={query.status}
+            onValueChange={(v) => go({ status: v as MovementStatus | "all" })}
+          >
+            <SelectTrigger id="filtro-mobile-estado" className="h-11 w-full">
+              <SelectValue>{query.status === "all" ? "Todos" : STATUS_LABELS[query.status]}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option === "all" ? "Todos" : STATUS_LABELS[option]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 shrink-0"
+            onClick={() => setMobileFiltersOpen(true)}
+          >
+            <SlidersHorizontal />
+            Filtros ({activeFilterCount(query)})
+          </Button>
+          <SheetContent side="bottom" className="max-h-[80dvh] overflow-y-auto rounded-t-xl">
+            <SheetHeader>
+              <SheetTitle>Filtros</SheetTitle>
+            </SheetHeader>
+            <div className="space-y-4 px-4 pb-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="filtro-mobile-categoria" className={LABEL_CLASS}>
+                  Categoría
+                </Label>
+                <Select value={query.categoryId} onValueChange={(v) => go({ categoryId: v })}>
+                  <SelectTrigger id="filtro-mobile-categoria" className="h-11 w-full">
+                    <SelectValue>{categoriaValue(query.categoryId, categories)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{TODAS}</SelectItem>
+                    {categories.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        <CategoryBadge name={c.name} />
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="filtro-mobile-moneda" className={LABEL_CLASS}>
+                  Moneda
+                </Label>
+                <Select
+                  value={query.currency}
+                  onValueChange={(v) => go({ currency: v as QueryCurrency | "all" })}
+                >
+                  <SelectTrigger id="filtro-mobile-moneda" className="h-11 w-full">
+                    <SelectValue>{query.currency === "all" ? TODAS : query.currency}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CURRENCY_OPTIONS.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option === "all" ? TODAS : option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label
+                  id="filtro-mobile-periodo-label"
+                  htmlFor="filtro-mobile-periodo"
+                  className={LABEL_CLASS}
+                >
+                  Período
+                </Label>
+                <Popover onOpenChange={handlePeriodoOpenChange}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="filtro-mobile-periodo"
+                      type="button"
+                      variant="outline"
+                      aria-label={`Período: ${rangoLabel(query.from, query.to)}`}
+                      className={cn(
+                        "h-11 w-full justify-start font-normal",
+                        !query.from && !query.to && "text-muted-foreground",
+                      )}
+                    >
+                      <CalendarIcon />
+                      {rangoLabel(query.from, query.to)}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    className={cn("w-auto p-0 transition-opacity", pending && "opacity-60")}
+                    aria-busy={pending}
+                    aria-labelledby="filtro-mobile-periodo-label"
+                    align="start"
+                  >
+                    <Calendar
+                      mode="range"
+                      locale={es}
+                      captionLayout="dropdown"
+                      startMonth={CALENDAR_START_MONTH}
+                      endMonth={CALENDAR_END_MONTH}
+                      defaultMonth={draft?.from ?? draft?.to}
+                      selected={draft}
+                      onSelect={handleCalendarSelect}
+                    />
+                    {(draft?.from || draft?.to) && (
+                      <div className="flex justify-end border-t p-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-11"
+                          onClick={() => {
+                            setDraft(undefined)
+                            go(rangeToPatch(undefined))
+                          }}
+                        >
+                          Borrar rango
+                        </Button>
+                      </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+            <SheetFooter className="flex-row justify-end border-t">
+              {hayFiltrosActivos(query) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-11"
+                  onClick={() => {
+                    limpiar()
+                    setMobileFiltersOpen(false)
+                  }}
+                >
+                  Limpiar
+                </Button>
+              )}
+              <SheetClose asChild>
+                <Button type="button" className="h-11">
+                  Listo
+                </Button>
+              </SheetClose>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
+      </div>
+
+      <div className={cn(FIELD_WIDTH.category, "hidden space-y-1.5 md:block")}>
         <Label htmlFor="filtro-categoria" className={LABEL_CLASS}>
           Categoría
         </Label>
@@ -529,7 +701,7 @@ export function MovementFilters({ basePath, query, categories }: Props) {
           no hay motivo para gastar el ancho que cuesta un segmentado. Misma
           estructura que Categoría, envoltorio incluido: ver el comentario de
           ese div. */}
-      <div className={cn(FIELD_WIDTH.currency, "space-y-1.5")}>
+      <div className={cn(FIELD_WIDTH.currency, "hidden space-y-1.5 md:block")}>
         <Label htmlFor="filtro-moneda" className={LABEL_CLASS}>
           Moneda
         </Label>
@@ -567,7 +739,7 @@ export function MovementFilters({ basePath, query, categories }: Props) {
         (clickearlo de nuevo). Eso se mapea a "all" y no se descarta: apagar el
         estado que estaba puesto es exactamente pedir "todos".
       */}
-      <div className={cn(FIELD_WIDTH.status, "space-y-1.5")}>
+      <div className={cn(FIELD_WIDTH.status, "hidden space-y-1.5 md:block")}>
         <Label id="filtro-estado-label" className={LABEL_CLASS}>
           Estado
         </Label>
@@ -589,7 +761,7 @@ export function MovementFilters({ basePath, query, categories }: Props) {
         </ToggleGroup>
       </div>
 
-      <div className={cn(FIELD_WIDTH.period, "space-y-1.5")}>
+      <div className={cn(FIELD_WIDTH.period, "hidden space-y-1.5 md:block")}>
         {/* Id propio en el Label: hace falta como blanco de `aria-labelledby`
             más abajo (hallazgo D). El `htmlFor` se deja como estaba, no
             estorba — con `aria-labelledby` puesto en el botón, el accname
@@ -692,7 +864,12 @@ export function MovementFilters({ basePath, query, categories }: Props) {
       </div>
 
       {hayFiltrosActivos(query) && (
-        <Button type="button" variant="ghost" onClick={limpiar} className="text-muted-foreground">
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={limpiar}
+          className="hidden text-muted-foreground md:inline-flex"
+        >
           <XIcon />
           Limpiar
         </Button>

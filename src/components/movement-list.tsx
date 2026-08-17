@@ -14,7 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { DeleteMovementButton } from "@/components/delete-movement-button"
-import { InstallmentTableRows } from "@/components/installment-rows"
+import { InstallmentRows, InstallmentTableRows } from "@/components/installment-rows"
 import { MovementFormDialog } from "@/components/movement-form-dialog"
 import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
@@ -55,6 +55,85 @@ function MovementTableHeader() {
   )
 }
 
+function MovementCards({
+  movements,
+  categories,
+  categoryName,
+  today,
+  expanded,
+  toggle,
+}: {
+  movements: MovementWithInstallments[]
+  categories: Category[]
+  categoryName: Map<string, string>
+  today: IsoDate
+  expanded: Set<string>
+  toggle: (id: string) => void
+}) {
+  return (
+    <div className="space-y-2 md:hidden">
+      {movements.map((m) => {
+        const { status, pendingCount, overdueCount } = summarizeMovementStatus(m.installments, today)
+        const currency = assertCurrency(m.currency)
+        const isOpen = expanded.has(m.id)
+        const categoria = m.categoryId ? categoryName.get(m.categoryId) : undefined
+        const detailsId = `cuotas-${m.id}`
+
+        return (
+          <article key={m.id} aria-label={m.description} className="rounded-lg border border-border bg-background p-3">
+            <button
+              type="button"
+              className="flex min-h-11 w-full items-start justify-between gap-3 text-left"
+              aria-label={`${isOpen ? "Ocultar" : "Ver"} cuotas de ${m.description}`}
+              aria-expanded={isOpen}
+              aria-controls={detailsId}
+              onClick={() => toggle(m.id)}
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-medium text-foreground">{m.description}</span>
+                <span className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {formatIsoForDisplay(m.date)}
+                  {m.installments.length > 1 && <span>· {m.installments.length} cuotas</span>}
+                </span>
+              </span>
+              <span className="shrink-0 text-right tabular-nums font-medium text-foreground">
+                {formatMoney(m.amountCents, currency)}
+              </span>
+            </button>
+
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span>{categoria ? <CategoryBadge name={categoria} /> : "—"}</span>
+              {status === "overdue" && (
+                <StatusBadge status="overdue">{overdueCount} vencida(s)</StatusBadge>
+              )}
+              {status === "pending" && (
+                <StatusBadge status="pending">{pendingCount} pendiente(s)</StatusBadge>
+              )}
+              {status === "paid" && <StatusBadge status="paid">Pagado</StatusBadge>}
+            </div>
+
+            {isOpen && (
+              <div id={detailsId} className="mt-3 border-t pt-1">
+                <InstallmentRows rows={m.installments} currency={currency} today={today} />
+                <div className="mt-2 flex items-center gap-1 border-t pt-2">
+                  <MovementFormDialog
+                    kind={assertInstallmentMovementKind(m.kind)}
+                    categories={categories}
+                    suggestedRate={null}
+                    today={today}
+                    movement={m}
+                  />
+                  <DeleteMovementButton id={m.id} description={m.description} />
+                </div>
+              </div>
+            )}
+          </article>
+        )
+      })}
+    </div>
+  )
+}
+
 export function MovementList({ movements, categories, today, emptyMessage }: Props) {
   const categoryName = new Map(categories.map((c) => [c.id, c.name]))
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -73,10 +152,12 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
   }
 
   return (
-    <Table>
-      <MovementTableHeader />
-      <TableBody>
-        {movements.map((m) => {
+    <>
+      <div className="hidden md:block">
+        <Table>
+          <MovementTableHeader />
+          <TableBody>
+            {movements.map((m) => {
           // El mismo cálculo que usa el filtro de estado de esta pantalla: el
           // badge y el filtro no pueden discrepar sobre qué está vencido.
           const { status, pendingCount, overdueCount } = summarizeMovementStatus(
@@ -87,8 +168,8 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
           const isOpen = expanded.has(m.id)
           const categoria = m.categoryId ? categoryName.get(m.categoryId) : undefined
 
-          return (
-            <Fragment key={m.id}>
+              return (
+                <Fragment key={m.id}>
               {/* La fila entera es el disparador, pero el teclado necesita un
                   control real: sin `tabIndex`/`onKeyDown` las cuotas de cada
                   movimiento eran inalcanzables sin mouse. `role="button"` no
@@ -178,11 +259,21 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
                   </TableRow>
                 </>
               )}
-            </Fragment>
-          )
-        })}
-      </TableBody>
-    </Table>
+                </Fragment>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </div>
+      <MovementCards
+        movements={movements}
+        categories={categories}
+        categoryName={categoryName}
+        today={today}
+        expanded={expanded}
+        toggle={toggle}
+      />
+    </>
   )
 }
 

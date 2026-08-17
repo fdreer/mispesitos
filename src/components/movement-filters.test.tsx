@@ -600,4 +600,15 @@ describe("MovementFilters", () => {
 
     expect(screen.getByRole("dialog", { name: "Período" })).toBeTruthy()
   })
+
+  it("en móvil agrupa los filtros secundarios en un panel y conserva cuántos están activos", () => {
+    montar({ categoryId: "cat-2", from: "2026-03-01" })
+
+    fireEvent.click(screen.getByRole("button", { name: "Filtros (2)" }))
+
+    const panel = screen.getByRole("dialog", { name: "Filtros" })
+    expect(panel.textContent).toContain("Categoría")
+    expect(panel.textContent).toContain("Moneda")
+    expect(panel.textContent).toContain("Período")
+  })
 })

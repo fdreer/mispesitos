@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 
 import { MovementList } from "@/components/movement-list"
 import type { MovementWithInstallments } from "@/server/queries"
@@ -105,7 +105,7 @@ describe("MovementList", () => {
     )
 
     // Desplegar: la fila del movimiento es la que abre las cuotas.
-    fireEvent.click(screen.getByText("Proyecto"))
+    fireEvent.click(within(container.querySelector("table")!).getByText("Proyecto"))
 
     const filas = [...container.querySelectorAll("tbody tr")]
     // Movimiento + dos cuotas + la fila de "Borrar".
@@ -150,7 +150,7 @@ describe("MovementList", () => {
       />,
     )
 
-    fireEvent.click(screen.getByText("Proyecto"))
+    fireEvent.click(within(container.querySelector("table")!).getByText("Proyecto"))
 
     const filas = [...container.querySelectorAll("tbody tr")]
     expect(celdas(filas[1])[2]).toBe("Cuota 1 · vencida")
@@ -163,7 +163,7 @@ describe("MovementList", () => {
    * cuotas desplegadas: es una acción del movimiento, no de la tabla.
    */
   it("editar abre el formulario con el movimiento ya cargado", () => {
-    render(
+    const { container } = render(
       <MovementList
         movements={[MOVIMIENTO]}
         categories={CATEGORIAS}
@@ -174,11 +174,38 @@ describe("MovementList", () => {
 
     expect(screen.queryByRole("button", { name: "Editar" })).toBeNull()
 
-    fireEvent.click(screen.getByText("Proyecto"))
-    fireEvent.click(screen.getByRole("button", { name: "Editar" }))
+    const tabla = within(container.querySelector("table")!)
+    fireEvent.click(tabla.getByText("Proyecto"))
+    fireEvent.click(tabla.getByRole("button", { name: "Editar" }))
 
     expect(screen.getByRole("dialog").textContent).toContain("Editar ingreso")
     expect(screen.getByLabelText<HTMLInputElement>("Descripción").value).toBe("Proyecto")
     expect(screen.getByLabelText<HTMLInputElement>("Importe").value).toBe("2000,00")
+  })
+
+  it("en móvil resume el movimiento en una tarjeta y despliega sus cuotas", () => {
+    render(
+      <MovementList
+        movements={[MOVIMIENTO]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="vacío"
+      />,
+    )
+
+    const tarjeta = screen.getByRole("article", { name: "Proyecto" })
+    expect((tarjeta.textContent ?? "").replace(/ /g, " ")).toContain("$ 2.000,00")
+    expect(tarjeta.textContent).toContain("11/08/2026")
+    expect(tarjeta.textContent).toContain("Freelance")
+    expect(tarjeta.textContent).toContain("2 cuotas")
+
+    const desplegar = screen.getByRole("button", { name: "Ver cuotas de Proyecto" })
+    expect(desplegar.getAttribute("aria-expanded")).toBe("false")
+
+    fireEvent.click(desplegar)
+
+    expect(desplegar.getAttribute("aria-expanded")).toBe("true")
+    expect(within(tarjeta).getByText(/Cuota\s+1/)).toBeTruthy()
+    expect(within(tarjeta).getByRole("button", { name: "Marcar pagada" })).toBeTruthy()
   })
 })
