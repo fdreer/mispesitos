@@ -397,8 +397,10 @@ export function MovementForm({
         <div className="space-y-2">
           <p className="text-sm font-medium">Vencimientos</p>
           {rows.map((row, index) => (
-            <div key={index} className="flex items-center gap-2">
-              <span className="text-muted-foreground w-8 text-sm tabular-nums">{index + 1}</span>
+            <div key={index} className="flex flex-wrap items-center gap-2">
+              <span className="text-muted-foreground w-8 shrink-0 text-sm tabular-nums">
+                {index + 1}
+              </span>
               {/* El que viaja: centavos, el formato que espera la acción. Vacío
                   si la fila todavía no es un número — así el servidor rechaza
                   con su propio mensaje en vez de recibir texto suelto. */}
@@ -413,13 +415,21 @@ export function MovementForm({
                 onChange={(e) => updateRow(index, { amount: e.target.value })}
                 aria-label={`Importe de la cuota ${index + 1}`}
                 aria-invalid={row.amount !== "" && installmentCents[index] === null}
+                className="min-w-0 flex-1 basis-24"
               />
-              <DateField
-                hiddenName="installmentDueDate"
-                value={row.dueDate}
-                onChange={(next) => updateRow(index, { dueDate: next })}
-                ariaLabel={`Vencimiento de la cuota ${index + 1}: ${formatIsoForDisplay(row.dueDate)}`}
-              />
+              {/* Ancho propio (no el `w-full` del botón sin envolver): en la
+                  fila `flex-wrap`, sin este div el botón competía por el mismo
+                  espacio que el importe y desbordaba el formulario en mobile.
+                  Acá abajo del ancho de `sm` pasa a su propia línea completa;
+                  de `sm` para arriba comparte fila con margen de sobra. */}
+              <div className="w-full sm:w-auto sm:flex-1">
+                <DateField
+                  hiddenName="installmentDueDate"
+                  value={row.dueDate}
+                  onChange={(next) => updateRow(index, { dueDate: next })}
+                  ariaLabel={`Vencimiento de la cuota ${index + 1}: ${formatIsoForDisplay(row.dueDate)}`}
+                />
+              </div>
             </div>
           ))}
           <p className={sumMatches ? "text-muted-foreground text-xs" : "text-destructive text-xs"}>
