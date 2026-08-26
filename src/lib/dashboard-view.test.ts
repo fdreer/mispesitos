@@ -69,7 +69,102 @@ describe("buildDashboardView", () => {
     // La cuota 2 todavía no venció, pero su movimiento sí: el enlace tiene que
     // llevar a la lista donde el movimiento aparece, o deja al usuario en una
     // lista vacía.
-    expect(view.upcoming.map((u) => u.status)).toEqual(["overdue", "overdue"])
+    expect(view.upcomingPayments.map((u) => u.status)).toEqual(["overdue", "overdue"])
+  })
+
+  it("separa los pagos impagos del mes actual y del mes siguiente", () => {
+    const pending = [
+      {
+        id: "exp-overdue",
+        number: 1,
+        dueDate: "2026-07-31" as const,
+        amountCents: 10_000,
+        movementId: "mov-overdue",
+        description: "Vencido",
+        currency: "ARS",
+        rate: "1",
+        kind: "expense",
+      },
+      {
+        id: "exp-current",
+        number: 1,
+        dueDate: "2026-08-31" as const,
+        amountCents: 100,
+        movementId: "mov-current",
+        description: "Este mes en dólares",
+        currency: "USD",
+        rate: "1200",
+        kind: "expense",
+      },
+      {
+        id: "exp-next",
+        number: 1,
+        dueDate: "2026-09-30" as const,
+        amountCents: 30_000,
+        movementId: "mov-next",
+        description: "Mes siguiente",
+        currency: "ARS",
+        rate: "1",
+        kind: "expense",
+      },
+      {
+        id: "income-current",
+        number: 1,
+        dueDate: "2026-08-20" as const,
+        amountCents: 40_000,
+        movementId: "mov-income",
+        description: "Cobro",
+        currency: "ARS",
+        rate: "1",
+        kind: "income",
+      },
+    ]
+
+    const view = buildDashboardView({ ...BASE, pending })
+
+    expect(view.paymentsThisMonth).toEqual({ arsCents: 130_000, count: 2, overdueCount: 1 })
+    expect(view.paymentsNextMonth).toEqual({ arsCents: 30_000, count: 1 })
+  })
+
+  it("separa vencimientos a pagar y a cobrar hasta el fin del mes siguiente", () => {
+    const row = {
+      number: 1,
+      amountCents: 10_000,
+      currency: "ARS",
+      rate: "1",
+    }
+    const view = buildDashboardView({
+      ...BASE,
+      pending: [
+        {
+          ...row,
+          id: "expense-next",
+          dueDate: "2026-09-30",
+          movementId: "mov-expense",
+          description: "A pagar",
+          kind: "expense",
+        },
+        {
+          ...row,
+          id: "income-current",
+          dueDate: "2026-08-20",
+          movementId: "mov-income",
+          description: "A cobrar",
+          kind: "income",
+        },
+        {
+          ...row,
+          id: "outside-window",
+          dueDate: "2026-10-01",
+          movementId: "mov-later",
+          description: "Más adelante",
+          kind: "expense",
+        },
+      ],
+    })
+
+    expect(view.upcomingPayments.map((item) => item.id)).toEqual(["expense-next"])
+    expect(view.upcomingReceivables.map((item) => item.id)).toEqual(["income-current"])
   })
 
   it("consolida la tenencia en dólares al TC de venta", () => {
@@ -224,7 +319,7 @@ describe("buildDashboardView", () => {
     const withinLimit = Array.from({ length: 25 }, (_, i) => ({
       id: `ins-${i}`,
       number: i + 1,
-      dueDate: "2026-08-15",
+      dueDate: "2026-09-30",
       amountCents: 1_000,
       movementId: `mov-${i}`,
       description: `Cuota ${i}`,
@@ -242,7 +337,7 @@ describe("buildDashboardView", () => {
         {
           id: "ins-far",
           number: 1,
-          dueDate: "2026-09-11", // un día después del límite (2026-09-10).
+          dueDate: "2026-10-01", // primer día fuera del mes siguiente.
           amountCents: 1_000,
           movementId: "mov-far",
           description: "Cuota lejana",
@@ -254,8 +349,8 @@ describe("buildDashboardView", () => {
       ],
     })
 
-    expect(view.upcoming).toHaveLength(20)
-    expect(view.upcoming.some((u) => u.id === "ins-far")).toBe(false)
+    expect(view.upcomingPayments).toHaveLength(20)
+    expect(view.upcomingPayments.some((u) => u.id === "ins-far")).toBe(false)
   })
 
   it("arma los vencimientos aunque el movimiento no esté en la lista de movimientos", () => {
@@ -280,8 +375,8 @@ describe("buildDashboardView", () => {
       ],
     })
 
-    expect(view.upcoming).toHaveLength(1)
-    expect(view.upcoming[0].status).toBe("pending")
+    expect(view.upcomingPayments).toHaveLength(1)
+    expect(view.upcomingPayments[0].status).toBe("pending")
   })
 
   /**

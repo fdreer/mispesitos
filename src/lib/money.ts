@@ -31,8 +31,22 @@ const FORMATTERS: Record<Currency, Intl.NumberFormat> = {
   }),
 }
 
-export function formatMoney(cents: number, currency: Currency): string {
-  return FORMATTERS[currency].format(cents / 100)
+const ZERO_DECIMAL_FORMATTERS: Record<Currency, Intl.NumberFormat> = {
+  ARS: new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }),
+  USD: new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }),
+}
+
+export function formatMoney(cents: number, currency: Currency, fractionDigits: 0 | 2 = 2): string {
+  const formatter = fractionDigits === 0 ? ZERO_DECIMAL_FORMATTERS[currency] : FORMATTERS[currency]
+  return formatter.format(cents / 100)
 }
 
 /**

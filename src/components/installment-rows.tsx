@@ -87,11 +87,14 @@ export function InstallmentRows({ rows, currency, today }: Props) {
   return (
     <ul className="mt-2 space-y-1 border-t pt-2">
       {rows.map((row) => (
-        <li key={row.id} className="flex items-center justify-between gap-2 text-sm">
+        <li
+          key={row.id}
+          className="flex flex-col items-start justify-between gap-2 text-sm sm:flex-row sm:items-center"
+        >
           <span className="text-muted-foreground">
             <CuotaLabel row={row} today={today} /> · vence {formatIsoForDisplay(row.dueDate)}
           </span>
-          <span className="flex items-center gap-2">
+          <span className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-start">
             <span className="tabular-nums">{formatMoney(row.amountCents, currency)}</span>
             <InstallmentPaidButton id={row.id} paid={row.paid} />
           </span>

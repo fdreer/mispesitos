@@ -118,8 +118,11 @@ type DashboardView = {
   consolidatedArsCents: number | null
   monthIncomeArsCents: number
   monthExpenseArsCents: number
+  paymentsThisMonth: { arsCents: number; count: number; overdueCount: number }
+  paymentsNextMonth: { arsCents: number; count: number }
   projection: { month: string; arsCents: number }[] | null
-  upcoming: UpcomingItem[]
+  upcomingPayments: UpcomingItem[]
+  upcomingReceivables: UpcomingItem[]
   pie: { name: string; arsCents: number }[]
   bars: { month: string; incomeArsCents: number; expenseArsCents: number }[]
   todayRate: number | null
@@ -161,6 +164,9 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
     todayRate === null ? null : balances.arsCents + convertToArs(balances.usdCents, todayRate)
 
   const thisMonth = monthKey(today)
+  const nextMonth = monthKey(addMonthsClamped(today, 1))
+  const firstDayNextMonth = `${nextMonth}-01`
+  const firstDayAfterNextMonth = `${monthKey(addMonthsClamped(today, 2))}-01`
 
   // El MISMO corte que hace `computeBalances`, y por el mismo motivo: lo pagado
   // antes del saldo inicial ya está adentro de ese saldo. Sin este filtro, con
@@ -168,6 +174,12 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
   // saldo de al lado no tenía en cuenta.
   const monthPaid = input.paid.filter(
     (p) => p.paidDate >= settings.initialBalanceDate && monthKey(p.paidDate) === thisMonth,
+  )
+  const paymentsThisMonth = input.pending.filter(
+    (p) => p.kind === "expense" && p.dueDate < firstDayNextMonth,
+  )
+  const paymentsNextMonth = input.pending.filter(
+    (p) => p.kind === "expense" && monthKey(p.dueDate) === nextMonth,
   )
 
   const projectionStart = projectionStartArsCents(balances, todayRate)
@@ -203,11 +215,9 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
     input.pending.filter((p) => isOverdue(p.dueDate, today)).map((p) => p.movementId),
   )
 
-  // Vencimientos: lo atrasado más lo que vence dentro de un mes.
-  const limit = addMonthsClamped(today, 1)
+  // Vencimientos: lo atrasado más los meses actual y siguiente completos.
   const upcoming: UpcomingItem[] = input.pending
-    .filter((p) => p.dueDate <= limit)
-    .slice(0, MAX_UPCOMING)
+    .filter((p) => p.dueDate < firstDayAfterNextMonth)
     .map((p) => ({
       id: p.id,
       number: p.number,
@@ -251,8 +261,24 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
     monthExpenseArsCents: monthPaid
       .filter((p) => p.kind === "expense")
       .reduce((a, p) => a + toArs(p.amountCents, p.currency, p.rate), 0),
+    paymentsThisMonth: {
+      arsCents: paymentsThisMonth.reduce(
+        (total, payment) => total + toArs(payment.amountCents, payment.currency, payment.rate),
+        0,
+      ),
+      count: paymentsThisMonth.length,
+      overdueCount: paymentsThisMonth.filter((payment) => isOverdue(payment.dueDate, today)).length,
+    },
+    paymentsNextMonth: {
+      arsCents: paymentsNextMonth.reduce(
+        (total, payment) => total + toArs(payment.amountCents, payment.currency, payment.rate),
+        0,
+      ),
+      count: paymentsNextMonth.length,
+    },
     projection,
-    upcoming,
+    upcomingPayments: upcoming.filter((item) => item.kind === "expense").slice(0, MAX_UPCOMING),
+    upcomingReceivables: upcoming.filter((item) => item.kind === "income").slice(0, MAX_UPCOMING),
     pie,
     bars,
     todayRate,

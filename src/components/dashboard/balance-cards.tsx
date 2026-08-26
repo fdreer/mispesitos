@@ -7,12 +7,12 @@ type Props = {
   usdCents: number
   consolidatedArsCents: number | null
   rate: number | null
-  monthIncomeArsCents: number
-  monthExpenseArsCents: number
+  paymentsThisMonth: { arsCents: number; count: number; overdueCount: number }
+  paymentsNextMonth: { arsCents: number; count: number }
 }
 
 /**
- * El encabezado de las cuatro tarjetas: siempre el mismo título atenuado, y el
+ * El encabezado de las cinco tarjetas: siempre el mismo título atenuado, y el
  * ícono de ayuda sólo en las que tienen algo que aclarar. Una sola definición
  * para que los cuatro títulos no puedan separarse en tamaño o color.
  */
@@ -28,11 +28,11 @@ export function BalanceHeader({ title, hint }: { title: string; hint?: React.Rea
 }
 
 /**
- * El número, con el mismo tamaño y la misma alineación en las cuatro. Es lo
+ * El número, con el mismo tamaño y la misma alineación en las cinco. Es lo
  * único que se viene a mirar acá, así que es lo único que se lee de lejos.
  */
 export function BalanceAmount({ children }: { children: React.ReactNode }) {
-  return <p className="text-xl tabular-nums">{children}</p>
+  return <p className="text-xl tabular-nums whitespace-nowrap">{children}</p>
 }
 
 /** La línea de contexto: un solo renglón, siempre debajo del número. */
@@ -45,21 +45,19 @@ export function BalanceCards({
   usdCents,
   consolidatedArsCents,
   rate,
-  monthIncomeArsCents,
-  monthExpenseArsCents,
+  paymentsThisMonth,
+  paymentsNextMonth,
 }: Props) {
-  const diff = monthIncomeArsCents - monthExpenseArsCents
-
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Card size="sm">
+    <div className="grid gap-3 sm:grid-cols-2 lg:max-w-5xl lg:grid-cols-5">
+      <Card size="sm" className="gap-2 py-3">
         <BalanceHeader title="Saldo en pesos" />
         <CardContent>
-          <BalanceAmount>{formatMoney(arsCents, "ARS")}</BalanceAmount>
+          <BalanceAmount>{formatMoney(arsCents, "ARS", 0)}</BalanceAmount>
         </CardContent>
       </Card>
 
-      <Card size="sm">
+      <Card size="sm" className="gap-2 py-3">
         {/*
          * A propósito distinto de la "Tenencia" de /cambios (usdPosition):
          * este saldo sale de computeBalances y puede quedar negativo si se
@@ -73,43 +71,44 @@ export function BalanceCards({
           hint="Puede quedar negativo si gastaste más dólares de los que tenías cargados. No es lo mismo que la tenencia de Cambios, que nunca baja de cero."
         />
         <CardContent>
-          <BalanceAmount>{formatMoney(usdCents, "USD")}</BalanceAmount>
+          <BalanceAmount>{formatMoney(usdCents, "USD", 0)}</BalanceAmount>
         </CardContent>
       </Card>
 
-      <Card size="sm">
+      <Card size="sm" className="gap-2 py-3">
         <BalanceHeader title="Total consolidado" />
         <CardContent>
           <BalanceAmount>
-            {consolidatedArsCents === null ? "—" : formatMoney(consolidatedArsCents, "ARS")}
+            {consolidatedArsCents === null ? "—" : formatMoney(consolidatedArsCents, "ARS", 0)}
           </BalanceAmount>
-          <BalanceNote>{rate ? `dólar a ${rate.toFixed(2)}` : "sin cotización de hoy"}</BalanceNote>
+          <BalanceNote>{rate ? `dólar a ${Math.round(rate).toLocaleString("es-AR")}` : "sin cotización de hoy"}</BalanceNote>
         </CardContent>
       </Card>
 
-      <Card size="sm">
-        {/*
-         * El título dice qué mide, porque en esta pantalla conviven dos
-         * definiciones distintas de "el mes": acá es CAJA —lo que entró y
-         * salió de verdad, cuota por cuota, el día que se pagó— y en la torta
-         * y las barras de abajo es el importe total del movimiento en el mes
-         * de su fecha. Un televisor en 12 cuotas cargado este mes vale
-         * $1.200.000 allá y $100.000 acá.
-         */}
+      <Card size="sm" className="gap-2 py-3">
         <BalanceHeader
-          title="Cobrado y pagado este mes"
-          hint="Cuenta cada cuota en el mes en que la marcaste pagada, no en el mes en que cargaste el movimiento. Los gráficos de abajo usan el criterio contrario."
+          title="Impagos este mes"
+          hint="Incluye egresos vencidos de meses anteriores y los que vencen durante este mes. Los importes en dólares usan el tipo de cambio guardado en cada movimiento."
         />
         <CardContent>
-          {/*
-           * Sin verde ni rojo: en este sistema el color señala estado, no
-           * importe, y el signo ya dice si el mes cerró para arriba o para
-           * abajo. El detalle de cuánto entró y cuánto salió está debajo.
-           */}
-          <BalanceAmount>{formatMoney(diff, "ARS")}</BalanceAmount>
+          <BalanceAmount>{formatMoney(paymentsThisMonth.arsCents, "ARS", 0)}</BalanceAmount>
           <BalanceNote>
-            {formatMoney(monthIncomeArsCents, "ARS")} cobrados ·{" "}
-            {formatMoney(monthExpenseArsCents, "ARS")} pagados
+            {paymentsThisMonth.count} {paymentsThisMonth.count === 1 ? "concepto" : "conceptos"}
+            {paymentsThisMonth.overdueCount > 0 &&
+              ` · ${paymentsThisMonth.overdueCount} ${paymentsThisMonth.overdueCount === 1 ? "vencido" : "vencidos"}`}
+          </BalanceNote>
+        </CardContent>
+      </Card>
+
+      <Card size="sm" className="gap-2 py-3">
+        <BalanceHeader
+          title="A pagar el mes próximo"
+          hint="Incluye sólo egresos pendientes cuyo vencimiento cae en el próximo mes calendario. Los importes en dólares usan el tipo de cambio guardado en cada movimiento."
+        />
+        <CardContent>
+          <BalanceAmount>{formatMoney(paymentsNextMonth.arsCents, "ARS", 0)}</BalanceAmount>
+          <BalanceNote>
+            {paymentsNextMonth.count} {paymentsNextMonth.count === 1 ? "concepto" : "conceptos"}
           </BalanceNote>
         </CardContent>
       </Card>

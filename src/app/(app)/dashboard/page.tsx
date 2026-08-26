@@ -129,11 +129,15 @@ async function DashboardBody() {
         usdCents={view.usdCents}
         consolidatedArsCents={view.consolidatedArsCents}
         rate={view.todayRate}
-        monthIncomeArsCents={view.monthIncomeArsCents}
-        monthExpenseArsCents={view.monthExpenseArsCents}
+        paymentsThisMonth={view.paymentsThisMonth}
+        paymentsNextMonth={view.paymentsNextMonth}
       />
 
-      <Upcoming items={view.upcoming} today={today} />
+      <Upcoming
+        payments={view.upcomingPayments}
+        receivables={view.upcomingReceivables}
+        today={today}
+      />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card size="sm">

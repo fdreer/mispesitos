@@ -6,27 +6,30 @@ import type { UpcomingItem } from "@/lib/dashboard-view"
 import type { IsoDate } from "@/lib/dates"
 import { BASE_PATHS } from "@/lib/movement-routes"
 
-export function Upcoming({ items, today }: { items: UpcomingItem[]; today: IsoDate }) {
+function PendingCard({
+  title,
+  items,
+  today,
+}: {
+  title: string
+  items: UpcomingItem[]
+  today: IsoDate
+}) {
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle className="text-base">Vencimientos</CardTitle>
+        <CardTitle className="text-base">{title}</CardTitle>
       </CardHeader>
       <CardContent>
         {items.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No tenés nada pendiente. Bien ahí.</p>
+          <p className="text-muted-foreground text-sm">No tenés {title.toLocaleLowerCase()}.</p>
         ) : (
           <ul className="divide-y">
             {items.map((item) => {
               return (
                 <li key={item.id} className="py-2">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">
-                      {item.description}{" "}
-                      <span className="text-muted-foreground font-normal">
-                        ({item.kind === "income" ? "a cobrar" : "a pagar"})
-                      </span>
-                    </p>
+                    <p className="text-sm font-medium">{item.description}</p>
                     <Link
                       href={`${BASE_PATHS[item.kind]}?status=${item.status}`}
                       className="text-muted-foreground shrink-0 text-xs underline"
@@ -46,5 +49,22 @@ export function Upcoming({ items, today }: { items: UpcomingItem[]; today: IsoDa
         )}
       </CardContent>
     </Card>
+  )
+}
+
+export function Upcoming({
+  payments,
+  receivables,
+  today,
+}: {
+  payments: UpcomingItem[]
+  receivables: UpcomingItem[]
+  today: IsoDate
+}) {
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <PendingCard title="Pagos pendientes" items={payments} today={today} />
+      <PendingCard title="Cobros pendientes" items={receivables} today={today} />
+    </div>
   )
 }
