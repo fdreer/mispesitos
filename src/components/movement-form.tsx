@@ -9,6 +9,7 @@ import type { ActionResult } from "@/server/actions/result"
 
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -64,7 +65,7 @@ function DateField({
             type="button"
             variant="outline"
             aria-label={ariaLabel}
-            className="w-full justify-start font-normal"
+            className="h-11 w-full justify-start font-normal"
           >
             <CalendarIcon />
             {formatIsoForDisplay(value)}
@@ -169,6 +170,7 @@ export function MovementForm({
     movement ? assertCurrency(movement.currency) : "ARS",
   )
   const [date, setDate] = useState(movement?.date ?? today)
+  const [settled, setSettled] = useState(false)
   const [count, setCount] = useState(movement?.installments.length ?? 1)
   const [rows, setRows] = useState<Row[]>(
     movement
@@ -225,6 +227,7 @@ export function MovementForm({
   // sin esto, borrar el importe de una cuota y que otra tuviera el sobrante
   // dejaba enviar un plan con una cuota sin número.
   const sumMatches = rowsSum === totalCents && installmentCents.every((c) => c !== null)
+  const settledLabel = kind === "income" ? "Cobrado" : "Pagado"
 
   // Mismo patrón: limpiar el formulario es un ajuste de estado disparado por
   // el resultado de la Server Action, no un efecto sobre un sistema externo.
@@ -254,7 +257,7 @@ export function MovementForm({
   }
 
   return (
-    <form action={action} className="space-y-4 rounded-lg border p-4">
+    <form action={action} className="space-y-5 rounded-xl border border-border/70 bg-card/40 p-4 sm:p-5">
       {/* Sólo editando. `updateMovement` lo valida como UUID y filtra además
           por usuario, igual que borrar: que el id viaje por el formulario no
           lo hace más confiable que cualquier otro campo. */}
@@ -262,6 +265,7 @@ export function MovementForm({
       <input type="hidden" name="kind" value={kind} />
       <input type="hidden" name="currency" value={currency} />
       <input type="hidden" name="amountCents" value={amount} />
+      {!movement && <input type="hidden" name="settled" value={settled ? "true" : "false"} />}
       {/*
        * Un solo campo `rate` a la vez: en ARS va oculto en "1", en USD es el
        * visible más abajo. Dos campos con el mismo `name` haría que
@@ -271,8 +275,8 @@ export function MovementForm({
        */}
       {currency === "ARS" && <input type="hidden" name="rate" value="1" />}
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
           <Label htmlFor="description">Descripción</Label>
           <Input
             id="description"
@@ -280,10 +284,11 @@ export function MovementForm({
             required
             maxLength={200}
             defaultValue={movement?.description ?? ""}
+            className="h-11"
           />
         </div>
 
-        <div className="space-y-1">
+        <div className="space-y-2">
           <Label htmlFor="categoryId">Categoría</Label>
           {/* Editando arranca en la del movimiento, que puede ser una archivada:
               la lista que llega en ese caso las incluye (ver `MovementList`).
@@ -294,7 +299,7 @@ export function MovementForm({
             required
             defaultValue={movement?.categoryId ?? categories[0]?.id}
           >
-            <SelectTrigger id="categoryId" className="w-full">
+            <SelectTrigger id="categoryId" className="h-11 w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -307,7 +312,7 @@ export function MovementForm({
           </Select>
         </div>
 
-        <div className="space-y-1">
+        <div className="space-y-2">
           <Label htmlFor="date">Fecha</Label>
           <DateField
             id="date"
@@ -318,7 +323,7 @@ export function MovementForm({
           />
         </div>
 
-        <div className="space-y-1">
+        <div className="space-y-2">
           <Label htmlFor="amount">Importe</Label>
           <div className="flex gap-2">
             <Input
@@ -327,12 +332,13 @@ export function MovementForm({
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               required
+              className="h-11"
             />
             <Select
               value={currency}
               onValueChange={(v) => setCurrency(v as "ARS" | "USD")}
             >
-              <SelectTrigger className="w-24">
+              <SelectTrigger className="h-11 w-24">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -344,8 +350,22 @@ export function MovementForm({
         </div>
       </div>
 
+      {!movement && (
+        <div className="flex min-h-11 items-start gap-3 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5">
+          <Checkbox
+            id="settled"
+            aria-label={settledLabel}
+            checked={settled}
+            onCheckedChange={(checked) => setSettled(checked === true)}
+          />
+          <Label htmlFor="settled" className="cursor-pointer items-start gap-1.5 leading-snug">
+            <span className="font-medium">{settledLabel}</span>
+          </Label>
+        </div>
+      )}
+
       {currency === "USD" && (
-        <div className="space-y-1">
+        <div className="space-y-2">
           <Label htmlFor="rateVisible">Tipo de cambio</Label>
           {/* Editando gana el TC con el que se guardó: es el del día de la
               operación, y el sugerido de hoy no tiene nada que ver con ella.
@@ -361,6 +381,7 @@ export function MovementForm({
                 : (suggestedRate ?? "")
             }
             required
+            className="h-11"
           />
           {!movement && (
             <p className="text-muted-foreground text-xs">
@@ -372,8 +393,8 @@ export function MovementForm({
         </div>
       )}
 
-      {kind === "expense" && (
-        <div className="space-y-1">
+      {kind === "expense" && !settled && (
+        <div className="space-y-2">
           <Label htmlFor="count">Cuotas</Label>
           <Input
             id="count"
@@ -388,16 +409,26 @@ export function MovementForm({
             onChange={(e) =>
               setCount(Math.min(MAX_INSTALLMENTS, Math.max(1, Number(e.target.value) || 1)))
             }
-            className="w-24"
+            className="h-11 w-24"
           />
         </div>
       )}
 
-      {totalCents > 0 && (
-        <div className="space-y-2">
+      {totalCents > 0 && settled && (
+        <>
+          <input type="hidden" name="installmentAmount" value={totalCents} />
+          <input type="hidden" name="installmentDueDate" value={date} />
+          <p className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-sm text-primary">
+            {settledLabel} por {formatMoney(totalCents, currency)} en la fecha del movimiento.
+          </p>
+        </>
+      )}
+
+      {totalCents > 0 && !settled && (
+        <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-3 sm:p-4">
           <p className="text-sm font-medium">Vencimientos</p>
           {rows.map((row, index) => (
-            <div key={index} className="flex flex-wrap items-center gap-2">
+            <div key={index} className="flex flex-wrap items-center gap-3">
               <span className="text-muted-foreground w-8 shrink-0 text-sm tabular-nums">
                 {index + 1}
               </span>
@@ -415,7 +446,7 @@ export function MovementForm({
                 onChange={(e) => updateRow(index, { amount: e.target.value })}
                 aria-label={`Importe de la cuota ${index + 1}`}
                 aria-invalid={row.amount !== "" && installmentCents[index] === null}
-                className="min-w-0 flex-1 basis-24"
+                className="h-11 min-w-0 flex-1 basis-24"
               />
               {/* Ancho propio (no el `w-full` del botón sin envolver): en la
                   fila `flex-wrap`, sin este div el botón competía por el mismo
@@ -442,7 +473,7 @@ export function MovementForm({
 
       {state && !state.ok && <p className="text-destructive text-sm">{state.message}</p>}
 
-      <Button type="submit" disabled={pending || !sumMatches || totalCents <= 0}>
+      <Button type="submit" className="h-11 w-full" disabled={pending || !sumMatches || totalCents <= 0}>
         {pending ? "Guardando…" : movement ? "Guardar cambios" : "Guardar"}
       </Button>
     </form>

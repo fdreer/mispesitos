@@ -28,6 +28,11 @@ vi.mock("next/navigation", () => ({
  */
 Element.prototype.hasPointerCapture ??= () => false
 Element.prototype.scrollIntoView ??= () => {}
+global.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
 
 const CATEGORIAS = [
   { id: "cat-1", userId: "u", name: "Supermercado", kind: "expense", archived: false },
@@ -58,6 +63,29 @@ describe("MovementForm", () => {
       'input[type="hidden"][name="installmentDueDate"]',
     )
     expect(vencimiento?.value).toBe("2026-08-20")
+  })
+
+  it.each([
+    { kind: "income" as const, label: "Cobrado" },
+    { kind: "expense" as const, label: "Pagado" },
+  ])("permite marcar un $kind inmediato y oculta las cuotas", ({ kind, label }) => {
+    const { container } = render(
+      <MovementForm kind={kind} categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+    )
+
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
+    const estado = screen.getByRole("checkbox", { name: label })
+
+    fireEvent.click(estado)
+
+    expect(screen.queryByLabelText("Importe de la cuota 1")).toBeNull()
+    expect(screen.queryByLabelText("Cuotas")).toBeNull()
+    expect(container.querySelector<HTMLInputElement>('input[name="settled"]')?.value).toBe("true")
+    expect(
+      [...container.querySelectorAll<HTMLInputElement>('input[name="installmentAmount"]')].map(
+        (input) => input.value,
+      ),
+    ).toEqual(["100000"])
   })
 
   // Las filas de cuota se MUESTRAN en pesos y se ENVÍAN en centavos: son dos

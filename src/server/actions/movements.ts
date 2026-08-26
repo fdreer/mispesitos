@@ -34,6 +34,7 @@ export async function createMovement(
   formData: FormData,
 ): Promise<ActionResult> {
   const user = await requireUser()
+  const settled = formData.get("settled") === "true"
 
   const installments = readInstallments(formData)
   if (installments === null) {
@@ -58,6 +59,9 @@ export async function createMovement(
 
   const input = parsed.data
   const movementId = randomUUID()
+  const installmentsToSave = settled
+    ? [{ amountCents: input.amountCents, dueDate: input.date }]
+    : input.installments
 
   try {
     await withUser(user.id, async (tx) => {
@@ -75,15 +79,15 @@ export async function createMovement(
       })
 
       await tx.insert(installment).values(
-        input.installments.map((cuota, index) => ({
+        installmentsToSave.map((cuota, index) => ({
           id: randomUUID(),
           movementId,
           userId: user.id,
           number: index + 1,
           amountCents: cuota.amountCents,
           dueDate: cuota.dueDate,
-          paid: false,
-          paidDate: null,
+          paid: settled,
+          paidDate: settled ? cuota.dueDate : null,
         })),
       )
     })
