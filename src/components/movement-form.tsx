@@ -171,7 +171,7 @@ export function MovementForm({
   )
   const [date, setDate] = useState(movement?.date ?? today)
   const [settled, setSettled] = useState(false)
-  const [count, setCount] = useState(movement?.installments.length ?? 1)
+  const [countInput, setCountInput] = useState(String(movement?.installments.length ?? 1))
   const [rows, setRows] = useState<Row[]>(
     movement
       ? movement.installments.map((i) => ({
@@ -188,6 +188,13 @@ export function MovementForm({
   const installmentCents = rows.map((r) => parseAmountToCents(r.amount))
 
   const totalCents = parseAmountToCents(amount) ?? 0
+  const parsedCount = Number(countInput)
+  const countValid =
+    /^\d+$/.test(countInput) &&
+    Number.isInteger(parsedCount) &&
+    parsedCount >= 1 &&
+    parsedCount <= MAX_INSTALLMENTS
+  const count = countValid ? parsedCount : 1
 
   /**
    * Regenera el plan de cuotas cuando cambia el total, la cantidad de cuotas
@@ -200,7 +207,7 @@ export function MovementForm({
   // `date` sale siempre de `DateField` —nunca de tipeo libre—, así que
   // siempre es un día real: a diferencia del viejo `<input type="date">`, acá
   // no hay estado intermedio a medio completar que proteger.
-  const planKey = totalCents > 0 ? planKeyOf(totalCents, count, date) : null
+  const planKey = totalCents > 0 && countValid ? planKeyOf(totalCents, count, date) : null
   // Sembrado con el plan que ya está guardado cuando se edita: sin esto el
   // primer render vería `null !== planKey` y regeneraría las cuotas con
   // `buildInstallments`, pisando los vencimientos e importes reales —incluidos
@@ -226,7 +233,11 @@ export function MovementForm({
   // Una fila a medio tipear (`null`) invalida la suma aunque el total dé:
   // sin esto, borrar el importe de una cuota y que otra tuviera el sobrante
   // dejaba enviar un plan con una cuota sin número.
-  const sumMatches = rowsSum === totalCents && installmentCents.every((c) => c !== null)
+  const sumMatches =
+    countValid &&
+    rows.length === count &&
+    rowsSum === totalCents &&
+    installmentCents.every((c) => c !== null)
   const settledLabel = kind === "income" ? "Cobrado" : "Pagado"
 
   // Mismo patrón: limpiar el formulario es un ajuste de estado disparado por
@@ -239,7 +250,7 @@ export function MovementForm({
     // datos se perdieron si algo dejara el diálogo abierto.
     if (!movement) {
       setAmount("")
-      setCount(1)
+      setCountInput("1")
     }
   }
 
@@ -398,19 +409,20 @@ export function MovementForm({
           <Label htmlFor="count">Cuotas</Label>
           <Input
             id="count"
-            type="number"
-            min={1}
-            max={MAX_INSTALLMENTS}
-            value={count}
-            // El clamp va en el estado, no sólo en el atributo `max`: `max`
-            // valida al hacer submit, y las filas se generan al tipear. Sin
-            // esto, escribir 99999 pinta 99.999 filas y cuelga la pestaña
-            // antes de que haya un submit que validar.
-            onChange={(e) =>
-              setCount(Math.min(MAX_INSTALLMENTS, Math.max(1, Number(e.target.value) || 1)))
-            }
+            type="text"
+            inputMode="numeric"
+            maxLength={3}
+            value={countInput}
+            aria-invalid={!countValid}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => setCountInput(e.target.value)}
             className="h-11 w-24"
           />
+          {!countValid && (
+            <p className="text-destructive text-xs" role="alert">
+              Ingresá un número entero entre 1 y {MAX_INSTALLMENTS}.
+            </p>
+          )}
         </div>
       )}
 
@@ -463,11 +475,13 @@ export function MovementForm({
               </div>
             </div>
           ))}
-          <p className={sumMatches ? "text-muted-foreground text-xs" : "text-destructive text-xs"}>
-            Suma de cuotas: {formatMoney(rowsSum, currency)} de{" "}
-            {formatMoney(totalCents, currency)}
-            {!sumMatches && ` — faltan ${formatMoney(totalCents - rowsSum, currency)}`}
-          </p>
+          {countValid && (
+            <p className={sumMatches ? "text-muted-foreground text-xs" : "text-destructive text-xs"}>
+              Suma de cuotas: {formatMoney(rowsSum, currency)} de{" "}
+              {formatMoney(totalCents, currency)}
+              {!sumMatches && ` — faltan ${formatMoney(totalCents - rowsSum, currency)}`}
+            </p>
+          )}
         </div>
       )}
 
