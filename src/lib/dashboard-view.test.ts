@@ -13,7 +13,6 @@ const BASE: DashboardInput = {
   paid: [],
   exchanges: [],
   pending: [],
-  movements: [],
   expenseCategories: [],
   horizonMonths: 6,
   historyMonths: 12,
@@ -26,9 +25,9 @@ describe("buildDashboardView", () => {
       paid: [
         // Anterior al saldo inicial: ya está adentro de esos $1.000, contarlo
         // acá lo contaría dos veces.
-        { paidDate: "2026-08-01", amountCents: 50_000, currency: "ARS", kind: "income", rate: "1" },
+        { paidDate: "2026-08-01", amountCents: 50_000, currency: "ARS", kind: "income", categoryId: null, rate: "1" },
         // Posterior: sí cuenta.
-        { paidDate: "2026-08-07", amountCents: 20_000, currency: "ARS", kind: "income", rate: "1" },
+        { paidDate: "2026-08-07", amountCents: 20_000, currency: "ARS", kind: "income", categoryId: null, rate: "1" },
       ],
     })
 
@@ -203,17 +202,7 @@ describe("buildDashboardView", () => {
           amountCents: 10_000,
           currency: "USD",
           kind: "expense",
-          rate: "1200",
-        },
-      ],
-      movements: [
-        {
-          id: "mov-usd",
-          date: "2026-08-07",
-          kind: "expense",
           categoryId: "cat-1",
-          currency: "USD",
-          amountCents: 10_000,
           rate: "1200",
         },
       ],
@@ -241,7 +230,7 @@ describe("buildDashboardView", () => {
         // vez de `>=`, esta fila saldría de la tarjeta pero seguiría adentro
         // del saldo, y las dos volverían a desincronizarse — el defecto que
         // esta tarea vino a arreglar.
-        { paidDate: "2026-08-05", amountCents: 5_000, currency: "ARS", kind: "income", rate: "1" },
+        { paidDate: "2026-08-05", amountCents: 5_000, currency: "ARS", kind: "income", categoryId: null, rate: "1" },
       ],
     })
 
@@ -249,70 +238,70 @@ describe("buildDashboardView", () => {
     expect(view.arsCents).toBe(100_000 + 5_000)
   })
 
-  it("la torta sólo cuenta gastos del mes actual; las barras excluyen los cambios de divisa", () => {
+  it("la torta y las barras suman cuotas pagadas por su fecha de pago, no el movimiento entero", () => {
     const view = buildDashboardView({
       ...BASE,
-      expenseCategories: [{ id: "cat-1", name: "Comida" }],
-      movements: [
-        // Gasto de este mes: cuenta en la torta y en la barra de agosto.
+      today: "2026-09-10",
+      expenseCategories: [{ id: "cat-1", name: "Electro" }],
+      paid: [
+        // Televisor en 12 cuotas cargado en agosto: sólo cuentan las dos
+        // cuotas pagadas, cada una en su mes de pago, y no el $1.200.000.
+        { paidDate: "2026-08-15", amountCents: 100_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
+        { paidDate: "2026-09-02", amountCents: 100_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
+        // Ingreso cobrado en septiembre: barra de ingresos, no torta.
+        { paidDate: "2026-09-05", amountCents: 50_000, currency: "ARS", kind: "income", categoryId: null, rate: "1" },
+        // Gasto sin categoría pagado este mes.
+        { paidDate: "2026-09-06", amountCents: 7_000, currency: "ARS", kind: "expense", categoryId: null, rate: "1" },
+      ],
+      // Lo impago no es percibido: no entra ni en la torta ni en las barras.
+      pending: [
         {
-          id: "exp-this",
-          date: "2026-08-07",
+          id: "ins-3",
+          number: 3,
+          dueDate: "2026-09-15",
+          amountCents: 100_000,
+          movementId: "mov-tv",
+          description: "Televisor",
+          currency: "ARS",
+          rate: "1",
           kind: "expense",
-          categoryId: "cat-1",
-          currency: "ARS",
-          amountCents: 10_000,
-          rate: "1",
-        },
-        // Ingreso de este mes: no es gasto, no entra en la torta, pero sí en
-        // la barra de ingresos de agosto.
-        {
-          id: "inc-this",
-          date: "2026-08-07",
-          kind: "income",
-          categoryId: null,
-          currency: "ARS",
-          amountCents: 20_000,
-          rate: "1",
-        },
-        // Gasto de julio: no entra en la torta (que sólo mira el mes
-        // actual), pero sí en la barra de julio.
-        {
-          id: "exp-prev",
-          date: "2026-07-07",
-          kind: "expense",
-          categoryId: "cat-1",
-          currency: "ARS",
-          amountCents: 99_000,
-          rate: "1",
-        },
-        // Cambio de divisa: si las barras no lo excluyeran, `bars` llamaría
-        // `assertInstallmentMovementKind("exchange")` y reventaría, porque
-        // no es "income" ni "expense".
-        {
-          id: "exch",
-          date: "2026-08-08",
-          kind: "exchange",
-          categoryId: null,
-          currency: "USD",
-          amountCents: 5_000,
-          rate: "1",
         },
       ],
     })
 
-    expect(view.pie).toEqual([{ name: "Comida", arsCents: 10_000 }])
-
+    expect(view.pie).toEqual([
+      { name: "Electro", arsCents: 100_000 },
+      { name: "Sin categoría", arsCents: 7_000 },
+    ])
+    expect(view.bars.find((b) => b.month === "2026-09")).toEqual({
+      month: "2026-09",
+      incomeArsCents: 50_000,
+      expenseArsCents: 107_000,
+    })
     expect(view.bars.find((b) => b.month === "2026-08")).toEqual({
       month: "2026-08",
-      incomeArsCents: 20_000,
-      expenseArsCents: 10_000,
-    })
-    expect(view.bars.find((b) => b.month === "2026-07")).toEqual({
-      month: "2026-07",
       incomeArsCents: 0,
-      expenseArsCents: 99_000,
+      expenseArsCents: 100_000,
     })
+  })
+
+  it("la torta y la barra del mes suman lo mismo que la tarjeta, con el corte del saldo inicial", () => {
+    const view = buildDashboardView({
+      ...BASE,
+      expenseCategories: [{ id: "cat-1", name: "Comida" }],
+      paid: [
+        // Antes del saldo inicial (2026-08-05): ya está adentro del saldo.
+        { paidDate: "2026-08-01", amountCents: 30_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
+        { paidDate: "2026-07-20", amountCents: 9_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
+        // Después: cuenta en los tres bloques.
+        { paidDate: "2026-08-07", amountCents: 10_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
+      ],
+    })
+
+    expect(view.monthExpenseArsCents).toBe(10_000)
+    expect(view.pie).toEqual([{ name: "Comida", arsCents: 10_000 }])
+    expect(view.bars.find((b) => b.month === "2026-08")?.expenseArsCents).toBe(10_000)
+    expect(view.bars.find((b) => b.month === "2026-07")?.expenseArsCents).toBe(0)
   })
 
   it("no deja pasar más de MAX_UPCOMING vencimientos, ni uno que vence después del horizonte", () => {
@@ -359,7 +348,6 @@ describe("buildDashboardView", () => {
     // meses, y el enlace de la cuota tiene que seguir saliendo bien.
     const view = buildDashboardView({
       ...BASE,
-      movements: [],
       pending: [
         {
           id: "ins-1",

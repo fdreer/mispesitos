@@ -39,6 +39,7 @@ type PaidRow = {
   amountCents: number
   currency: string
   kind: string
+  categoryId: string | null
   rate: string
 }
 
@@ -63,20 +64,6 @@ type PendingRow = {
   kind: string
 }
 
-/**
- * Movimiento, sin sus cuotas: el armado ya no las necesita. El estado de cada
- * enlace sale de `pending`, que es la lista completa de cuotas impagas.
- */
-type MovementRow = {
-  id: string
-  date: IsoDate
-  kind: string
-  categoryId: string | null
-  currency: string
-  amountCents: number
-  rate: string
-}
-
 export type DashboardInput = {
   today: IsoDate
   settings: {
@@ -89,7 +76,6 @@ export type DashboardInput = {
   paid: PaidRow[]
   exchanges: ExchangeRow[]
   pending: PendingRow[]
-  movements: MovementRow[]
   expenseCategories: { id: string; name: string }[]
   horizonMonths: number
   historyMonths: number
@@ -168,13 +154,21 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
   const firstDayNextMonth = `${nextMonth}-01`
   const firstDayAfterNextMonth = `${monthKey(addMonthsClamped(today, 2))}-01`
 
-  // El MISMO corte que hace `computeBalances`, y por el mismo motivo: lo pagado
-  // antes del saldo inicial ya está adentro de ese saldo. Sin este filtro, con
-  // un saldo inicial fechado a mitad de mes la tarjeta mostraba un cobro que el
-  // saldo de al lado no tenía en cuenta.
-  const monthPaid = input.paid.filter(
-    (p) => p.paidDate >= settings.initialBalanceDate && monthKey(p.paidDate) === thisMonth,
-  )
+  /*
+   * Criterio de lo percibido (§0 del plan v2): la tarjeta del mes, la torta y
+   * las barras cuentan lo mismo, cuotas PAGADAS por su `paidDate`. Un
+   * televisor de $1.200.000 en 12 cuotas suma $100.000 en cada mes en que se
+   * paga una, no $1.200.000 el día que se cargó.
+   *
+   * Y con el MISMO corte que hace `computeBalances`, y por el mismo motivo: lo
+   * pagado antes del saldo inicial ya está adentro de ese saldo. Sin este
+   * filtro, con un saldo inicial fechado a mitad de mes la tarjeta mostraba un
+   * cobro que el saldo de al lado no tenía en cuenta. Aplicado una sola vez
+   * acá, la torta y la barra del mes en curso suman exactamente lo que la
+   * tarjeta.
+   */
+  const paidSinceStart = input.paid.filter((p) => p.paidDate >= settings.initialBalanceDate)
+  const monthPaid = paidSinceStart.filter((p) => monthKey(p.paidDate) === thisMonth)
   const paymentsThisMonth = input.pending.filter(
     (p) => p.kind === "expense" && p.dueDate < firstDayNextMonth,
   )
@@ -230,23 +224,21 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
     }))
 
   const pie = spendByCategory(
-    input.movements
-      .filter((m) => m.kind === "expense" && monthKey(m.date) === thisMonth)
-      .map((m) => ({
-        categoryId: m.categoryId,
-        arsCents: toArs(m.amountCents, m.currency, m.rate),
+    monthPaid
+      .filter((p) => p.kind === "expense")
+      .map((p) => ({
+        categoryId: p.categoryId,
+        arsCents: toArs(p.amountCents, p.currency, p.rate),
       })),
     input.expenseCategories,
   )
 
   const bars = monthlyTotals(
-    input.movements
-      .filter((m) => m.kind !== "exchange")
-      .map((m) => ({
-        date: m.date,
-        kind: assertInstallmentMovementKind(m.kind),
-        arsCents: toArs(m.amountCents, m.currency, m.rate),
-      })),
+    paidSinceStart.map((p) => ({
+      date: p.paidDate,
+      kind: assertInstallmentMovementKind(p.kind),
+      arsCents: toArs(p.amountCents, p.currency, p.rate),
+    })),
     input.historyMonths,
     today,
   )

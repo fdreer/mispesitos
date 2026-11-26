@@ -11,6 +11,7 @@ type Row = {
   dueDate: string
   amountCents: number
   paid: boolean
+  paidDate?: string | null
 }
 
 type Props = {
@@ -23,6 +24,9 @@ type Props = {
    * mismatch de hidratación y un "vencida" que aparece o desaparece solo.
    */
   today: IsoDate
+  /** Del movimiento: nombra la cuota en el toast y en la confirmación. */
+  description: string
+  kind: "income" | "expense"
 }
 
 /** "Cuota 3", más la marca de vencida cuando corresponde. */
@@ -52,7 +56,7 @@ function CuotaLabel({ row, today }: { row: Row; today: IsoDate }) {
  * primera va vacía porque es la del chevron, que es del movimiento y no de la
  * cuota.
  */
-export function InstallmentTableRows({ rows, currency, today }: Props) {
+export function InstallmentTableRows({ rows, currency, today, description, kind }: Props) {
   return (
     <>
       {rows.map((row) => (
@@ -70,8 +74,18 @@ export function InstallmentTableRows({ rows, currency, today }: Props) {
           <TableCell />
           <TableCell className="tabular-nums">{formatMoney(row.amountCents, currency)}</TableCell>
           <TableCell>
-            <InstallmentPaidButton id={row.id} paid={row.paid} align="start" />
+            <InstallmentPaidButton
+              id={row.id}
+              paid={row.paid}
+              paidDate={row.paidDate}
+              today={today}
+              number={row.number}
+              description={description}
+              kind={kind}
+              align="start"
+            />
           </TableCell>
+          <TableCell />
         </TableRow>
       ))}
     </>
@@ -83,7 +97,7 @@ export function InstallmentTableRows({ rows, currency, today }: Props) {
  * cada ítem es un `<li>` y no hay columnas contra las cuales alinear. Es el
  * formato que tenía antes esta pantalla, y el único lugar que todavía lo usa.
  */
-export function InstallmentRows({ rows, currency, today }: Props) {
+export function InstallmentRows({ rows, currency, today, description, kind }: Props) {
   return (
     <ul className="mt-2 space-y-1 border-t pt-2">
       {rows.map((row) => (
@@ -96,7 +110,15 @@ export function InstallmentRows({ rows, currency, today }: Props) {
           </span>
           <span className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-start">
             <span className="tabular-nums">{formatMoney(row.amountCents, currency)}</span>
-            <InstallmentPaidButton id={row.id} paid={row.paid} />
+            <InstallmentPaidButton
+              id={row.id}
+              paid={row.paid}
+              paidDate={row.paidDate}
+              today={today}
+              number={row.number}
+              description={description}
+              kind={kind}
+            />
           </span>
         </li>
       ))}

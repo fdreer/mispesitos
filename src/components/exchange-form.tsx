@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 import { CalendarIcon } from "lucide-react"
 import { es } from "date-fns/locale"
 
@@ -31,7 +32,10 @@ export function ExchangeForm({ buyRate, sellRate, today }: Props) {
   const suggested = direction === "buy" ? buyRate : sellRate
 
   useEffect(() => {
-    if (state?.ok) router.refresh()
+    if (state?.ok) {
+      router.refresh()
+      toast.success("Cambio registrado")
+    }
   }, [state, router])
 
   return (

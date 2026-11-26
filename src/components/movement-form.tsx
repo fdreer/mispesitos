@@ -1,7 +1,8 @@
 "use client"
 
-import { useActionState, useEffect, useMemo, useState } from "react"
+import { useActionState, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 import { CalendarIcon } from "lucide-react"
 import { es } from "date-fns/locale"
 
@@ -256,12 +257,23 @@ export function MovementForm({
 
   // `router.refresh()` sí es un efecto legítimo: notifica al router, no
   // actualiza estado de React, así que no dispara la regla anterior.
+  //
+  // El toast va con la marca de `toastedState` porque este efecto corre más de
+  // una vez por guardado: `onSaved` llega como flecha nueva en cada render, y
+  // sin la marca cada re-render apilaba otro "Egreso cargado".
+  const toastedState = useRef<ActionResult | null>(null)
   useEffect(() => {
     if (state?.ok) {
       router.refresh()
+      if (toastedState.current !== state) {
+        toastedState.current = state
+        toast.success(
+          movement ? "Cambios guardados" : kind === "income" ? "Ingreso cargado" : "Egreso cargado",
+        )
+      }
       onSaved?.()
     }
-  }, [state, router, onSaved])
+  }, [state, router, onSaved, movement, kind])
 
   function updateRow(index: number, patch: Partial<Row>) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)))

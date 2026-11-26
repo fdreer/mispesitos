@@ -14,21 +14,18 @@ Nadie puede resolverlas mirando el código: hay que elegir.
 
 ### 1.1 El dashboard: ¿caja o devengado?
 
-Hoy conviven las dos definiciones, y cada bloque está rotulado para que no se
-contradigan, pero siguen midiendo cosas distintas:
+~~Hoy conviven las dos definiciones.~~ **Resuelto el 2026-11-26** con el criterio de
+lo percibido (§0 del plan v2): los tres bloques suman lo mismo, **cuotas pagadas por
+su `paid_date`**, con el mismo corte del saldo inicial que usa el saldo.
 
 | Bloque | Qué suma |
 |---|---|
 | Tarjeta "Este mes" | cuotas **pagadas**, por su fecha de pago |
-| Torta "por categoría" | el **importe total** de los movimientos cargados en el mes |
-| Barras "últimos 12 meses" | ídem torta |
+| Torta "por categoría" | ídem, sólo egresos del mes en curso |
+| Barras "últimos 12 meses" | ídem, ingresos y egresos de cada mes |
 
-Un televisor de $1.200.000 en 12 cuotas cargado el 5 de agosto: la torta muestra
-$1.200.000 y la tarjeta $100.000. Las dos lecturas son legítimas —una es la plata
-que se movió, la otra es lo que se comprometió— y el spec no desambigua.
-
-**La decisión es si las tres tienen que hablar de lo mismo, y de cuál.** Mientras
-no se tome, la pantalla es honesta pero pide leer las etiquetas.
+El televisor de $1.200.000 en 12 cuotas suma $100.000 en cada mes en que se paga una
+cuota. Lo comprometido y todavía impago se ve en "Vencimientos" y en la proyección.
 
 ### 1.2 Desarchivar una categoría
 
@@ -62,8 +59,8 @@ Sigue siendo el rombo de Next.js. Pide una decisión de diseño.
 Se dejó afuera a propósito, con el alcance ya acordado.
 
 - ~~**Editar un movimiento ya guardado.**~~ Hecho el 2026-08-12, ver §11.
-- **Elegir la fecha de pago al marcar una cuota.** Siempre queda la fecha de hoy,
-  calculada en el servidor con el reloj de Buenos Aires.
+- ~~**Elegir la fecha de pago al marcar una cuota.**~~ Hecho el 2026-11-26 (Fase 1
+  del plan v2): hoy por defecto, con un selector de fecha en el detalle de cuotas.
 - ~~**Cuatro de los cinco filtros de listas.**~~ Los cuatro que faltaban están:
   categoría, desde y hasta con la barra de filtros del 2026-08-11 (§7), y moneda
   el 2026-08-12 (§11). Los cinco del spec, más el buscador por descripción.

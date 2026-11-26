@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest"
 import {
+  describeNextInstallment,
+  nextUnpaidInstallment,
+  resolvePaidDate,
   splitAmount,
   buildInstallments,
   highestPaidNumber,
@@ -193,5 +196,85 @@ describe("highestPaidNumber", () => {
 
   it("no depende del orden en que vengan", () => {
     expect(highestPaidNumber([cuota(7, true), cuota(2, true)])).toBe(7)
+  })
+})
+
+describe("nextUnpaidInstallment", () => {
+  it("devuelve la impaga de número más bajo, aunque las cuotas vengan desordenadas", () => {
+    const cuotas = [
+      { id: "c3", number: 3, paid: false },
+      { id: "c1", number: 1, paid: true },
+      { id: "c2", number: 2, paid: false },
+    ]
+    expect(nextUnpaidInstallment(cuotas)?.id).toBe("c2")
+  })
+
+  it("salta las pagadas aunque se hayan pagado salteadas", () => {
+    const cuotas = [
+      { id: "c1", number: 1, paid: true },
+      { id: "c2", number: 2, paid: false },
+      { id: "c3", number: 3, paid: true },
+    ]
+    expect(nextUnpaidInstallment(cuotas)?.id).toBe("c2")
+  })
+
+  it("es null si están todas pagas o no hay cuotas", () => {
+    expect(nextUnpaidInstallment([{ number: 1, paid: true }])).toBeNull()
+    expect(nextUnpaidInstallment([])).toBeNull()
+  })
+})
+
+describe("describeNextInstallment", () => {
+  it("arma 'Cuota 3/12 · vence 15/12' en un plan de varias cuotas", () => {
+    expect(describeNextInstallment({ number: 3, dueDate: "2026-12-15" }, 12, "2026-11-26")).toBe(
+      "Cuota 3/12 · vence 15/12",
+    )
+  })
+
+  it("con una sola cuota no dice 'Cuota 1/1'", () => {
+    expect(describeNextInstallment({ number: 1, dueDate: "2026-12-15" }, 1, "2026-11-26")).toBe(
+      "Vence 15/12",
+    )
+  })
+
+  it("dice 'venció' si la fecha ya pasó, y suma el año si no es el de hoy", () => {
+    expect(describeNextInstallment({ number: 2, dueDate: "2026-11-01" }, 3, "2026-11-26")).toBe(
+      "Cuota 2/3 · venció 01/11",
+    )
+    expect(describeNextInstallment({ number: 1, dueDate: "2027-01-10" }, 1, "2026-11-26")).toBe(
+      "Vence 10/01/2027",
+    )
+  })
+
+  it("vence hoy no es 'venció'", () => {
+    expect(describeNextInstallment({ number: 1, dueDate: "2026-11-26" }, 1, "2026-11-26")).toBe(
+      "Vence 26/11",
+    )
+  })
+})
+
+describe("resolvePaidDate", () => {
+  const HOY = "2026-11-26"
+
+  it("sin fecha, marca con la de hoy", () => {
+    expect(resolvePaidDate(true, undefined, HOY)).toEqual({ ok: true, paidDate: HOY })
+  })
+
+  it("acepta una fecha pasada o la de hoy", () => {
+    expect(resolvePaidDate(true, "2026-11-01", HOY)).toEqual({ ok: true, paidDate: "2026-11-01" })
+    expect(resolvePaidDate(true, HOY, HOY)).toEqual({ ok: true, paidDate: HOY })
+  })
+
+  it("rechaza una fecha futura: todavía no es plata que se movió", () => {
+    expect(resolvePaidDate(true, "2026-11-27", HOY).ok).toBe(false)
+  })
+
+  it("rechaza una fecha que no existe", () => {
+    expect(resolvePaidDate(true, "2026-02-30", HOY).ok).toBe(false)
+    expect(resolvePaidDate(true, "ayer", HOY).ok).toBe(false)
+  })
+
+  it("al desmarcar limpia la fecha, aunque venga una", () => {
+    expect(resolvePaidDate(false, "2026-11-01", HOY)).toEqual({ ok: true, paidDate: null })
   })
 })

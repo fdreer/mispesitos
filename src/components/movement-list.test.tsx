@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 
 import { MovementList } from "@/components/movement-list"
 import type { MovementWithInstallments } from "@/server/queries"
@@ -11,8 +11,10 @@ import type { MovementWithInstallments } from "@/server/queries"
  * verdad abre una conexión a Postgres apenas se las importa. Mismo criterio
  * que `movement-form.test.tsx`.
  */
+const mocks = vi.hoisted(() => ({ setInstallmentPaid: vi.fn(async () => ({ ok: true })) }))
+
 vi.mock("@/server/actions/movements", () => ({
-  setInstallmentPaid: async () => ({ ok: true }),
+  setInstallmentPaid: mocks.setInstallmentPaid,
   deleteMovement: async () => ({ ok: true }),
   // Las dos del formulario de edición, que ahora cuelga de la misma fila.
   createMovement: async () => ({ ok: true }),
@@ -27,7 +29,10 @@ vi.mock("next/navigation", () => ({
 Element.prototype.hasPointerCapture ??= () => false
 Element.prototype.scrollIntoView ??= () => {}
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  mocks.setInstallmentPaid.mockClear()
+})
 
 const CATEGORIAS = [
   { id: "cat-1", userId: "u", name: "Freelance", kind: "income" as const, archived: false },
@@ -108,22 +113,24 @@ describe("MovementList", () => {
     fireEvent.click(within(container.querySelector("table")!).getByText("Proyecto"))
 
     const filas = [...container.querySelectorAll("tbody tr")]
-    // Movimiento + dos cuotas + la fila de "Borrar".
-    expect(filas).toHaveLength(4)
+    // Movimiento + dos cuotas. Editar y Borrar viven en el menú ⋯ de la fila.
+    expect(filas).toHaveLength(3)
 
-    // Todas las filas tienen las mismas seis columnas: es lo que garantiza
+    // Todas las filas tienen las mismas siete columnas: es lo que garantiza
     // que las celdas de una cuota se apilen bajo las del movimiento.
     for (const fila of filas) {
       const ancho = [...fila.children].reduce(
         (acc, c) => acc + Number((c as HTMLTableCellElement).colSpan || 1),
         0,
       )
-      expect(ancho).toBe(6)
+      expect(ancho).toBe(7)
     }
 
     const movimiento = celdas(filas[0])
     expect(movimiento[1]).toBe("11/08/2026")
     expect(movimiento[2]).toContain("Proyecto")
+    // La próxima cuota impaga, debajo de la descripción.
+    expect(movimiento[2]).toContain("Cuota 1/2 · vence 11/08")
     expect(movimiento[3]).toBe("Freelance")
     expect(movimiento[4]).toBe("$ 2.000,00")
 
@@ -131,13 +138,13 @@ describe("MovementList", () => {
     expect(cuota1[1]).toBe("11/08/2026")
     expect(cuota1[2]).toBe("Cuota 1")
     expect(cuota1[4]).toBe("$ 1.000,00")
-    expect(cuota1[5]).toBe("Marcar pagada")
+    expect(cuota1[5]).toBe("Marcar cobrada")
 
     const cuota2 = celdas(filas[2])
     expect(cuota2[1]).toBe("11/09/2026")
     expect(cuota2[2]).toBe("Cuota 2")
     expect(cuota2[4]).toBe("$ 1.000,00")
-    expect(cuota2[5]).toBe("Pagada")
+    expect(cuota2[5]).toBe("Cobrada · 11/09")
   })
 
   it("una cuota impaga con vencimiento pasado se marca como vencida", () => {
@@ -159,10 +166,11 @@ describe("MovementList", () => {
   })
 
   /*
-   * Editar vive en la misma fila de cierre que borrar, y sólo aparece con las
-   * cuotas desplegadas: es una acción del movimiento, no de la tabla.
+   * Editar y Borrar viven en el menú ⋯ de cada fila (§5.3 del plan v2), a la
+   * vista sin desplegar nada. Los diálogos se abren por estado, fuera del
+   * menú: si colgaran del ítem, cerrar el menú los desmontaría.
    */
-  it("editar abre el formulario con el movimiento ya cargado", () => {
+  it("editar, desde el menú ⋯, abre el formulario con el movimiento ya cargado", () => {
     const { container } = render(
       <MovementList
         movements={[MOVIMIENTO]}
@@ -172,15 +180,74 @@ describe("MovementList", () => {
       />,
     )
 
-    expect(screen.queryByRole("button", { name: "Editar" })).toBeNull()
-
     const tabla = within(container.querySelector("table")!)
-    fireEvent.click(tabla.getByText("Proyecto"))
-    fireEvent.click(tabla.getByRole("button", { name: "Editar" }))
+    fireEvent.keyDown(tabla.getByRole("button", { name: "Acciones de Proyecto" }), { key: "Enter" })
+
+    const borrar = screen.getByRole("menuitem", { name: "Borrar" })
+    expect(borrar.getAttribute("data-variant")).toBe("destructive")
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Editar" }))
 
     expect(screen.getByRole("dialog").textContent).toContain("Editar ingreso")
     expect(screen.getByLabelText<HTMLInputElement>("Descripción").value).toBe("Proyecto")
     expect(screen.getByLabelText<HTMLInputElement>("Importe").value).toBe("2000,00")
+    // Abrir el menú no desplegó la fila.
+    expect(tabla.getByText("Proyecto").closest("tr")?.getAttribute("aria-expanded")).toBe("false")
+  })
+
+  it("borrar, desde el menú ⋯, pide confirmación", () => {
+    const { container } = render(
+      <MovementList
+        movements={[MOVIMIENTO]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="vacío"
+      />,
+    )
+
+    const tabla = within(container.querySelector("table")!)
+    fireEvent.keyDown(tabla.getByRole("button", { name: "Acciones de Proyecto" }), { key: "Enter" })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Borrar" }))
+
+    expect(screen.getByRole("alertdialog").textContent).toContain("¿Borrar “Proyecto”?")
+  })
+
+  /*
+   * Pagar en un toque (§5.1): marca la PRÓXIMA impaga —la de número más bajo—
+   * con la fecha de hoy, sin desplegar la fila ni pedir confirmación.
+   */
+  it("cobrar desde la fila marca la próxima cuota impaga y no despliega nada", async () => {
+    const { container } = render(
+      <MovementList
+        movements={[MOVIMIENTO]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="vacío"
+      />,
+    )
+
+    const tabla = within(container.querySelector("table")!)
+    const cobrar = tabla.getByRole("button", { name: "Cobrar cuota 1/2 de Proyecto" })
+    expect(cobrar.textContent).toBe("Cobrar")
+
+    await act(async () => {
+      fireEvent.click(cobrar)
+    })
+
+    expect(mocks.setInstallmentPaid).toHaveBeenCalledWith("cuo-1", true, undefined)
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(1)
+  })
+
+  it("un movimiento todo pago no ofrece pagar", () => {
+    const pagado = {
+      ...MOVIMIENTO,
+      installments: MOVIMIENTO.installments.map((i) => ({ ...i, paid: true, paidDate: "2026-08-11" })),
+    }
+    render(
+      <MovementList movements={[pagado]} categories={CATEGORIAS} today="2026-08-11" emptyMessage="vacío" />,
+    )
+
+    expect(screen.queryByRole("button", { name: /^Cobrar/ })).toBeNull()
   })
 
   it("en móvil resume el movimiento en una tarjeta y despliega sus cuotas", () => {
@@ -198,6 +265,10 @@ describe("MovementList", () => {
     expect(tarjeta.textContent).toContain("11/08/2026")
     expect(tarjeta.textContent).toContain("Freelance")
     expect(tarjeta.textContent).toContain("2 cuotas")
+    // La tarjeta también muestra la próxima cuota y se cobra sin desplegar.
+    expect(tarjeta.textContent).toContain("Cuota 1/2 · vence 11/08")
+    expect(within(tarjeta).getByRole("button", { name: "Cobrar cuota 1/2 de Proyecto" })).toBeTruthy()
+    expect(within(tarjeta).getByRole("button", { name: "Acciones de Proyecto" })).toBeTruthy()
 
     const desplegar = screen.getByRole("button", { name: "Ver cuotas de Proyecto" })
     expect(desplegar.getAttribute("aria-expanded")).toBe("false")
@@ -205,7 +276,8 @@ describe("MovementList", () => {
     fireEvent.click(desplegar)
 
     expect(desplegar.getAttribute("aria-expanded")).toBe("true")
-    expect(within(tarjeta).getByText(/Cuota\s+1/)).toBeTruthy()
-    expect(within(tarjeta).getByRole("button", { name: "Marcar pagada" })).toBeTruthy()
+    const detalle = within(document.getElementById("cuotas-mov-1")!)
+    expect(detalle.getByText(/Cuota\s+1/)).toBeTruthy()
+    expect(detalle.getByRole("button", { name: "Marcar cobrada" })).toBeTruthy()
   })
 })

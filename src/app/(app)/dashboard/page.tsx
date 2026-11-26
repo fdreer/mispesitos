@@ -6,12 +6,11 @@ import { Upcoming } from "@/components/dashboard/upcoming"
 import { InfoHint } from "@/components/info-hint"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { buildDashboardView } from "@/lib/dashboard-view"
-import { addMonthsClamped, monthKey, todayInAr } from "@/lib/dates"
+import { todayInAr } from "@/lib/dates"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import {
   listCategories,
   listExchanges,
-  listMovementRows,
   listPaidInstallments,
   listPendingInstallments,
 } from "@/server/queries"
@@ -42,14 +41,14 @@ function ChartCardHeader({ title, children }: { title: string; children: React.R
 
 /**
  * Todo lo que hay debajo del título. Va aparte, detrás de un Suspense, para
- * que el título salga en el primer flush en vez de esperar a las seis
+ * que el título salga en el primer flush en vez de esperar a las cuatro
  * consultas y a la cotización (que sola puede tardar 3s, ver TIMEOUT_MS en
  * @/lib/rate).
  *
  * A diferencia de /ingresos y /egresos, acá NO se puede transmitir bloque por
- * bloque: `buildDashboardView` es un solo cálculo que necesita las seis
+ * bloque: `buildDashboardView` es un solo cálculo que necesita las cuatro
  * consultas juntas —los saldos de las tarjetas alimentan el primer punto de la
- * proyección, y la torta y las barras salen del mismo recorte de movimientos—,
+ * proyección, y la torta y las barras salen de las mismas cuotas pagadas—,
  * así que partirlo en cuatro Suspense sería partir también esa función, y las
  * cuatro partes terminarían esperando lo mismo igual. Un solo límite, con un
  * esqueleto que promete la grilla de verdad, es todo lo que esta pantalla
@@ -60,27 +59,14 @@ async function DashboardBody() {
   const today = todayInAr()
 
   /*
-   * La torta mira el mes en curso y las barras los últimos HISTORY_MONTHS, así
-   * que traer la historia entera es traer filas que nadie mira: sin este piso,
-   * cada carga del dashboard se lleva todos los movimientos de la cuenta y
-   * todas sus cuotas.
-   *
-   * Los vencimientos NO dependen de esta lista: su estado sale de las cuotas
-   * pendientes (ver el comentario de `overdueMovements` en
-   * @/lib/dashboard-view), que vienen completas. Un plan de hace tres años con
-   * cuotas que todavía vencen sigue apareciendo en "Vencimientos" y sigue
-   * enlazando bien, aunque su movimiento quede afuera de acá.
-   *
-   * Y por `listMovementRows`, no `listMovements`: `MovementRow` no lleva
-   * cuotas, así que traerlas era traer filas que el mapeo de abajo tiraba.
+   * La torta y las barras salen de las cuotas pagadas (criterio de lo
+   * percibido, ver @/lib/dashboard-view), que ya vienen enteras para el saldo:
+   * no hace falta traer movimientos aparte.
    */
-  const historyFrom = `${monthKey(addMonthsClamped(today, -(HISTORY_MONTHS - 1)))}-01`
-
-  const [paid, exchanges, pending, movements, expenseCategories, rate] = await Promise.all([
+  const [paid, exchanges, pending, expenseCategories, rate] = await Promise.all([
     listPaidInstallments(user.id),
     listExchanges(user.id),
     listPendingInstallments(user.id),
-    listMovementRows(user.id, { from: historyFrom }),
     // "expense" + archivadas incluidas: la torta de egresos por categoría
     // tiene que poder resolver el nombre de un movimiento viejo cuya
     // categoría ya se archivó.
@@ -108,15 +94,6 @@ async function DashboardBody() {
       direction: e.direction,
     })),
     pending,
-    movements: movements.map((m) => ({
-      id: m.id,
-      date: m.date,
-      kind: m.kind,
-      categoryId: m.categoryId,
-      currency: m.currency,
-      amountCents: m.amountCents,
-      rate: m.rate,
-    })),
     expenseCategories,
     horizonMonths: HORIZON_MONTHS,
     historyMonths: HISTORY_MONTHS,
@@ -160,9 +137,9 @@ async function DashboardBody() {
 
         <Card size="sm">
           <ChartCardHeader title="Gastos de este mes, por categoría">
-            Cuenta el importe total de cada gasto en el mes de su fecha, aunque lo pagues en
-            cuotas más adelante. Un televisor de $1.200.000 en 12 cuotas entra entero acá, y
-            de a una cuota en &ldquo;Cobrado y pagado este mes&rdquo;.
+            Suma lo que pagaste este mes, por la fecha de pago de cada cuota, igual que
+            &ldquo;Cobrado y pagado este mes&rdquo;. Un televisor de $1.200.000 en 12 cuotas
+            suma $100.000 en cada mes en que pagás una.
           </ChartCardHeader>
           <CardContent>
             <CategoryPie data={view.pie} />
@@ -171,9 +148,9 @@ async function DashboardBody() {
       </div>
 
       <Card size="sm">
-        <ChartCardHeader title={`Lo que cargaste en los últimos ${HISTORY_MONTHS} meses`}>
-          Con el mismo criterio que la torta: el importe total de cada movimiento en el mes
-          de su fecha, no lo que se pagó o se cobró cada mes.
+        <ChartCardHeader title={`Cobrado y pagado en los últimos ${HISTORY_MONTHS} meses`}>
+          Con el mismo criterio que la torta: cada cuota cobrada o pagada, en el mes de su
+          fecha de pago. Lo pendiente no entra hasta que lo marcás pagado.
         </ChartCardHeader>
         <CardContent>
           <MonthlyBars data={view.bars} />

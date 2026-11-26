@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useTransition } from "react"
+import { toast } from "sonner"
 
 import {
   AlertDialog,
@@ -11,54 +12,87 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { deleteMovement } from "@/server/actions/movements"
 
-type Props = {
+type DialogProps = {
   id: string
   description: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** Avisa que la acción está en vuelo, para que el disparador se apague. */
+  onPendingChange?: (pending: boolean) => void
 }
 
-export function DeleteMovementButton({ id, description }: Props) {
-  const [pending, startTransition] = useTransition()
-  const [error, setError] = useState<string | null>(null)
+/**
+ * La confirmación de borrado, sin disparador: la abre el botón "Borrar" de
+ * /cambios o el ítem "Borrar" del menú ⋯ de cada fila de /ingresos y
+ * /egresos. El resultado se avisa con un toast: el diálogo ya se cerró, así
+ * que no hay dónde más mostrarlo.
+ */
+export function DeleteMovementDialog({
+  id,
+  description,
+  open,
+  onOpenChange,
+  onPendingChange,
+}: DialogProps) {
+  const [, startTransition] = useTransition()
 
   function handleConfirm() {
-    setError(null)
+    onPendingChange?.(true)
     startTransition(async () => {
       const result = await deleteMovement(id)
-      if (!result.ok) {
-        setError(result.message)
-      }
+      onPendingChange?.(false)
+      if (result.ok) toast.success("Borrado", { description })
+      else toast.error(result.message)
     })
   }
 
   return (
-    // `items-start`: queda en la columna Estado, sobre el mismo eje que el
-    // botón de cada cuota (ver `InstallmentTableRows`).
-    <div className="flex flex-col items-start gap-1">
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button type="button" variant="ghost" size="sm" disabled={pending}>
-            {pending ? "Borrando…" : "Borrar"}
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Borrar &ldquo;{description}&rdquo;?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Se borran también sus cuotas y no se puede deshacer.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirm}>Borrar</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      {error && <p className="text-destructive text-xs">{error}</p>}
-    </div>
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>¿Borrar &ldquo;{description}&rdquo;?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Se borran también sus cuotas y no se puede deshacer.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={handleConfirm}>
+            Borrar
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+/** Botón suelto con su confirmación: el de cada operación de /cambios. */
+export function DeleteMovementButton({ id, description }: { id: string; description: string }) {
+  const [open, setOpen] = useState(false)
+  const [pending, setPending] = useState(false)
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={pending}
+        onClick={() => setOpen(true)}
+      >
+        {pending ? "Borrando…" : "Borrar"}
+      </Button>
+      <DeleteMovementDialog
+        id={id}
+        description={description}
+        open={open}
+        onOpenChange={setOpen}
+        onPendingChange={setPending}
+      />
+    </>
   )
 }

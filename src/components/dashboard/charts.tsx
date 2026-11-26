@@ -103,7 +103,7 @@ export function CategoryPie({ data }: { data: { name: string; arsCents: number }
   if (data.length === 0) {
     return (
       <p className="text-muted-foreground py-8 text-center text-sm">
-        No cargaste gastos con fecha de este mes.
+        Todavía no pagaste nada este mes.
       </p>
     )
   }

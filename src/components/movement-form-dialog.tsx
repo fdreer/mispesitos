@@ -33,9 +33,16 @@ type Props = {
   /**
    * Presente = editar ese movimiento; ausente = dar de alta uno nuevo. Es la
    * misma prop que distingue los dos modos de `MovementForm`, y acá además
-   * cambia el disparador y el título.
+   * cambia el título.
    */
   movement?: MovementWithInstallments
+  /**
+   * Abierto desde afuera, sin disparador propio: es como lo usa el menú ⋯ de
+   * cada fila (`MovementRowActions`), donde "Editar" es un ítem del menú y no
+   * un botón suelto.
+   */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 export function MovementFormDialog({
@@ -44,26 +51,24 @@ export function MovementFormDialog({
   suggestedRate,
   today,
   movement,
+  open: controlledOpen,
+  onOpenChange,
 }: Props) {
-  const [open, setOpen] = useState(false)
+  const [ownOpen, setOwnOpen] = useState(false)
+  const controlled = controlledOpen !== undefined
+  const open = controlled ? controlledOpen : ownOpen
+  const setOpen = controlled ? (onOpenChange ?? (() => {})) : setOwnOpen
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {movement ? (
-          // Ghost y `size="sm"`, como el de borrar: los dos viven en la fila
-          // de cierre de las cuotas y son acciones del movimiento, no la
-          // acción principal de la pantalla.
-          <Button type="button" variant="ghost" size="sm">
-            Editar
-          </Button>
-        ) : (
+      {!controlled && (
+        <DialogTrigger asChild>
           <Button type="button">
             <Plus />
             Nuevo
           </Button>
-        )}
-      </DialogTrigger>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{(movement ? EDIT_TITLES : TITLES)[kind]}</DialogTitle>

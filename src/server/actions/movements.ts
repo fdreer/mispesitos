@@ -7,8 +7,8 @@ import { z } from "zod"
 
 import { withUser } from "@/db/client"
 import { installment, movement } from "@/db/schema"
-import { todayInAr } from "@/lib/dates"
-import { highestPaidNumber } from "@/lib/installments"
+import { todayInAr, type IsoDate } from "@/lib/dates"
+import { highestPaidNumber, resolvePaidDate } from "@/lib/installments"
 import { logDbError } from "@/lib/log-db-error"
 import { assertInstallmentMovementKind } from "@/lib/movement-asserts"
 import { BASE_PATHS } from "@/lib/movement-routes"
@@ -357,21 +357,35 @@ export async function deleteMovement(id: string): Promise<ActionResult> {
 const setInstallmentPaidSchema = z.object({
   id: z.uuid("Esa cuota no existe."),
   paid: z.boolean(),
+  paidDate: z.string().optional(),
 })
 
-export async function setInstallmentPaid(id: string, paid: boolean): Promise<ActionResult> {
+/**
+ * Marca o desmarca una cuota. `paidDate` es opcional: sin ella la cuota queda
+ * pagada hoy (reloj de Buenos Aires), el caso de un toque. La regla de qué
+ * fecha se acepta vive en `resolvePaidDate` (@/lib/installments), probada sin
+ * base.
+ */
+export async function setInstallmentPaid(
+  id: string,
+  paid: boolean,
+  paidDate?: IsoDate,
+): Promise<ActionResult> {
   const user = await requireUser()
 
-  const parsed = setInstallmentPaidSchema.safeParse({ id, paid })
+  const parsed = setInstallmentPaidSchema.safeParse({ id, paid, paidDate })
   if (!parsed.success) {
     return failure("Esa cuota no existe.")
   }
+
+  const resolved = resolvePaidDate(parsed.data.paid, parsed.data.paidDate, todayInAr())
+  if (!resolved.ok) return failure(resolved.message)
 
   try {
     const updated = await withUser(user.id, (tx) =>
       tx
         .update(installment)
-        .set({ paid: parsed.data.paid, paidDate: parsed.data.paid ? todayInAr() : null })
+        .set({ paid: parsed.data.paid, paidDate: resolved.paidDate })
         .where(and(eq(installment.id, parsed.data.id), eq(installment.userId, user.id)))
         .returning({ id: installment.id }),
     )

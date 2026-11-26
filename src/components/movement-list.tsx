@@ -13,9 +13,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { DeleteMovementButton } from "@/components/delete-movement-button"
 import { InstallmentRows, InstallmentTableRows } from "@/components/installment-rows"
-import { MovementFormDialog } from "@/components/movement-form-dialog"
+import {
+  MovementRowActions,
+  nextInstallmentText,
+  PayNextButton,
+} from "@/components/movement-row-actions"
 import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
 import { assertCurrency, assertInstallmentMovementKind } from "@/lib/movement-asserts"
@@ -37,8 +40,8 @@ type Props = {
  * Los encabezados en un solo lugar: el esqueleto de más abajo pinta la MISMA
  * fila de encabezados mientras la consulta viaja, así que si viviera duplicada
  * agregar una columna a la tabla dejaría al esqueleto prometiendo otra grilla.
- * La primera columna no tiene título (es la del chevron que despliega las
- * cuotas) y por eso va aparte, no en esta lista.
+ * La primera columna (el chevron que despliega las cuotas) y la última (Pagar
+ * y el menú ⋯) no tienen título visible y por eso van aparte, no en esta lista.
  */
 const COLUMNS = ["Fecha", "Descripción", "Categoría", "Importe", "Estado"] as const
 
@@ -50,9 +53,22 @@ function MovementTableHeader() {
         {COLUMNS.map((c) => (
           <TableHead key={c}>{c}</TableHead>
         ))}
+        <TableHead>
+          <span className="sr-only">Acciones</span>
+        </TableHead>
       </TableRow>
     </TableHeader>
   )
+}
+
+function MovementStatusBadge({
+  status,
+  pendingCount,
+  overdueCount,
+}: ReturnType<typeof summarizeMovementStatus>) {
+  if (status === "overdue") return <StatusBadge status="overdue">{overdueCount} vencida(s)</StatusBadge>
+  if (status === "pending") return <StatusBadge status="pending">{pendingCount} pendiente(s)</StatusBadge>
+  return <StatusBadge status="paid">Pagado</StatusBadge>
 }
 
 function MovementCards({
@@ -73,11 +89,13 @@ function MovementCards({
   return (
     <div className="space-y-2 md:hidden">
       {movements.map((m) => {
-        const { status, pendingCount, overdueCount } = summarizeMovementStatus(m.installments, today)
+        const summary = summarizeMovementStatus(m.installments, today)
         const currency = assertCurrency(m.currency)
+        const kind = assertInstallmentMovementKind(m.kind)
         const isOpen = expanded.has(m.id)
         const categoria = m.categoryId ? categoryName.get(m.categoryId) : undefined
         const detailsId = `cuotas-${m.id}`
+        const nextText = nextInstallmentText(m, today)
 
         return (
           <article key={m.id} aria-label={m.description} className="rounded-lg border border-border bg-background p-3">
@@ -103,28 +121,33 @@ function MovementCards({
 
             <div className="mt-2 flex items-center justify-between gap-2">
               <span>{categoria ? <CategoryBadge name={categoria} /> : "—"}</span>
-              {status === "overdue" && (
-                <StatusBadge status="overdue">{overdueCount} vencida(s)</StatusBadge>
-              )}
-              {status === "pending" && (
-                <StatusBadge status="pending">{pendingCount} pendiente(s)</StatusBadge>
-              )}
-              {status === "paid" && <StatusBadge status="paid">Pagado</StatusBadge>}
+              <MovementStatusBadge {...summary} />
+            </div>
+
+            {/* La próxima cuota y las acciones de un toque: Pagar sin tener
+                que desplegar nada, y el menú ⋯ con Editar y Borrar. */}
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-xs text-muted-foreground">{nextText}</span>
+              <span className="flex shrink-0 items-center gap-1">
+                <PayNextButton movement={m} kind={kind} />
+                <MovementRowActions
+                  movement={m}
+                  kind={kind}
+                  categories={categories}
+                  today={today}
+                />
+              </span>
             </div>
 
             {isOpen && (
               <div id={detailsId} className="mt-3 border-t pt-1">
-                <InstallmentRows rows={m.installments} currency={currency} today={today} />
-                <div className="mt-2 flex items-center gap-1 border-t pt-2">
-                  <MovementFormDialog
-                    kind={assertInstallmentMovementKind(m.kind)}
-                    categories={categories}
-                    suggestedRate={null}
-                    today={today}
-                    movement={m}
-                  />
-                  <DeleteMovementButton id={m.id} description={m.description} />
-                </div>
+                <InstallmentRows
+                  rows={m.installments}
+                  currency={currency}
+                  today={today}
+                  description={m.description}
+                  kind={kind}
+                />
               </div>
             )}
           </article>
@@ -158,107 +181,100 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
           <MovementTableHeader />
           <TableBody>
             {movements.map((m) => {
-          // El mismo cálculo que usa el filtro de estado de esta pantalla: el
-          // badge y el filtro no pueden discrepar sobre qué está vencido.
-          const { status, pendingCount, overdueCount } = summarizeMovementStatus(
-            m.installments,
-            today,
-          )
-          const currency = assertCurrency(m.currency)
-          const isOpen = expanded.has(m.id)
-          const categoria = m.categoryId ? categoryName.get(m.categoryId) : undefined
+              // El mismo cálculo que usa el filtro de estado de esta pantalla:
+              // el badge y el filtro no pueden discrepar sobre qué está vencido.
+              const summary = summarizeMovementStatus(m.installments, today)
+              const currency = assertCurrency(m.currency)
+              const kind = assertInstallmentMovementKind(m.kind)
+              const isOpen = expanded.has(m.id)
+              const categoria = m.categoryId ? categoryName.get(m.categoryId) : undefined
+              const nextText = nextInstallmentText(m, today)
 
               return (
                 <Fragment key={m.id}>
-              {/* La fila entera es el disparador, pero el teclado necesita un
-                  control real: sin `tabIndex`/`onKeyDown` las cuotas de cada
-                  movimiento eran inalcanzables sin mouse. `role="button"` no
-                  va acá —rompería la semántica de tabla para un lector de
-                  pantalla—; `aria-expanded` sobre la fila ya comunica el
-                  estado, y la celda del chevron lleva el nombre accesible. */}
-              <TableRow
-                className="cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
-                tabIndex={0}
-                aria-expanded={isOpen}
-                onClick={() => toggle(m.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault()
-                    toggle(m.id)
-                  }
-                }}
-              >
-                <TableCell>
-                  {isOpen ? (
-                    <ChevronDown className="text-muted-foreground size-4" />
-                  ) : (
-                    <ChevronRight className="text-muted-foreground size-4" />
-                  )}
-                  <span className="sr-only">
-                    {isOpen ? "Ocultar cuotas de" : "Ver cuotas de"} {m.description}
-                  </span>
-                </TableCell>
-                <TableCell className="text-muted-foreground tabular-nums">
-                  {formatIsoForDisplay(m.date)}
-                </TableCell>
-                <TableCell className="max-w-64 truncate whitespace-normal">
-                  {m.description}
-                  {m.installments.length > 1 && (
-                    <span className="text-muted-foreground"> · {m.installments.length} cuotas</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {/* `categoryName.get` puede no encontrar nada aunque el
-                      movimiento tenga `categoryId`: la lista que llega por
-                      props es la del tipo de esta pantalla. El guión es para
-                      los dos casos, sin categoría y sin nombre resoluble. */}
-                  {categoria ? <CategoryBadge name={categoria} /> : "—"}
-                </TableCell>
-                <TableCell className="tabular-nums">{formatMoney(m.amountCents, currency)}</TableCell>
-                <TableCell>
-                  {status === "overdue" && (
-                    <StatusBadge status="overdue">{overdueCount} vencida(s)</StatusBadge>
-                  )}
-                  {status === "pending" && (
-                    <StatusBadge status="pending">{pendingCount} pendiente(s)</StatusBadge>
-                  )}
-                  {status === "paid" && <StatusBadge status="paid">Pagado</StatusBadge>}
-                </TableCell>
-              </TableRow>
-              {isOpen && (
-                <>
-                  <InstallmentTableRows
-                    rows={m.installments}
-                    currency={currency}
-                    today={today}
-                  />
-                  {/* Editar y borrar son del movimiento, no de una cuota: van
-                      en su propia fila de cierre, alineados a la columna
-                      Estado —la misma donde cada cuota tiene su botón— para
-                      que las acciones queden todas sobre el mismo eje. */}
-                  <TableRow className="bg-muted/30 hover:bg-muted/30">
-                    <TableCell colSpan={5} />
+                  {/* La fila entera es el disparador, pero el teclado necesita
+                      un control real: sin `tabIndex`/`onKeyDown` las cuotas de
+                      cada movimiento eran inalcanzables sin mouse.
+                      `role="button"` no va acá —rompería la semántica de tabla
+                      para un lector de pantalla—; `aria-expanded` sobre la fila
+                      ya comunica el estado, y la celda del chevron lleva el
+                      nombre accesible. */}
+                  <TableRow
+                    className="cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                    tabIndex={0}
+                    aria-expanded={isOpen}
+                    onClick={() => toggle(m.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        toggle(m.id)
+                      }
+                    }}
+                  >
                     <TableCell>
-                      <div className="flex items-start gap-1">
-                        {/* Sin cotización sugerida: editando manda el TC con
-                            el que se guardó el movimiento, que es el del día
-                            en que ocurrió (ver `MovementForm`). Pedirle una
-                            sugerencia a dolarapi por cada fila desplegada
-                            sería una llamada de red para un dato que este
-                            formulario no va a usar. */}
-                        <MovementFormDialog
-                          kind={assertInstallmentMovementKind(m.kind)}
-                          categories={categories}
-                          suggestedRate={null}
-                          today={today}
+                      {isOpen ? (
+                        <ChevronDown className="text-muted-foreground size-4" />
+                      ) : (
+                        <ChevronRight className="text-muted-foreground size-4" />
+                      )}
+                      <span className="sr-only">
+                        {isOpen ? "Ocultar cuotas de" : "Ver cuotas de"} {m.description}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground tabular-nums">
+                      {formatIsoForDisplay(m.date)}
+                    </TableCell>
+                    <TableCell className="max-w-64 truncate whitespace-normal">
+                      {m.description}
+                      {m.installments.length > 1 && (
+                        <span className="text-muted-foreground"> · {m.installments.length} cuotas</span>
+                      )}
+                      {nextText && (
+                        <span className="block text-xs text-muted-foreground">{nextText}</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {/* `categoryName.get` puede no encontrar nada aunque el
+                          movimiento tenga `categoryId`: la lista que llega por
+                          props es la del tipo de esta pantalla. El guión es
+                          para los dos casos, sin categoría y sin nombre
+                          resoluble. */}
+                      {categoria ? <CategoryBadge name={categoria} /> : "—"}
+                    </TableCell>
+                    <TableCell className="tabular-nums">{formatMoney(m.amountCents, currency)}</TableCell>
+                    <TableCell>
+                      <MovementStatusBadge {...summary} />
+                    </TableCell>
+                    {/* Los clics y las teclas de esta celda no llegan a la
+                        fila: si no, pagar desplegaría las cuotas. Y como React
+                        propaga los eventos a través de los portales, sin esto
+                        escribir un espacio en el formulario de edición —que
+                        cuelga de acá— plegaría la fila, y el `preventDefault`
+                        de su `onKeyDown` se comería el espacio. */}
+                    <TableCell
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        <PayNextButton movement={m} kind={kind} />
+                        <MovementRowActions
                           movement={m}
+                          kind={kind}
+                          categories={categories}
+                          today={today}
                         />
-                        <DeleteMovementButton id={m.id} description={m.description} />
                       </div>
                     </TableCell>
                   </TableRow>
-                </>
-              )}
+                  {isOpen && (
+                    <InstallmentTableRows
+                      rows={m.installments}
+                      currency={currency}
+                      today={today}
+                      description={m.description}
+                      kind={kind}
+                    />
+                  )}
                 </Fragment>
               )
             })}
@@ -301,6 +317,7 @@ export function MovementListSkeleton({ rows = 5 }: { rows?: number }) {
                 <div className="h-4 animate-pulse rounded bg-graphite" />
               </TableCell>
             ))}
+            <TableCell />
           </TableRow>
         ))}
       </TableBody>

@@ -140,27 +140,7 @@ async function conCuotas(
 }
 
 /**
- * TODOS los movimientos que pasan el filtro, SIN sus cuotas. Es lo que necesita
- * el dashboard: agrega sobre el importe total de cada movimiento y su estado lo
- * saca de `listPendingInstallments`, así que las cuotas que traía `listMovements`
- * se serializaban para tirarse en el mapeo de la página —con 200 movimientos a
- * doce cuotas, ~2.400 filas por carga—.
- */
-export async function listMovementRows(
-  userId: string,
-  filters: MovementFilters = {},
-): Promise<Movement[]> {
-  return withUser(userId, (tx) =>
-    tx
-      .select()
-      .from(movement)
-      .where(and(...movementConditions(userId, filters)))
-      .orderBy(...MOVEMENT_ORDER),
-  )
-}
-
-/**
- * Lo mismo, con las cuotas colgadas. Sin tope: el único llamador que queda es
+ * Los movimientos que pasan el filtro, con las cuotas colgadas. Sin tope: el único llamador que queda es
  * la lista filtrada por estado, que no puede recortar en SQL (ver
  * `listMovementsPage`).
  */
@@ -235,6 +215,9 @@ export async function listPaidInstallments(userId: string) {
         amountCents: installment.amountCents,
         currency: movement.currency,
         kind: movement.kind,
+        // Para la torta del dashboard, que suma cuotas pagadas por categoría
+        // (criterio de lo percibido, §0 del plan v2).
+        categoryId: movement.categoryId,
         // Necesario para consolidar a pesos con el TC del propio movimiento.
         rate: movement.rate,
       })

@@ -1,4 +1,4 @@
-import { addMonthsClamped, type IsoDate } from "@/lib/dates"
+import { addMonthsClamped, isValidIsoDate, type IsoDate } from "@/lib/dates"
 
 /**
  * Techo de cuotas de un movimiento. La cota no es de negocio: es de volumen.
@@ -82,4 +82,77 @@ export function highestPaidNumber(installments: { number: number; paid: boolean 
 export function installmentsSumMatches(totalCents: number, amounts: number[]): boolean {
   if (amounts.length === 0) return false
   return amounts.reduce((a, b) => a + b, 0) === totalCents
+}
+
+/**
+ * La cuota que paga el botón "Pagar" de la fila (§5.1 del plan v2): la impaga
+ * de número más bajo. Por número y no por vencimiento porque el número es el
+ * orden del plan, y un vencimiento editado a mano no tiene por qué respetarlo;
+ * "Cuota 3/12" tiene que hablar de la tercera. `null` si ya están todas pagas.
+ */
+export function nextUnpaidInstallment<T extends { number: number; paid: boolean }>(
+  installments: T[],
+): T | null {
+  let next: T | null = null
+  for (const i of installments) {
+    if (!i.paid && (next === null || i.number < next.number)) next = i
+  }
+  return next
+}
+
+/**
+ * "15/12" si cae en el año de `today`, "15/12/2027" si no: la fila es angosta y
+ * el año casi siempre es el de hoy, pero un plan largo no puede dejar dudas.
+ */
+export function formatShortDate(iso: IsoDate, today: IsoDate): string {
+  const [year, month, day] = iso.split("-")
+  return year === today.slice(0, 4) ? `${day}/${month}` : `${day}/${month}/${year}`
+}
+
+/**
+ * Lo que muestra la fila sobre su próxima cuota: "Cuota 3/12 · vence 15/12", o
+ * "Vence 15/12" cuando el plan es de una sola (decir "Cuota 1/1" es ruido). Si
+ * ya venció, "venció" en lugar de "vence".
+ */
+export function describeNextInstallment(
+  next: { number: number; dueDate: IsoDate },
+  total: number,
+  today: IsoDate,
+): string {
+  const verb = next.dueDate < today ? "venció" : "vence"
+  const when = `${verb} ${formatShortDate(next.dueDate, today)}`
+  if (total <= 1) return when.charAt(0).toUpperCase() + when.slice(1)
+  return `Cuota ${next.number}/${total} · ${when}`
+}
+
+export type PaidDateResult =
+  | { ok: true; paidDate: IsoDate | null }
+  | { ok: false; message: string }
+
+/**
+ * La fecha que se guarda al marcar o desmarcar una cuota (§5.1 del plan v2).
+ *
+ * - Desmarcar siempre limpia la fecha: la CHECK de la migración 0009 exige
+ *   `paid_date` sólo cuando `paid = true`, y una fecha suelta en una cuota
+ *   impaga contaría como plata que se movió.
+ * - Marcar sin fecha es "hoy", el caso de un toque.
+ * - Una fecha futura se rechaza: con el criterio de lo percibido (§0) una cuota
+ *   existe el día que la plata sale, y ese día todavía no llegó. Para lo que
+ *   se va a pagar está el vencimiento.
+ *
+ * `today` entra como parámetro (el servidor pasa `todayInAr()`) para que la
+ * regla se pruebe sin reloj.
+ */
+export function resolvePaidDate(
+  paid: boolean,
+  requested: IsoDate | undefined,
+  today: IsoDate,
+): PaidDateResult {
+  if (!paid) return { ok: true, paidDate: null }
+  if (requested === undefined) return { ok: true, paidDate: today }
+  if (!isValidIsoDate(requested)) return { ok: false, message: "Elegí una fecha de pago válida." }
+  if (requested > today) {
+    return { ok: false, message: "La fecha de pago no puede ser posterior a hoy." }
+  }
+  return { ok: true, paidDate: requested }
 }

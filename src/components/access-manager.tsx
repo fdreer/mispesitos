@@ -2,6 +2,7 @@
 
 import { useActionState, useState, useTransition } from "react"
 import { Check, Copy } from "lucide-react"
+import { toast } from "sonner"
 
 import {
   AlertDialog,
@@ -101,6 +102,7 @@ export function RevokeInvitationButton({ id }: { id: string }) {
             setError(null)
             const result = await revokeInvitation(id)
             if (!result.ok) setError(result.message)
+            else toast.success("Invitación revocada")
           })
         }
       >
@@ -132,6 +134,7 @@ export function UserAccessButton({
     startTransition(async () => {
       const result = await setUserAccess(userId, enabled)
       if (!result.ok) setError(result.message)
+      else toast.success(enabled ? `${name} tiene acceso otra vez` : `${name} ya no tiene acceso`)
     })
   }
 

@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 
 import { CategoryBadge } from "@/components/category-badge"
 import { Badge } from "@/components/ui/badge"
@@ -31,7 +32,10 @@ export function CategoryManager({
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null)
 
   useEffect(() => {
-    if (state?.ok) router.refresh()
+    if (state?.ok) {
+      router.refresh()
+      toast.success("Categoría creada")
+    }
   }, [state, router])
 
   // La lista llega ordenada por nombre desde la consulta; separarlas mantiene
@@ -51,6 +55,8 @@ export function CategoryManager({
       const result = archived ? await unarchiveCategory(id) : await archiveCategory(id)
       if (!result.ok) {
         setRowError({ id, message: result.message })
+      } else {
+        toast.success(archived ? "Categoría desarchivada" : "Categoría archivada")
       }
     })
   }

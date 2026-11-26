@@ -41,6 +41,8 @@ function PendingCard({
                     rows={[{ ...item, paid: false }]}
                     currency={item.currency}
                     today={today}
+                    description={item.description}
+                    kind={item.kind}
                   />
                 </li>
               )

@@ -30,6 +30,9 @@ function diferida() {
   return { promesa, resolver }
 }
 
+/** Lo que el botón necesita además del id y el estado. */
+const BASE = { today: "2026-11-26", number: 3, description: "Televisor" }
+
 afterEach(() => {
   cleanup()
   mocks.setInstallmentPaid.mockReset()
@@ -40,23 +43,28 @@ describe("InstallmentPaidButton", () => {
     const { promesa, resolver } = diferida()
     mocks.setInstallmentPaid.mockReturnValue(promesa)
 
-    render(<InstallmentPaidButton id="ins-1" paid={false} />)
+    render(<InstallmentPaidButton id="ins-1" paid={false} {...BASE} />)
     fireEvent.click(screen.getByRole("button", { name: "Marcar pagada" }))
 
-    expect(mocks.setInstallmentPaid).toHaveBeenCalledWith("ins-1", true)
+    expect(mocks.setInstallmentPaid).toHaveBeenCalledWith("ins-1", true, undefined)
 
     await act(async () => {
       resolver({ ok: true })
     })
   })
 
-  it("una cuota pagada se desmarca", async () => {
+  it("una cuota pagada se desmarca, pero sólo después de confirmar", async () => {
     const { promesa, resolver } = diferida()
     mocks.setInstallmentPaid.mockReturnValue(promesa)
 
-    render(<InstallmentPaidButton id="ins-1" paid />)
-    fireEvent.click(screen.getByRole("button", { name: "Pagada" }))
+    render(<InstallmentPaidButton id="ins-1" paid paidDate="2026-11-20" {...BASE} />)
+    fireEvent.click(screen.getByRole("button", { name: "Pagada · 20/11" }))
 
+    // Desmarcar saca plata de lo percibido: el toque solo no alcanza.
+    expect(mocks.setInstallmentPaid).not.toHaveBeenCalled()
+    expect(screen.getByRole("alertdialog").textContent).toContain("Desmarcar la cuota 3")
+
+    fireEvent.click(screen.getByRole("button", { name: "Desmarcar" }))
     expect(mocks.setInstallmentPaid).toHaveBeenCalledWith("ins-1", false)
 
     await act(async () => {
@@ -74,8 +82,8 @@ describe("InstallmentPaidButton", () => {
 
     render(
       <>
-        <InstallmentPaidButton id="ins-1" paid={false} />
-        <InstallmentPaidButton id="ins-2" paid={false} />
+        <InstallmentPaidButton id="ins-1" paid={false} {...BASE} />
+        <InstallmentPaidButton id="ins-2" paid={false} {...BASE} />
       </>,
     )
 
@@ -91,7 +99,7 @@ describe("InstallmentPaidButton", () => {
     fireEvent.click(dos)
 
     expect(mocks.setInstallmentPaid).toHaveBeenCalledTimes(2)
-    expect(mocks.setInstallmentPaid).toHaveBeenLastCalledWith("ins-2", true)
+    expect(mocks.setInstallmentPaid).toHaveBeenLastCalledWith("ins-2", true, undefined)
 
     await act(async () => {
       primera.resolver({ ok: true })
@@ -108,7 +116,7 @@ describe("InstallmentPaidButton", () => {
     const { promesa, resolver } = diferida()
     mocks.setInstallmentPaid.mockReturnValue(promesa)
 
-    render(<InstallmentPaidButton id="ins-1" paid={false} />)
+    render(<InstallmentPaidButton id="ins-1" paid={false} {...BASE} />)
     const boton = screen.getByRole("button", { name: "Marcar pagada" })
     fireEvent.click(boton)
 
@@ -126,7 +134,7 @@ describe("InstallmentPaidButton", () => {
     const falla = diferida()
     mocks.setInstallmentPaid.mockReturnValueOnce(falla.promesa)
 
-    render(<InstallmentPaidButton id="ins-1" paid={false} />)
+    render(<InstallmentPaidButton id="ins-1" paid={false} {...BASE} />)
     const boton = screen.getByRole("button", { name: "Marcar pagada" })
     fireEvent.click(boton)
 
@@ -143,5 +151,29 @@ describe("InstallmentPaidButton", () => {
       exito.resolver({ ok: true })
     })
     expect(screen.queryByText("No pudimos actualizar la cuota.")).toBeNull()
+  })
+
+  it("deja elegir la fecha de pago, nunca una posterior a hoy", async () => {
+    const { promesa, resolver } = diferida()
+    mocks.setInstallmentPaid.mockReturnValue(promesa)
+
+    render(<InstallmentPaidButton id="ins-1" paid={false} {...BASE} />)
+    fireEvent.click(screen.getByRole("button", { name: "Elegir fecha de pago de la cuota 3" }))
+
+    // El 27 de noviembre es mañana: no se puede elegir.
+    const manana = screen.getByRole("button", { name: /27 de noviembre/ })
+    expect(manana).toHaveProperty("disabled", true)
+
+    fireEvent.click(screen.getByRole("button", { name: /20 de noviembre/ }))
+    expect(mocks.setInstallmentPaid).toHaveBeenCalledWith("ins-1", true, "2026-11-20")
+
+    await act(async () => {
+      resolver({ ok: true })
+    })
+  })
+
+  it("en un ingreso habla de cobrar, no de pagar", () => {
+    render(<InstallmentPaidButton id="ins-1" paid={false} kind="income" {...BASE} />)
+    expect(screen.getByRole("button", { name: "Marcar cobrada" })).toBeTruthy()
   })
 })

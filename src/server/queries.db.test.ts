@@ -729,7 +729,7 @@ describe("listMovements", () => {
 })
 
 describe("listPaidInstallments", () => {
-  it("trae sólo las cuotas pagadas, con la moneda y el tipo del movimiento", async () => {
+  it("trae sólo las cuotas pagadas, con la moneda, el tipo y la categoría del movimiento", async () => {
     const pagadas = await listPaidInstallments(USUARIO_A)
 
     // Ordenadas por importe acá y no en la consulta: listPaidInstallments no
@@ -738,6 +738,7 @@ describe("listPaidInstallments", () => {
       {
         paidDate: "2026-03-20",
         amountCents: 45_00,
+        categoryId: CAT.comida,
         currency: "ARS",
         kind: "expense",
         rate: "1.0000",
@@ -745,6 +746,7 @@ describe("listPaidInstallments", () => {
       {
         paidDate: "2026-03-01",
         amountCents: 80_00,
+        categoryId: CAT.sueldo,
         currency: "USD",
         kind: "income",
         rate: "900.0000",
@@ -752,6 +754,7 @@ describe("listPaidInstallments", () => {
       {
         paidDate: "2026-04-05",
         amountCents: 120_00,
+        categoryId: CAT.alquiler,
         currency: "USD",
         kind: "expense",
         rate: "1300.0000",
@@ -759,6 +762,7 @@ describe("listPaidInstallments", () => {
       {
         paidDate: SALDO_INICIAL_A,
         amountCents: 200_00,
+        categoryId: CAT.sueldo,
         currency: "USD",
         kind: "income",
         rate: "1200.0000",
