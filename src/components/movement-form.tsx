@@ -141,6 +141,7 @@ export function MovementForm({
   const router = useRouter()
   const ids = useId()
   const amountRef = useRef<HTMLInputElement>(null)
+  const descriptionRef = useRef<HTMLInputElement>(null)
   // "Guardar y cargar otro" (§5.2): el botón lo marca antes de enviar, y el
   // efecto del resultado lo lee para no cerrar el diálogo.
   const keepOpen = useRef(false)
@@ -402,6 +403,12 @@ export function MovementForm({
               inputMode="decimal"
               autoComplete="off"
               enterKeyHint="next"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  descriptionRef.current?.focus()
+                }
+              }}
               // Sin autoFocus editando: el diálogo se abre para cambiar
               // cualquier cosa, y el teclado del teléfono tapando media
               // pantalla no ayuda.
@@ -431,12 +438,19 @@ export function MovementForm({
         <div className="space-y-2">
           <Label htmlFor="description">Descripción</Label>
           <Input
+            ref={descriptionRef}
             id="description"
             name="description"
             required
             maxLength={200}
             autoComplete="off"
             enterKeyHint="next"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                document.getElementById("categoryId")?.focus()
+              }
+            }}
             list={suggestions.length > 0 ? datalistId : undefined}
             value={description}
             onChange={(e) => changeDescription(e.target.value)}
@@ -745,7 +759,7 @@ export function MovementForm({
 
       {/* Fijo abajo en el teléfono (§5.2): con el plan de cuotas desplegado
           el botón quedaba varias pantallas más abajo. */}
-      <div className="sticky -bottom-4 z-10 -mx-4 flex flex-col gap-2 border-t border-border/70 bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:flex-row-reverse sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
+      <div className="sticky -bottom-4 z-10 -mx-4 flex flex-col gap-2 border-t border-border/70 bg-background/95 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur sm:static sm:mx-0 sm:flex-row-reverse sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
         <Button
           type="submit"
           className="h-11 sm:flex-1"

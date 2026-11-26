@@ -248,6 +248,10 @@ corras contra producción, ni dos veces en paralelo.**
 - **Las acciones se confirman con un toast** (shadcn `sonner`, un único `<Toaster>` en
   `src/app/layout.tsx`). Los errores se muestran junto al control que falló, no en un
   toast que desaparece.
+- **Navegación adaptada por dispositivo:** riel lateral colapsable sólo en escritorio
+  (`lg:block`) y barra inferior fija en móvil (`Inicio · Egresos · + · Ingresos · Más`),
+  con carga rápida en hoja inferior casi a pantalla completa desde `+` y las rutas
+  secundarias + sesión en `Más`.
 - **La base es la última red, no sólo el depósito.** Las claves foráneas llevan adentro
   el `user_id` y el `kind`, así que un movimiento no puede referenciar la categoría de
   otro usuario ni una de un tipo que no le corresponde, aunque el código se olvide de

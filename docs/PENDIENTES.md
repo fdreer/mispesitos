@@ -1220,3 +1220,65 @@ de `.env.local`. Se agregaron igual tests en `src/server/queries.db.test.ts`
 para `dateField: "paid"` en `listMovements` y para `listPaidInstallmentsForReport`
 (incluyendo `perceivedPayment` con `usd_paid_rate`). Hay que correrlos contra
 una base descartable antes de mergear.
+
+---
+
+## 17. Fase 6 del plan v2: pulido móvil (2026-11-26)
+
+La fase "Pulido móvil" de `docs/superpowers/specs/2026-11-26-v2-plan.md` (§5.2,
+§5.3, §5.4, §6 y decisión §7.6): barra de navegación inferior fija en móvil con
+carga rápida integrada (`+`) y menú `Más`, formulario como hoja inferior casi a
+pantalla completa, foco encadenado con `enterKeyHint` y esqueletos con forma de
+tarjeta.
+
+| Qué | Dónde | Sección |
+|---|---|---|
+| Helpers puros de ruta activa (con subrutas), menú `Más`, tipo por defecto de carga rápida y evento global `openQuickAddSheet` | `src/lib/mobile-nav.ts` | §5.4, §7.6 |
+| Barra de navegación inferior fija en móvil (`Inicio · Egresos · + · Ingresos · Más`), hoja inferior `Más` con rutas restantes y `Salir`; riel lateral sólo en escritorio | `src/components/app-sidebar.tsx` | §5.4, §7.6 |
+| Carga rápida móvil (`+`): hoja inferior casi a pantalla completa con selector `Egreso \| Ingreso`, cargada sin bloquear dentro de `Suspense` desde el layout | `src/components/quick-add-sheet.tsx`, `src/components/mobile-quick-add-loader.tsx`, `src/app/(app)/layout.tsx` | §5.4 |
+| Padding inferior + `env(safe-area-inset-bottom)` en el layout para que el contenido no quede tapado por la barra fija | `src/app/(app)/layout.tsx` | §5.4 |
+| Formulario de movimiento como hoja inferior casi a pantalla completa en móvil (`92dvh`, handle superior, safe-area) y diálogo centrado en escritorio; foco encadenado con `Enter` entre Importe → Descripción → Categoría | `src/components/movement-form-dialog.tsx`, `src/components/movement-form.tsx` | §5.2, §5.4 |
+| Esqueleto genérico de pantallas con forma de tarjetas en móvil (`sm:hidden`) y grilla en escritorio | `src/app/(app)/loading.tsx` | §5.3, §6 |
+
+`tsc --noEmit` y `eslint` limpios (queda el aviso previo de `<img>` en
+`app-sidebar.tsx`). `drizzle-kit generate` dice `"No schema changes"` (no hubo
+cambios de esquema ni de consultas SQL). La suite pasó de 615 a 623 tests (622
+en verde; falla sólo el que ya fallaba antes, el tope de 120 filas en
+`movement-form.test.tsx`).
+
+### 17.1 Qué se decidió
+
+- **Botón `+` integrado en el centro de la barra inferior en lugar de un FAB superpuesto.**
+  Tener un botón flotante `+` abajo a la derecha encima de la barra fija de 5
+  lugares (`Inicio · Egresos · + · Ingresos · Más`) duplicaba la misma acción y
+  tapaba las acciones de fila y las tablas en `375px`. El `+` central destacado
+  en lima cumple el mismo rol desde cualquier pantalla sin solaparse con nada.
+- **Carga rápida no bloqueante en el layout.** `MobileQuickAddLoader` vive en un
+  `<Suspense fallback={null}>` dentro de `src/app/(app)/layout.tsx` y se conecta
+  con el `+` de `AppSidebar` mediante un evento de `window` definido en
+  `src/lib/mobile-nav.ts`. Así `AppSidebar` no arrastra `MovementForm` a su árbol
+  de imports y la navegación no espera a los catálogos para pintar la pantalla.
+- **Tipo inicial de carga rápida según pantalla.** Al abrir `+` desde `/ingresos`
+  arranca en `Ingreso`; desde cualquier otra pantalla arranca en `Egreso`. Arriba
+  de la hoja un segmentado permite cambiar entre `Egreso` e `Ingreso` sin cerrarla.
+- **Gesto de deslizar para pagar dejado afuera.** Era la última prioridad
+  opcional de §5.4; cada tarjeta móvil ya tiene el botón `Pagar` / `Cobrar` a un
+  toque sin desplegar (Fase 1), y evitar el swipe horizontal elimina el riesgo de
+  interferir con el scroll vertical de la lista o el gesto de volver atrás del
+  navegador.
+
+### 17.2 Lo que se verificó y lo que no
+
+Verificado en el navegador, escritorio (`1280×800`) y móvil (`375×812`), contra
+la instalación Docker local (no contra la base de `.env.local`), volviendo el
+viewport a escritorio al finalizar: riel lateral visible sólo en escritorio y
+barra inferior fija sólo en móvil (`Inicio · Egresos · + · Ingresos · Más`) sin
+scroll horizontal; hoja `Más` con `Tarjetas`, `Informes`, `Cambios`, `Categorías`,
+`Ajustes` y `Salir`; navegación a `/tarjetas` y `/informes` con padding inferior
+suficiente para no tapar el contenido final; apertura de `+` como hoja inferior
+casi a pantalla completa en `Egreso` desde `/dashboard` y en `Ingreso` desde
+`/ingresos`, con botón `Guardar` fijo abajo; y `MovementFormDialog` ("Nuevo" en
+`/egresos`) como hoja inferior en móvil y diálogo centrado en escritorio.
+
+**No hubo cambios de base ni de consultas**, así que no se agregaron ni
+modificaron tests `*.db.test.ts` ni se corrió `pnpm test:db`.

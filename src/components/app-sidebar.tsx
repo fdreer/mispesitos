@@ -9,7 +9,8 @@ import {
   CreditCard,
   LayoutDashboard,
   LogOut,
-  Menu,
+  MoreHorizontal,
+  Plus,
   Settings,
   Tags,
   TrendingDown,
@@ -18,13 +19,30 @@ import {
 
 import { signOut } from "@/auth-client"
 import { Button } from "@/components/ui/button"
-import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
+import { isMoreMenuActive, isRouteActive, openQuickAddSheet } from "@/lib/mobile-nav"
 import { cn } from "@/lib/utils"
 
 const LINKS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/ingresos", label: "Ingresos", icon: TrendingUp },
   { href: "/egresos", label: "Egresos", icon: TrendingDown },
+  { href: "/tarjetas", label: "Tarjetas", icon: CreditCard },
+  { href: "/informes", label: "Informes", icon: BarChart3 },
+  { href: "/cambios", label: "Cambios", icon: ArrowLeftRight },
+  { href: "/categorias", label: "Categorías", icon: Tags },
+  { href: "/ajustes", label: "Ajustes", icon: Settings },
+]
+
+/** Rutas que se abren desde "Más" en la barra inferior móvil (§5.4 y §7.6). */
+const MORE_LINKS = [
   { href: "/tarjetas", label: "Tarjetas", icon: CreditCard },
   { href: "/informes", label: "Informes", icon: BarChart3 },
   { href: "/cambios", label: "Cambios", icon: ArrowLeftRight },
@@ -57,10 +75,6 @@ const RAIL_LABEL = cn(
   "group-focus-within/rail:max-w-32 group-focus-within/rail:opacity-100",
 )
 
-/** Lo mismo, pero siempre abierto: el drawer de mobile no se contrae nunca. */
-const FULL_ITEM = "justify-start gap-2.5 px-2.5"
-const FULL_LABEL = "max-w-32 opacity-100"
-
 const ITEM_BASE =
   "flex items-center rounded-lg py-2 text-[13px] whitespace-nowrap transition-all"
 
@@ -78,31 +92,11 @@ function Brand({ rail }: { rail: boolean }) {
   )
 }
 
-/**
- * Los links de navegación, compartidos entre el riel de escritorio y el drawer
- * de mobile: mismo orden, mismos íconos, mismo estado activo.
- *
- * `rail` elige entre las dos formas. En el drawer, `onNavigate` cierra el
- * Sheet: un `Link` no dispara el `onOpenChange` de Radix, así que sin eso el
- * drawer se quedaría abierto tapando la pantalla nueva.
- *
- * La etiqueta se recorta con `max-w-0` y `overflow-hidden`, no con `hidden`:
- * sigue en el árbol de accesibilidad, así que cada ícono conserva su nombre
- * aunque el riel esté contraído.
- */
-function NavLinks({
-  pathname,
-  rail,
-  onNavigate,
-}: {
-  pathname: string
-  rail: boolean
-  onNavigate?: () => void
-}) {
+function DesktopNavLinks({ pathname }: { pathname: string }) {
   return (
-    <nav className="flex flex-1 flex-col gap-0.5 px-2">
+    <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-0.5 px-2">
       {LINKS.map((link) => {
-        const active = pathname === link.href
+        const active = isRouteActive(pathname, link.href)
         const Icon = link.icon
         return (
           <Link
@@ -116,17 +110,17 @@ function NavLinks({
              */
             onClick={(e) => {
               e.currentTarget.blur()
-              onNavigate?.()
             }}
             aria-current={active ? "page" : undefined}
             className={cn(
               ITEM_BASE,
-              rail ? cn(RAIL_COLLAPSED, RAIL_EXPANDED) : FULL_ITEM,
+              RAIL_COLLAPSED,
+              RAIL_EXPANDED,
               active ? "bg-accent text-paper" : "text-mist hover:bg-accent/50 hover:text-paper",
             )}
           >
             <Icon className="size-4 shrink-0" />
-            <span className={rail ? RAIL_LABEL : FULL_LABEL}>{link.label}</span>
+            <span className={RAIL_LABEL}>{link.label}</span>
           </Link>
         )
       })}
@@ -134,22 +128,24 @@ function NavLinks({
   )
 }
 
-export function AppSidebar() {
+type Props = {
+  /** Callback opcional para tests; en producción dispara el evento de QuickAddSheet. */
+  onQuickAdd?: () => void
+}
+
+export function AppSidebar({ onQuickAdd }: Props = {}) {
   const pathname = usePathname()
   const router = useRouter()
   const [pending, setPending] = useState(false)
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
 
-  // Cierra el drawer al cambiar de pantalla (además del cierre por click en un
-  // link, ver NavLinks): cubre volver atrás/adelante con el navegador, que
-  // tampoco pasa por `onNavigate`. Ajuste de estado durante el render
-  // comparando contra el último valor aplicado, igual que `movement-form.tsx`:
-  // es el patrón que recomienda React para "resetear estado cuando cambia una
-  // entrada", y evita el render en cascada de hacerlo en un `useEffect`.
+  // Cierra la hoja "Más" al cambiar de pantalla (incluye volver atrás/adelante
+  // con el navegador). Ajuste de estado durante el render comparando contra el
+  // último pathname, igual que `movement-form.tsx`.
   const [lastPathname, setLastPathname] = useState(pathname)
   if (pathname !== lastPathname) {
     setLastPathname(pathname)
-    setMobileOpen(false)
+    setMoreOpen(false)
   }
 
   async function handleSignOut() {
@@ -157,46 +153,147 @@ export function AppSidebar() {
     const result = await signOut()
     setPending(false)
     if (result.error) return
+    setMoreOpen(false)
     router.push("/login")
     router.refresh()
   }
 
   const salir = pending ? "Saliendo…" : "Salir"
+  const moreActive = isMoreMenuActive(pathname)
+
+  function handleQuickAdd() {
+    if (onQuickAdd) {
+      onQuickAdd()
+    } else {
+      openQuickAddSheet()
+    }
+  }
 
   return (
     <>
-      {/* Barra mobile: reemplaza al riel por debajo de `lg`, donde 224px de
-          ancho fijo no dejaban lugar para el contenido (con 375px de viewport,
-          apenas 151px libres). */}
-      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-graphite bg-carbon px-4 py-3 lg:hidden">
-        <Brand rail={false} />
-        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetTrigger asChild>
-            <Button type="button" variant="ghost" size="icon-sm">
-              <Menu />
-              <span className="sr-only">Abrir menú</span>
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="left" className="w-64 gap-0 bg-carbon p-0">
-            <SheetTitle className="sr-only">Menú de navegación</SheetTitle>
-            <div className="flex h-full flex-col py-4">
-              <NavLinks pathname={pathname} rail={false} onNavigate={() => setMobileOpen(false)} />
-              <div className="px-2 pt-2">
+      {/*
+        Barra de navegación inferior fija en móvil (§5.4 y decisión §7.6):
+        Inicio · Egresos · + · Ingresos · Más.
+        La sidebar queda sólo en escritorio (`lg:block`). El botón central "+"
+        inicia la carga rápida sin solaparse con tablas ni gráficos.
+      */}
+      <nav
+        aria-label="Navegación móvil"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-graphite bg-carbon/95 backdrop-blur pb-[env(safe-area-inset-bottom)] lg:hidden"
+      >
+        <div className="mx-auto grid h-16 max-w-lg grid-cols-5 items-center px-1">
+          <Link
+            href="/dashboard"
+            aria-current={isRouteActive(pathname, "/dashboard") ? "page" : undefined}
+            className={cn(
+              "flex flex-col items-center justify-center gap-1 rounded-lg py-1.5 text-[11px] font-medium transition-colors",
+              isRouteActive(pathname, "/dashboard") ? "text-paper" : "text-fog hover:text-mist",
+            )}
+          >
+            <LayoutDashboard className="size-5 shrink-0" />
+            <span>Inicio</span>
+          </Link>
+
+          <Link
+            href="/egresos"
+            aria-current={isRouteActive(pathname, "/egresos") ? "page" : undefined}
+            className={cn(
+              "flex flex-col items-center justify-center gap-1 rounded-lg py-1.5 text-[11px] font-medium transition-colors",
+              isRouteActive(pathname, "/egresos") ? "text-paper" : "text-fog hover:text-mist",
+            )}
+          >
+            <TrendingDown className="size-5 shrink-0" />
+            <span>Egresos</span>
+          </Link>
+
+          <div className="flex items-center justify-center">
+            <button
+              type="button"
+              onClick={handleQuickAdd}
+              aria-label="Cargar movimiento"
+              className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Plus className="size-5 stroke-[2.25]" />
+            </button>
+          </div>
+
+          <Link
+            href="/ingresos"
+            aria-current={isRouteActive(pathname, "/ingresos") ? "page" : undefined}
+            className={cn(
+              "flex flex-col items-center justify-center gap-1 rounded-lg py-1.5 text-[11px] font-medium transition-colors",
+              isRouteActive(pathname, "/ingresos") ? "text-paper" : "text-fog hover:text-mist",
+            )}
+          >
+            <TrendingUp className="size-5 shrink-0" />
+            <span>Ingresos</span>
+          </Link>
+
+          <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
+            <SheetTrigger asChild>
+              <button
+                type="button"
+                aria-expanded={moreOpen}
+                className={cn(
+                  "flex flex-col items-center justify-center gap-1 rounded-lg py-1.5 text-[11px] font-medium transition-colors",
+                  moreActive || moreOpen ? "text-paper" : "text-fog hover:text-mist",
+                )}
+              >
+                <MoreHorizontal className="size-5 shrink-0" />
+                <span>Más</span>
+              </button>
+            </SheetTrigger>
+            <SheetContent
+              side="bottom"
+              className="gap-0 rounded-t-2xl border-t border-graphite bg-carbon p-0 pb-[calc(1rem+env(safe-area-inset-bottom))]"
+            >
+              <div aria-hidden className="mx-auto mt-2.5 h-1 w-10 rounded-full bg-smoke" />
+              <SheetHeader className="border-b border-graphite px-4 py-3">
+                <SheetTitle className="flex items-center gap-2 text-sm">
+                  <Brand rail={false} />
+                </SheetTitle>
+                <SheetDescription className="sr-only">
+                  Otras secciones y opciones de cuenta
+                </SheetDescription>
+              </SheetHeader>
+              <div className="flex flex-col gap-0.5 p-2">
+                {MORE_LINKS.map((link) => {
+                  const active = isRouteActive(pathname, link.href)
+                  const Icon = link.icon
+                  return (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      onClick={() => setMoreOpen(false)}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-3 text-sm transition-colors",
+                        active
+                          ? "bg-accent text-paper"
+                          : "text-mist hover:bg-accent/50 hover:text-paper",
+                      )}
+                    >
+                      <Icon className="size-4 shrink-0" />
+                      <span>{link.label}</span>
+                    </Link>
+                  )
+                })}
+                <div className="my-1.5 border-t border-graphite" />
                 <Button
                   type="button"
                   variant="ghost"
                   onClick={handleSignOut}
                   disabled={pending}
-                  className={cn("w-full text-fog", FULL_ITEM)}
+                  className="h-11 w-full justify-start gap-3 px-3 text-sm text-fog hover:text-paper"
                 >
                   <LogOut className="size-4 shrink-0" />
                   {salir}
                 </Button>
               </div>
-            </div>
-          </SheetContent>
-        </Sheet>
-      </header>
+            </SheetContent>
+          </Sheet>
+        </div>
+      </nav>
 
       {/*
         El riel de escritorio. El <aside> ocupa SIEMPRE 56px en el flujo y el
@@ -221,7 +318,7 @@ export function AppSidebar() {
         >
           <Brand rail />
           <div className="flex-1 pt-3">
-            <NavLinks pathname={pathname} rail />
+            <DesktopNavLinks pathname={pathname} />
           </div>
 
           <div className="px-2 pb-4">
