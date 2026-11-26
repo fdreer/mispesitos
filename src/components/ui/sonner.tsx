@@ -3,10 +3,6 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 
-/**
- * El Toaster de shadcn, sin `next-themes`: la app tiene un solo tema, el
- * oscuro (ver §2 de docs/PENDIENTES.md), así que no hay preferencia que leer.
- */
 const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner

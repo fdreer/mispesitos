@@ -14,6 +14,7 @@ y [Acceso privado e invitaciones](#acceso-privado-e-invitaciones).
 - Sistema visual: `docs/superpowers/specs/2026-08-10-linear-design-system-design.md`
 - Plan v2 (tarjetas, subcategorías, informes, self-hosting): `docs/superpowers/specs/2026-11-26-v2-plan.md`
 - **Lo que falta y lo que se decidió no hacer: [`docs/PENDIENTES.md`](docs/PENDIENTES.md)**
+- **Notas técnicas y decisiones de implementación: [`docs/notas-tecnicas.md`](docs/notas-tecnicas.md)**
 
 ## Stack
 

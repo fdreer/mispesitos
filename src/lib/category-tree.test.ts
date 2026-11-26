@@ -24,7 +24,6 @@ function cat(
   return { id, name, parentId, archived: false, color: null, ...extra }
 }
 
-/** Un set chico con las dos formas: un padre con hijas y una suelta. */
 const HOGAR = cat("hogar", "Hogar", null, { color: "azul" })
 const ALQUILER = cat("alquiler", "Alquiler", "hogar")
 const EXPENSAS = cat("expensas", "Expensas", "hogar")
@@ -52,8 +51,6 @@ describe("isLeafCategory", () => {
     expect(isLeafCategory(TODAS, "ocio")).toBe(true)
   })
 
-  // La misma respuesta que el trigger de la base: si la interfaz contara sólo
-  // las activas, ofrecería un padre que después falla al guardar.
   it("las hijas archivadas también cuentan", () => {
     const soloArchivadas = [HOGAR, { ...ALQUILER, archived: true }]
     expect(isLeafCategory(soloArchivadas, "hogar")).toBe(false)
@@ -170,8 +167,6 @@ describe("spendByParent", () => {
   })
 
   it("lo que no tiene categoría, o tiene una que no vino en la lista, va a Sin categoría", () => {
-    // Pasa si la lista viniera sólo con las activas y el gasto fuera de una
-    // archivada: sin esto la torta mostraría "undefined" como nombre.
     const result = spendByParent(
       [
         { categoryId: null, arsCents: 700 },
@@ -189,8 +184,6 @@ describe("spendByParent", () => {
   })
 
   it("suma junto lo de dos categorías con ids distintos que comparten nombre", () => {
-    // Puede pasar de verdad: el índice único de nombres sólo mira las activas,
-    // así que una archivada y una activa nueva pueden llamarse igual.
     const result = spendByParent(
       [
         { categoryId: "activa", arsCents: 1_000 },

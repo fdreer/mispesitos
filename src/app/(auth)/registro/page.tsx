@@ -21,17 +21,6 @@ const loginLink = (
   </p>
 )
 
-/**
- * Tres caras, según el estado de la instalación (§0.1 del plan v2):
- *
- * - **Vacía:** quien llega crea la cuenta de administrador.
- * - **Con invitación válida en la cookie:** el formulario, con el correo fijo
- *   si la invitación es para uno.
- * - **Sin invitación:** el aviso de instalación privada, sin formulario.
- *
- * La página sólo decide qué mostrar. Quién puede crear una cuenta lo decide el
- * hook de src/auth.ts.
- */
 export default async function RegistroPage({ searchParams }: Props) {
   if (await getOptionalUser()) redirect("/dashboard")
 

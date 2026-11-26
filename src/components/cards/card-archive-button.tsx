@@ -8,11 +8,6 @@ import { Archive, ArchiveRestore } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { setCardArchived } from "@/server/actions/cards"
 
-/**
- * Archivar o desarchivar una tarjeta. Sin confirmación: no borra nada y se
- * deshace con el mismo botón. Archivada deja de ofrecerse como medio de pago;
- * sus compras y resúmenes siguen ahí.
- */
 export function CardArchiveButton({
   id,
   name,

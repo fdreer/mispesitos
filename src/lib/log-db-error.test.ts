@@ -2,12 +2,6 @@ import { describe, it, expect, vi, afterEach } from "vitest"
 
 import { logDbError } from "@/lib/log-db-error"
 
-/**
- * Arma un `DrizzleQueryError` como el que arma Drizzle de verdad: `message`
- * es el dump completo de la consulta con sus params adentro, y la causa
- * real —el `PostgresError` de postgres.js— vive en `cause`. Mismo shape que
- * usa `db-errors.test.ts` para `isUniqueViolation`.
- */
 function drizzleQueryError(mensajeQuery: string, cause: unknown): Error {
   const error = new Error(mensajeQuery)
   Object.assign(error, { cause })
@@ -42,9 +36,6 @@ describe("logDbError", () => {
       message: 'duplicate key value violates unique constraint "movement_external_id_unique"',
     })
 
-    // La aserción que importa: ni un valor de la fila ni el propio marcador
-    // "params:" pueden aparecer en NINGUNA parte de lo que se logueó, esté
-    // donde esté anidado.
     const volcado = JSON.stringify(espia.mock.calls)
     expect(volcado).not.toContain("Alquiler de marzo")
     expect(volcado).not.toContain("150000")
@@ -54,9 +45,6 @@ describe("logDbError", () => {
   it("si no hay cause para desenvolver (Drizzle envuelve dos veces, u otra versión), no deja pasar el dump de la consulta", () => {
     const espia = vi.spyOn(console, "error").mockImplementation(() => {})
 
-    // Sin `cause`: el helper usa el error tal cual, y su `message` sigue
-    // siendo el dump con los params adentro. Este es el caso exacto que
-    // motiva el guard —si se lo saca, esta prueba tiene que fallar.
     const error = new Error(dumpDeLaConsulta)
 
     logDbError("createMovement", error)

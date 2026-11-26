@@ -17,14 +17,6 @@ import type { SpendGroup } from "@/lib/category-tree"
 import { formatAxisPesos, formatMoney } from "@/lib/money"
 import { cn } from "@/lib/utils"
 
-/*
- * La paleta del sistema, repetida acá en hexadecimal a propósito: Recharts
- * recibe colores como strings de JavaScript y no puede leer los tokens de
- * Tailwind. Los valores son los de `globals.css`; si allá cambian, acá también.
- *
- * El lima ácido no está en esta lista y no tiene que estarlo: es el color de la
- * acción principal y de nada más.
- */
 const FOG = "#8a8f98"
 const SIGNAL_TEAL = "#02b8cc"
 const PULSE_GREEN = "#27a644"
@@ -35,12 +27,6 @@ const tip = (value: number) => formatMoney(Math.round(value * 100), "ARS")
 
 const AXIS_TICK = { fill: FOG, fontSize: 12 } as const
 
-/**
- * Pasarle `formatter` a ChartTooltipContent le delega toda la fila —punto de
- * color incluido, no sólo el número— así que arma la fila entera: el punto
- * toma `item.payload.fill` (las porciones de la torta) o si no `item.color`
- * (la referencia `var(--color-...)` que ya trae la Line/Bar).
- */
 const moneyTooltipFormatter: NonNullable<ComponentProps<typeof ChartTooltipContent>["formatter"]> = (
   value,
   name,
@@ -67,9 +53,6 @@ const MONTHLY_CONFIG = {
   Egresos: { label: "Egresos", color: CORAL_RED },
 } satisfies ChartConfig
 
-// Genérico a propósito: los nombres de categoría son datos del usuario, no se
-// conocen en build time. El color de cada porción sale de `fill` en el propio
-// dato (ver `CategoryPie` abajo), no de esta config.
 const PIE_CONFIG = { value: { label: "Importe" } } satisfies ChartConfig
 
 export function ProjectionChart({
@@ -102,24 +85,9 @@ export function ProjectionChart({
   )
 }
 
-/** El color de una porción: el tono resuelto, o el hash para "Sin categoría". */
 const groupColor = (g: { name: string; hue: number | null }) =>
   hueColor(g.hue ?? categoryHue(g.name))
 
-/**
- * La torta de gastos del mes, por categoría PADRE (§2.3 del plan v2), con el
- * desglose por subcategoría en la lista de abajo.
- *
- * Por padre y no por hoja: con subcategorías, la torta por hoja se partía en
- * porciones finitas ("Alquiler", "Expensas", "Servicios"…) y lo que se quiere
- * ver de un vistazo es cuánto se va en Hogar. El detalle está a un clic, en la
- * lista, sin cambiar de pantalla.
- *
- * El color sale de la categoría (el elegido, o el hash del nombre; ver
- * `resolveCategoryHue`), no de su posición en la lista: la misma categoría no
- * cambia de color de un mes a otro con sólo gastar más o menos, y coincide con
- * su badge en la tabla de egresos.
- */
 export function CategoryPie({ data }: { data: SpendGroup[] }) {
   if (data.length === 0) {
     return (
@@ -153,12 +121,6 @@ export function CategoryPie({ data }: { data: SpendGroup[] }) {
   )
 }
 
-/**
- * La leyenda de la torta, que es además el desglose: cada padre con su
- * importe y su porcentaje, y los que tienen subcategorías se despliegan.
- * Sin esta lista, el importe de cada porción sólo se veía pasando el mouse,
- * que en un teléfono no existe.
- */
 function CategoryBreakdown({ data, total }: { data: SpendGroup[]; total: number }) {
   const [open, setOpen] = useState<Set<string>>(new Set())
   const toggle = (name: string) =>
@@ -175,7 +137,6 @@ function CategoryBreakdown({ data, total }: { data: SpendGroup[]; total: number 
       {data.map((group, index) => {
         const expandable = group.children.length > 0
         const isOpen = open.has(group.name)
-        // Por posición y no por nombre: un nombre con espacios no es un id.
         const detailsId = `desglose-${index}`
         const row = (
           <>

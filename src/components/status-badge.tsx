@@ -4,11 +4,6 @@ import { AlertCircle, CheckCircle2, Clock } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import type { MovementStatus } from "@/lib/movement-status"
 
-/**
- * Qué color e icono le toca a cada estado. Vive acá para que la tabla y las
- * pastillas compartan la misma referencia visual: nunca sólo el color (§5.3
- * del plan v2).
- */
 const STATUS_VARIANT: Record<MovementStatus, "destructive" | "warning" | "success"> = {
   overdue: "destructive",
   pending: "warning",

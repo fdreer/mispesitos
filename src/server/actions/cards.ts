@@ -21,16 +21,6 @@ import { cardSchema, positiveRate, statementDatesSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { requireUser } from "@/server/session"
 
-/**
- * Las acciones de /tarjetas (§1 del plan v2, Fase 3): alta, edición y
- * archivo de tarjetas, corrección de las fechas de un resumen, y pagarlo o
- * desmarcarlo.
- *
- * Todo lo que toca un resumen revalida la app entera: pagar un resumen mueve
- * el saldo del dashboard, el estado de las compras en /egresos y la posición
- * en dólares de /cambios.
- */
-
 const cardIdSchema = z.uuid("Esa tarjeta no existe.")
 const statementIdSchema = z.uuid("Ese resumen no existe.")
 
@@ -90,11 +80,6 @@ export async function createCard(
   return success()
 }
 
-/**
- * Editar el día de cierre o de vencimiento cambia sólo lo que se PROPONE para
- * los resúmenes que todavía no existen. Los que ya existen tienen sus fechas
- * reales y no se tocan: para eso está corregir cada resumen.
- */
 export async function updateCard(
   _prev: ActionResult | null,
   formData: FormData,
@@ -136,11 +121,6 @@ export async function updateCard(
   return success()
 }
 
-/**
- * Se archiva, no se borra (§1.2): tiene compras y resúmenes colgando.
- * Archivada deja de ofrecerse como medio de pago, pero sus compras y
- * resúmenes siguen ahí, y se puede seguir pagando lo que deba.
- */
 export async function setCardArchived(id: string, archived: boolean): Promise<ActionResult> {
   const user = await requireUser()
   const parsed = cardIdSchema.safeParse(id)
@@ -169,20 +149,6 @@ export async function setCardArchived(id: string, archived: boolean): Promise<Ac
 
 const MENSAJE_PAGADO = "El resumen está pagado: desmarcalo para cambiarle las fechas."
 
-/**
- * Corrige el cierre y el vencimiento de un resumen (§1.2): cuando llega el
- * resumen real, las fechas propuestas se ajustan y las cuotas de ese resumen
- * heredan el nuevo vencimiento, en la misma transacción.
- *
- * Si el resumen todavía no existe —el que está acumulando, sin ninguna compra
- * aún— se crea con las fechas que llegan: así se le puede corregir el cierre
- * antes de que entre la primera compra, que es justo cuando importa.
- *
- * Cambiar el cierre NO reasigna las compras que ya están en el resumen: sólo
- * decide dónde caen las que se carguen desde ahora. Mover compras ya
- * cargadas entre resúmenes sería reescribir planes de cuotas por un cambio
- * de fecha, y eso no lo pide el plan.
- */
 export async function updateStatementDates(
   _prev: ActionResult | null,
   formData: FormData,
@@ -256,19 +222,6 @@ const paymentSchema = z.object({
   mode: z.enum(["usd", "ars"]).catch("usd"),
 })
 
-/**
- * Paga un resumen (§1.3): pone la fecha en el resumen y en TODAS sus cuotas,
- * en una sola transacción. Sólo pago total (decisión 7.3).
- *
- * La parte en dólares (decisión 7.1) se paga con dólares —las cuotas USD
- * descuentan del saldo en dólares, como cualquier otra— o con pesos al TC
- * que se informe, que queda guardado en el resumen. Las cuotas no se
- * reescriben: la traducción a pesos ocurre al leer (`perceivedPayment` en
- * @/lib/cards), así que desmarcar vuelve todo atrás.
- *
- * Las reglas de qué fecha y qué TC se aceptan viven en
- * `resolveStatementPayment`, probadas sin base.
- */
 export async function payStatement(
   _prev: ActionResult | null,
   formData: FormData,
@@ -282,7 +235,6 @@ export async function payStatement(
   if (!parsed.success) return failure("Ese resumen no existe.")
   const mode: StatementPaymentMode = parsed.data.mode
 
-  // El TC sólo se lee si se va a usar: con dólares, el campo ni se muestra.
   let usdRate: number | null = null
   const rawRate = String(formData.get("usdPaidRate") ?? "")
   if (mode === "ars" && rawRate !== "") {
@@ -351,7 +303,6 @@ export async function payStatement(
   return success()
 }
 
-/** Desmarca el resumen y, con él, todas sus cuotas (§1.3). */
 export async function unpayStatement(statementId: string): Promise<ActionResult> {
   const user = await requireUser()
   const parsed = statementIdSchema.safeParse(statementId)

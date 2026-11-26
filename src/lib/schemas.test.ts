@@ -60,9 +60,6 @@ describe("settingsSchema", () => {
   })
 
   it("sigue admitiendo un saldo inicial en cero", () => {
-    // `amountCents` la comparten los dos esquemas: la cota de "mayor a cero"
-    // es de movementSchema y no puede haberse colado acá, donde arrancar sin
-    // un peso y sin un dólar es un caso legítimo.
     const result = settingsSchema.safeParse({
       initialBalanceArsCents: "0",
       initialBalanceUsdCents: "0",
@@ -81,22 +78,12 @@ describe("settingsSchema", () => {
   })
 
   it("lee el TC del saldo inicial escrito como se escribe acá", () => {
-    // "1.450" son mil cuatrocientos cincuenta pesos por dólar. Leerlo como
-    // 1,45 valuaría los dólares del saldo inicial en casi nada y arrastraría
-    // el TC promedio de toda la posición.
     const result = settingsSchema.safeParse({ ...valid, initialBalanceUsdRate: "1.450" })
     expect(result.success).toBe(true)
     if (!result.success) return
     expect(result.data.initialBalanceUsdRate).toBe(1450)
   })
 
-  /**
-   * NO BORRAR NI RELAJAR. `user_settings.initial_balance_usd_rate` es
-   * `numeric(12,4)`, la misma columna que `movement.rate`, así que necesita la
-   * misma cota. Va aparte porque este TC pasa por `exchangeRate`, que admite
-   * cero, y el del movimiento por `positiveRate`, que no: son dos piezas
-   * distintas y la cota tiene que estar en las dos.
-   */
   it("rechaza un TC del saldo inicial que no entra en la columna", () => {
     for (const tipeado of ["100000000", "100.000.000"]) {
       const result = settingsSchema.safeParse({ ...valid, initialBalanceUsdRate: tipeado })
@@ -116,8 +103,6 @@ describe("settingsSchema", () => {
   })
 
   it("la cota no le come el cero al saldo inicial sin dólares", () => {
-    // `exchangeRate` admite cero a propósito y `positiveRate` no: la cota se
-    // agrega sin pisar esa diferencia.
     const result = settingsSchema.safeParse({
       ...valid,
       initialBalanceUsdCents: "0",
@@ -180,7 +165,6 @@ describe("movementSchema", () => {
 
   it("acepta un movimiento en cuotas cuya suma cierra, incluido el reparto con resto", () => {
     const plan = buildInstallments(10_000, 3, "2026-08-10")
-    // 10.000 / 3 = 3333 / 3333 / 3334: la última cuota absorbe el resto.
     expect(plan.map((i) => i.amountCents)).toEqual([3333, 3333, 3334])
 
     const result = movementSchema.safeParse({
@@ -209,9 +193,6 @@ describe("movementSchema", () => {
   })
 
   it("lee el TC de un movimiento con el mismo formato que el importe", () => {
-    // El campo de TC y el del importe son dos cajas de texto pegadas, en el
-    // mismo formulario. Si "1.450" vale 1450 en una y 1,45 en la otra, el
-    // movimiento en dólares queda valuado en la milésima parte y nada avisa.
     const usd = {
       ...validMovement,
       currency: "USD",
@@ -270,16 +251,6 @@ describe("movementSchema", () => {
     expect(fieldError(result, "rate")).toBeDefined()
   })
 
-  /**
-   * NO BORRAR NI RELAJAR. `movement.rate` es `numeric(12,4)`: 8 dígitos enteros
-   * y 4 decimales, ni uno más. Lo que no entra en la columna se rechaza acá, en
-   * el campo, y no en el INSERT.
-   *
-   * Los dos lados fallaban distinto y los dos mal: un TC de 9 dígitos hacía que
-   * Postgres tirara y el usuario viera "No pudimos guardar el movimiento" sin
-   * saber qué campo mirar, y uno de 5 decimales ni siquiera fallaba —Postgres lo
-   * redondeaba en silencio y guardaba un número distinto del que se escribió.
-   */
   const usdConTc = (rate: string) => ({
     ...validMovement,
     currency: "USD",
@@ -299,8 +270,6 @@ describe("movementSchema", () => {
   })
 
   it("rechaza un TC con más de cuatro decimales, que la base redondearía en silencio", () => {
-    // "1450,75259" se guardaría como 1450,7526: un TC que la persona nunca
-    // escribió, sin un solo error a la vista.
     for (const tipeado of ["1450,75259", "1,00001", "0,123456"]) {
       const result = movementSchema.safeParse(usdConTc(tipeado))
       expect(result.success).toBe(false)
@@ -311,8 +280,6 @@ describe("movementSchema", () => {
   })
 
   it("acepta el TC más grande y más preciso que la columna sí guarda", () => {
-    // El borde exacto de numeric(12,4). Un test que sólo rechazara lo grande
-    // pasaría igual con una cota inventada más chica que la columna.
     const result = movementSchema.safeParse(usdConTc("99.999.999,9999"))
     expect(result.success).toBe(true)
     if (!result.success) return
@@ -344,9 +311,6 @@ describe("movementSchema", () => {
   })
 
   it("rechaza una fecha que tiene la forma correcta pero no existe", () => {
-    // El 30 de febrero pasaba la validación de formato y llegaba hasta el
-    // INSERT, donde la columna `date` lo rechaza: el usuario veía el error
-    // genérico de "no pudimos guardar" y ninguna pista de cuál era el campo.
     for (const fecha of ["2026-02-30", "2026-02-29", "2026-13-01", "2026-08-00"]) {
       const result = movementSchema.safeParse({ ...validMovement, date: fecha })
       expect(result.success).toBe(false)

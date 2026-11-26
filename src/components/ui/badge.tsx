@@ -14,9 +14,6 @@ const badgeVariants = cva(
           "bg-secondary text-muted-foreground [a]:hover:bg-secondary/80",
         destructive:
           "bg-coral-red/15 text-coral-red focus-visible:ring-destructive/20 [a]:hover:bg-coral-red/25",
-        // Las dos que le faltaban al juego para poder pintar los tres estados
-        // de un movimiento. Mismo patrón que `destructive`: el color al 15%
-        // de fondo y pleno en el texto.
         success: "bg-pulse-green/15 text-pulse-green [a]:hover:bg-pulse-green/25",
         warning: "bg-ember-orange/15 text-ember-orange [a]:hover:bg-ember-orange/25",
         outline:

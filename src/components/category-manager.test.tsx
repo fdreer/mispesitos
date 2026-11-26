@@ -6,7 +6,6 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { CategoryManager } from "@/components/category-manager"
 import type { Category } from "@/server/queries"
 
-/** Las dos fronteras de siempre: las Server Actions y el router de Next. */
 const createCategory = vi.fn()
 const updateCategory = vi.fn()
 const moveCategory = vi.fn()
@@ -48,11 +47,6 @@ function montar(categories: Category[], movementCounts: Record<string, number> =
   )
 }
 
-/**
- * Abre el menú ⋯ de una fila y elige una acción. Con Enter y no con clic:
- * Radix abre el menú con `pointerdown`, que jsdom no arma completo (mismo
- * recurso que los tests del menú de movimientos).
- */
 async function elegirDelMenu(nombre: string, accion: string | RegExp) {
   fireEvent.keyDown(screen.getByRole("button", { name: `Acciones de ${nombre}` }), { key: "Enter" })
   // El clic sí adentro de un `act` async: puede disparar una Server Action.

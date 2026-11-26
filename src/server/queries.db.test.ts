@@ -32,28 +32,11 @@ import {
 } from "@/server/queries"
 import { CARD_FILTER_CASH, parseMovementQuery } from "@/lib/movement-query"
 
-/**
- * Tests de la capa de lectura contra la base real. Todo lo que se siembra
- * lleva el prefijo `q-` (y los usuarios `queries-test-`) para no pisarse con
- * `src/db/rls.db.test.ts`, que corre contra la misma base.
- *
- * Se siembran DOS usuarios con datos parecidos —mismos nombres de categoría,
- * mismas fechas, importes distintos— porque cada consulta tiene que probar dos
- * cosas: que trae lo que promete y que no trae nada del otro. Todos los
- * importes son únicos entre sí a propósito: alcanzan como identidad, así que
- * una fuga se ve en el valor y no sólo en el largo de la lista.
- */
 const USUARIO_A = "queries-test-a"
 const USUARIO_B = "queries-test-b"
-/** Existe en `user` pero nunca completó el onboarding: no tiene `user_settings`. */
 const USUARIO_SIN_ONBOARDING = "queries-test-sin-onboarding"
 const USUARIOS = [USUARIO_A, USUARIO_B, USUARIO_SIN_ONBOARDING]
 
-/**
- * La fecha del saldo inicial de A. Es el borde que separa lo que cuenta para
- * la posición en dólares de lo que ya está adentro del saldo inicial, y hay
- * tres filas sembradas exactamente en este día a propósito.
- */
 const SALDO_INICIAL_A = "2026-03-15"
 
 const CAT = {
@@ -76,22 +59,6 @@ const MOV = {
   cambioBorde: "q-mov-a-cambio-borde",
 }
 
-/**
- * Los ids de las cuotas del supermercado NO siguen el orden de su número, y
- * sus vencimientos tampoco. Es a propósito, y la primera versión de estos
- * tests se equivocó justamente acá: con ids `-1/-2/-3` y vencimientos
- * crecientes, sacarle el `orderBy(asc(number))` a `listMovements` dejaba la
- * suite en VERDE, porque cualquier índice que la base eligiera para el scan
- * (la PK sobre `id`, o `installment_user_due_idx` sobre `(user_id, due_date)`)
- * devolvía las filas justo en orden de número.
- *
- * Con estos ids el orden lexicográfico da 2, 3, 1; con estos vencimientos el
- * orden por fecha da 2, 1, 3; y el orden de inserción es 3, 1, 2. Ninguno es
- * 1, 2, 3: lo único que puede producir ese orden es el ORDER BY de la
- * consulta. Un plan de cuotas con la 1 venciendo después que la 2 es dato
- * perfectamente cargable: el formulario toma cada vencimiento por separado y
- * nada obliga a que crezcan.
- */
 const INS = {
   comida1: "q-ins-a-comida-mayo",
   comida2: "q-ins-a-comida-abril",
@@ -106,9 +73,6 @@ const nombres = (filas: { name: string }[]) => filas.map((f) => f.name)
 const ids = (filas: { id: string }[]) => filas.map((f) => f.id)
 
 async function sembrarUsuario(id: string) {
-  // Igual que en rls.db.test.ts: `user` es la única tabla que se escribe con
-  // la conexión de la app y fuera de withUser (la migración 0004 le da a
-  // `app_user` una policy sin condición sobre las tablas de better-auth).
   await db.insert(user).values({
     id,
     name: id,
@@ -1264,8 +1228,6 @@ describe("listUsdPositionEvents", () => {
     const eventos = await listUsdPositionEvents(USUARIO_A)
 
     // Lo único que sostiene esto es el `gte(installment.paidDate,
-    // settings.date)` de la consulta: con `gt` este evento desaparece y la
-    // posición se queda 200 dólares corta contra el saldo del dashboard.
     expect(eventos).toContainEqual({
       date: SALDO_INICIAL_A,
       usdCents: 200_00,
@@ -1277,7 +1239,6 @@ describe("listUsdPositionEvents", () => {
   it("un cambio con fecha exactamente igual a la del saldo inicial entra en la posición", async () => {
     const eventos = await listUsdPositionEvents(USUARIO_A)
 
-    // Idem, con el `gte(movement.date, settings.date)`.
     expect(eventos).toContainEqual({
       date: SALDO_INICIAL_A,
       usdCents: 50_00,
@@ -1289,9 +1250,6 @@ describe("listUsdPositionEvents", () => {
   it("descarta lo anterior a la fecha del saldo inicial", async () => {
     const eventos = await listUsdPositionEvents(USUARIO_A)
 
-    // El cambio del 2026-02-20 (10_00) y la cuota cobrada el 2026-03-01
-    // (80_00) ya están adentro del saldo inicial: contarlos otra vez
-    // duplicaría esos dólares.
     expect(eventos.every((e) => e.date >= SALDO_INICIAL_A)).toBe(true)
     expect(eventos.map((e) => e.usdCents)).not.toContain(10_00)
     expect(eventos.map((e) => e.usdCents)).not.toContain(80_00)
@@ -1300,31 +1258,26 @@ describe("listUsdPositionEvents", () => {
   it("una compra es entrada y una venta es salida", async () => {
     const eventos = await listUsdPositionEvents(USUARIO_A)
 
-    expect(eventos.find((e) => e.usdCents === 50_00)?.direction).toBe("in") // buy
-    expect(eventos.find((e) => e.usdCents === 30_00)?.direction).toBe("out") // sell
+    expect(eventos.find((e) => e.usdCents === 50_00)?.direction).toBe("in")
+    expect(eventos.find((e) => e.usdCents === 30_00)?.direction).toBe("out")
   })
 
   it("una cuota cobrada en USD es entrada y una pagada es salida", async () => {
     const eventos = await listUsdPositionEvents(USUARIO_A)
 
-    expect(eventos.find((e) => e.usdCents === 200_00)?.direction).toBe("in") // income
-    expect(eventos.find((e) => e.usdCents === 120_00)?.direction).toBe("out") // expense
+    expect(eventos.find((e) => e.usdCents === 200_00)?.direction).toBe("in")
+    expect(eventos.find((e) => e.usdCents === 120_00)?.direction).toBe("out")
   })
 
   it("no cuenta las cuotas impagas", async () => {
     const eventos = await listUsdPositionEvents(USUARIO_A)
 
-    // La cuota 2 del alquiler (180_00 USD, vence el 2026-05-01) sigue
-    // pendiente: esos dólares todavía no salieron de la tenencia.
     expect(eventos.map((e) => e.usdCents)).not.toContain(180_00)
   })
 
   it("no cuenta las cuotas de movimientos en pesos", async () => {
     const eventos = await listUsdPositionEvents(USUARIO_A)
 
-    // La cuota 1 del supermercado (45_00, ARS) está pagada el 2026-03-20, o
-    // sea después del saldo inicial: lo único que la deja afuera es el filtro
-    // por moneda. Sin él entraría como una salida de 45 dólares.
     expect(eventos.map((e) => e.date)).not.toContain("2026-03-20")
     expect(eventos.map((e) => e.usdCents)).not.toContain(45_00)
   })
@@ -1336,8 +1289,6 @@ describe("listUsdPositionEvents", () => {
   it("no mezcla eventos de otro usuario", async () => {
     const eventos = await listUsdPositionEvents(USUARIO_A)
 
-    // B tiene saldo inicial de 500_00, un cambio de 444_00 el mismo día que
-    // el borde de A y una cuota cobrada de 777_00.
     for (const ajeno of [500_00, 444_00, 777_00]) {
       expect(eventos.map((e) => e.usdCents)).not.toContain(ajeno)
     }
@@ -1345,8 +1296,6 @@ describe("listUsdPositionEvents", () => {
   })
 
   it("cada usuario siembra su propio saldo inicial", async () => {
-    // La contracara: B tiene que ver LO SUYO. Una consulta que devolviera
-    // siempre vacío pasaría todos los "no trae nada ajeno" de arriba.
     expect(await listUsdPositionEvents(USUARIO_B)).toContainEqual({
       date: "2026-01-01",
       usdCents: 500_00,
@@ -1356,15 +1305,6 @@ describe("listUsdPositionEvents", () => {
   })
 })
 
-/**
- * Los tipos que devuelve el driver no son un detalle de implementación: la
- * plata son centavos enteros (`bigint` con `mode: "number"`) y los tipos de
- * cambio son `numeric`, que postgres.js entrega como STRING para no perder
- * precisión. Si alguno cambiara en silencio, las cuentas de plata se romperían
- * sin un solo error — `"1300.0000" + 1` es una concatenación, no una suma— y
- * las comparaciones de fecha de toda la app, que son comparaciones de texto,
- * dejarían de funcionar si `date` empezara a llegar como Date.
- */
 describe("los tipos que devuelve el driver", () => {
   it("los centavos llegan como number y los numeric como string", async () => {
     const [mov] = await listMovements(USUARIO_A, { kind: "income", from: SALDO_INICIAL_A })
@@ -1396,8 +1336,6 @@ describe("los tipos que devuelve el driver", () => {
   })
 
   it("los eventos de posición ya vienen con el rate convertido a number", async () => {
-    // La conversión del numeric pasa una sola vez, adentro de
-    // buildUsdPositionEvents: acá ya tiene que estar hecha.
     const eventos = await listUsdPositionEvents(USUARIO_A)
 
     expect(eventos).toHaveLength(5)
@@ -1439,8 +1377,6 @@ describe("aislamiento por usuario", () => {
   })
 
   it("las filas del primer usuario siguen ahí para su dueño", async () => {
-    // Si la siembra se hubiera perdido, todos los "no trae nada ajeno"
-    // pasarían por la razón equivocada.
     const propias = await withUser(USUARIO_A, (tx) =>
       tx
         .select({ id: movement.id })
@@ -1452,34 +1388,6 @@ describe("aislamiento por usuario", () => {
   })
 })
 
-/**
- * EL CRUCE DE LAS DOS RUTAS. El corte "contar sólo desde initialBalanceDate"
- * está escrito SEIS veces: dos en `computeBalances` (@/lib/balance), dos en
- * `buildUsdPositionEvents` (@/lib/position) y dos en SQL, los `gte` de
- * `listUsdPositionEvents` de este mismo archivo.
- *
- * Cada mitad tenía su cobertura y ninguna cruzaba a la otra:
- * `src/lib/position.test.ts` ata las dos puras entre sí sin tocar la base, y
- * los tests de arriba prueban el SQL contra literales escritos a mano. Con eso,
- * cambiar un `gte` de SQL por `gt` deja las DOS suites en verde y al usuario
- * con /cambios y el dashboard diciendo cosas distintas sobre los mismos
- * dólares.
- *
- * Este bloque es el que se entera: siembra una sola vez (la siembra de A, que
- * ya tiene TRES filas exactamente en `SALDO_INICIAL_A` y dos anteriores) y hace
- * salir el número por los dos caminos completos, cada uno con sus consultas de
- * verdad:
- *
- *   posición: listUsdPositionEvents -> usdPosition
- *   saldo:    getSettings + listPaidInstallments + listExchanges -> computeBalances
- *
- * El mapeo del lado del saldo es el MISMO que hace el dashboard, asserts
- * incluidos: si acá se escribiera a mano, el test probaría una ruta que la app
- * no usa.
- *
- * NO BORRAR NI RELAJAR. Si se pone en rojo, las dos pantallas están mostrando
- * números distintos.
- */
 describe("la posición y el saldo salen del mismo dato por dos rutas distintas", () => {
   async function porLasDosRutas(userId: string) {
     const [eventos, settings, pagadas, cambios] = await Promise.all([
@@ -1491,7 +1399,6 @@ describe("la posición y el saldo salen del mismo dato por dos rutas distintas",
 
     const position = usdPosition(eventos)
 
-    // Igual que src/app/(app)/dashboard/page.tsx, asserts incluidos.
     const balances = computeBalances(
       {
         initialArsCents: settings!.initialBalanceArsCents,
@@ -1518,59 +1425,30 @@ describe("la posición y el saldo salen del mismo dato por dos rutas distintas",
   it("los dólares que dice /cambios y los que dice el dashboard son los mismos", async () => {
     const { position, balances } = await porLasDosRutas(USUARIO_A)
 
-    // La misma igualdad que el invariante puro de src/lib/position.test.ts,
-    // pero con las dos rutas COMPLETAS: SQL incluido de un lado y las
-    // consultas sin filtro de fecha del otro.
     expect(position.oversoldUsdCents).toBe(0)
     expect(position.usdCents - position.oversoldUsdCents).toBe(balances.usdCents)
 
-    // Y el literal, además de la igualdad: dos rutas rotas de la misma manera
-    // también coincidirían. US$100 de saldo inicial + US$50 comprados el día
-    // del saldo inicial + US$200 cobrados ese mismo día - US$120 pagados el
-    // 2026-04-05 - US$30 vendidos el 2026-05-20.
     expect(balances.usdCents).toBe(200_00)
   })
 
-  /**
-   * La misma igualdad para el otro usuario, cuyo saldo inicial es de OTRA
-   * fecha (2026-01-01) y cuyas filas son todas posteriores. Sin esta mitad,
-   * un corte de fecha que ignorara la configuración del usuario y usara una
-   * constante pasaría el caso de arriba.
-   */
   it("y también para un usuario con otra fecha de saldo inicial", async () => {
     const { position, balances } = await porLasDosRutas(USUARIO_B)
 
     expect(position.usdCents - position.oversoldUsdCents).toBe(balances.usdCents)
-    // US$500 de saldo inicial + US$444 comprados + US$777 cobrados.
     expect(balances.usdCents).toBe(1721_00)
   })
 
-  /**
-   * EL BORDE, que es lo que hace que este cruce valga la pena, y cuánto pesa.
-   *
-   * Las dos filas cargadas EXACTAMENTE en `SALDO_INICIAL_A` —la compra de
-   * US$50 y la cuota cobrada de US$200— tienen que contar de los dos lados. El
-   * test de arriba ya se rompe si no, pero acá queda escrito el tamaño del
-   * desastre: sacarlas de la posición y dejarlas en el saldo —o sea, cambiar un
-   * `gte` de SQL por `gt`— deja las dos pantallas separadas por US$250, y
-   * encima prende la alerta de sobreventa.
-   */
   it("sacar del cálculo las filas del día exacto separa las dos pantallas por US$250", async () => {
     const { balances } = await porLasDosRutas(USUARIO_A)
     const eventos = await listUsdPositionEvents(USUARIO_A)
 
-    // Los eventos del día exacto que vienen de una fila cargada (el saldo
-    // inicial en sí también cae ese día, pero no lo filtra ningún `gte`).
     const delBorde = eventos.filter((e) => e.date === SALDO_INICIAL_A && e.usdCents !== 100_00)
     expect(delBorde.map((e) => e.usdCents).sort((a, b) => a - b)).toEqual([50_00, 200_00])
 
-    // Exactamente lo que devolvería listUsdPositionEvents con `gt`.
     const conGt = usdPosition(eventos.filter((e) => !delBorde.includes(e)))
 
     expect(conGt.usdCents - conGt.oversoldUsdCents).not.toBe(balances.usdCents)
     expect(balances.usdCents - (conGt.usdCents - conGt.oversoldUsdCents)).toBe(250_00)
-    // Y no es sólo un número más chico: sin esos dólares, /cambios avisaría de
-    // una sobreventa que nunca pasó.
     expect(conGt.oversoldUsdCents).toBeGreaterThan(0)
   })
 })
@@ -1581,27 +1459,10 @@ describe("countMovementsByCategory", () => {
 
     expect(conteo.get(CAT.comida)).toBe(3)
     expect(conteo.get(CAT.alquiler)).toBe(1)
-    // Los cambios de divisa no tienen categoría: no hay clave nula.
     expect([...conteo.keys()].every((id) => id !== null && id.startsWith("q-cat-a-"))).toBe(true)
   })
 })
 
-/**
- * Las lecturas que cambió la Fase 3 del plan v2 (tarjetas, migración 0012).
- *
- * Un usuario aparte, sembrado y borrado acá adentro, para no mover los
- * conteos exactos de A de los demás casos. Tiene UNA compra en dólares con
- * tarjeta en dos cuotas: el resumen de enero pagado CON PESOS a $1.500 y el
- * de febrero impago. Es el caso que obliga a las tres consultas a mirar el
- * resumen: la cuota pagada tiene que leerse como pesos al TC del pago (y no
- * como dólares al TC de la compra), no tiene que mover la posición en
- * dólares, y la impaga tiene que traer su resumen y su tarjeta para que el
- * dashboard la agrupe.
- *
- * Todo se siembra en UNA transacción: los triggers de la 0012 son diferidos y
- * piden que la cuota pagada de una compra con tarjeta esté en un resumen
- * pagado el mismo día.
- */
 describe("tarjetas", () => {
   const USUARIO = "queries-test-tarjeta"
   const CAT_T = "q-cat-t-compras"

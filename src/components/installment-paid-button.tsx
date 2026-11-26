@@ -22,26 +22,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { dateToIso, isoToDate, type IsoDate } from "@/lib/dates"
 import { formatShortDate } from "@/lib/installments"
 
-/**
- * El control de "pagada" de UNA cuota, con su propio estado en vuelo y su
- * propio error.
- *
- * Antes esto vivía en `InstallmentRows`, que llevaba un `Set` de ids en vuelo
- * para que marcar una cuota no dejara muertos los botones de las otras. Con el
- * estado adentro de cada botón esa independencia sale sola —cada instancia
- * tiene su `useTransition`— y de paso el mismo botón sirve en los dos lugares
- * donde se muestran cuotas: la tabla de movimientos (una fila por cuota) y la
- * lista de vencimientos del dashboard.
- *
- * Impaga: "Marcar pagada" la marca con la fecha de hoy y el calendario de al
- * lado deja elegir otra (§5.1 del plan v2; nunca una futura, ver
- * `resolvePaidDate`). Las dos avisan con un toast que trae "Deshacer".
- * Pagada: desmarcar pide confirmación, porque saca plata de lo percibido.
- *
- * El resultado de la Server Action se mira, nunca se descarta: si marcar falla,
- * la persona tiene que enterarse en vez de ver la cuota igual que antes sin
- * ninguna explicación.
- */
 export function InstallmentPaidButton({
   id,
   paid,
@@ -55,13 +35,10 @@ export function InstallmentPaidButton({
   id: string
   paid: boolean
   paidDate?: IsoDate | null
-  /** Tope del calendario: no se puede pagar en el futuro. */
   today: IsoDate
   number: number
-  /** Del movimiento: es lo que nombra el toast. */
   description: string
   kind?: "income" | "expense"
-  /** De qué lado se apilan el botón y su mensaje de error. */
   align?: "start" | "end"
 }) {
   const [pending, startTransition] = useTransition()

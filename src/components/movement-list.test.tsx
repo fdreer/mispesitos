@@ -7,11 +7,6 @@ import { MovementList } from "@/components/movement-list"
 import { parseMovementQuery } from "@/lib/movement-query"
 import type { MovementWithInstallments } from "@/server/queries"
 
-/**
- * Las Server Actions que cuelgan de los botones de cada fila: importarlas de
- * verdad abre una conexión a Postgres apenas se las importa. Mismo criterio
- * que `movement-form.test.tsx`.
- */
 const mocks = vi.hoisted(() => ({
   setInstallmentPaid: vi.fn(async () => ({ ok: true })),
   fetchMovementListPage: vi.fn(async () => ({
@@ -26,7 +21,6 @@ vi.mock("@/server/actions/movements", () => ({
   setInstallmentPaid: mocks.setInstallmentPaid,
   fetchMovementListPage: mocks.fetchMovementListPage,
   deleteMovement: async () => ({ ok: true }),
-  // Las dos del formulario de edición, que ahora cuelga de la misma fila.
   createMovement: async () => ({ ok: true }),
   updateMovement: async () => ({ ok: true }),
 }))
@@ -43,7 +37,6 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {}, push: () => {} }),
 }))
 
-/** Radix (el Select y el Dialog de shadcn) usa dos APIs que jsdom no trae. */
 Element.prototype.hasPointerCapture ??= () => false
 Element.prototype.scrollIntoView ??= () => {}
 
@@ -57,8 +50,6 @@ const CATEGORIAS = [
   { id: "cat-1", userId: "u", name: "Freelance", kind: "income" as const, archived: false, parentId: null, color: null, icon: null },
 ]
 
-/** Las dos marcas de tiempo que trae toda fila de la base y que esta tabla no
- * muestra: van fijas para que el fixture no dependa del reloj. */
 const SELLOS = { createdAt: new Date(0), updatedAt: new Date(0) }
 
 const MOVIMIENTO: MovementWithInstallments = {
@@ -103,26 +94,11 @@ const MOVIMIENTO: MovementWithInstallments = {
   ],
 }
 
-/**
- * El texto de cada celda de una fila, en orden de columna. El espacio duro
- * (U+00A0) que `Intl.NumberFormat` mete después del símbolo de moneda se
- * normaliza a uno común: si no, "$ 2.000,00" no coincide con "$ 2.000,00" y
- * la diferencia es invisible al leer el error.
- */
 function celdas(fila: Element): string[] {
   return [...fila.children].map((c) => (c.textContent ?? "").replace(/ /g, " ").trim())
 }
 
 describe("MovementList", () => {
-  /*
-   * La razón de ser de este archivo: las cuotas se desplegaban adentro de una
-   * celda con `colSpan`, así que su fecha, su importe y su botón no caían bajo
-   * ninguna de las columnas de la tabla. Ahora cada cuota es una fila de la
-   * MISMA grilla, y esto es lo que impide que vuelva a desalinearse.
-   *
-   * Los índices son las columnas declaradas en `COLUMNS` más la del chevron:
-   * 0 chevron · 1 Fecha · 2 Descripción · 3 Categoría · 4 Importe · 5 Estado.
-   */
   it("las cuotas caen en las mismas columnas que el movimiento", () => {
     const { container } = render(
       <MovementList
@@ -133,15 +109,11 @@ describe("MovementList", () => {
       />,
     )
 
-    // Desplegar: la fila del movimiento es la que abre las cuotas.
     fireEvent.click(within(container.querySelector("table")!).getByText("Proyecto"))
 
     const filas = [...container.querySelectorAll("tbody tr")]
-    // Movimiento + dos cuotas. Editar y Borrar viven en el menú ⋯ de la fila.
     expect(filas).toHaveLength(3)
 
-    // Todas las filas tienen las mismas siete columnas: es lo que garantiza
-    // que las celdas de una cuota se apilen bajo las del movimiento.
     for (const fila of filas) {
       const ancho = [...fila.children].reduce(
         (acc, c) => acc + Number((c as HTMLTableCellElement).colSpan || 1),
@@ -153,7 +125,6 @@ describe("MovementList", () => {
     const movimiento = celdas(filas[0])
     expect(movimiento[1]).toBe("11/08/2026")
     expect(movimiento[2]).toContain("Proyecto")
-    // La próxima cuota impaga, con fecha relativa debajo de la descripción.
     expect(movimiento[2]).toContain("Cuota 1/2 · vence hoy")
     expect(movimiento[3]).toBe("Freelance")
     expect(movimiento[4]).toBe("$ 2.000,00")
@@ -185,15 +156,9 @@ describe("MovementList", () => {
 
     const filas = [...container.querySelectorAll("tbody tr")]
     expect(celdas(filas[1])[2]).toBe("Cuota 1 · vencida")
-    // La que ya está pagada no se marca, aunque su vencimiento también pasó.
     expect(celdas(filas[2])[2]).toBe("Cuota 2")
   })
 
-  /*
-   * Editar y Borrar viven en el menú ⋯ de cada fila (§5.3 del plan v2), a la
-   * vista sin desplegar nada. Los diálogos se abren por estado, fuera del
-   * menú: si colgaran del ítem, cerrar el menú los desmontaría.
-   */
   it("editar, desde el menú ⋯, abre el formulario con el movimiento ya cargado", () => {
     const { container } = render(
       <MovementList
@@ -215,7 +180,6 @@ describe("MovementList", () => {
     expect(screen.getByRole("dialog").textContent).toContain("Editar ingreso")
     expect(screen.getByLabelText<HTMLInputElement>("Descripción").value).toBe("Proyecto")
     expect(screen.getByLabelText<HTMLInputElement>("Importe").value).toBe("2.000")
-    // Abrir el menú no desplegó la fila.
     expect(tabla.getByText("Proyecto").closest("tr")?.getAttribute("aria-expanded")).toBe("false")
   })
 
@@ -236,10 +200,6 @@ describe("MovementList", () => {
     expect(screen.getByRole("alertdialog").textContent).toContain("¿Borrar “Proyecto”?")
   })
 
-  /*
-   * Pagar en un toque (§5.1): marca la PRÓXIMA impaga —la de número más bajo—
-   * con la fecha de hoy, sin desplegar la fila ni pedir confirmación.
-   */
   it("cobrar desde la fila marca la próxima cuota impaga y no despliega nada", async () => {
     const { container } = render(
       <MovementList
@@ -289,7 +249,6 @@ describe("MovementList", () => {
     expect(tarjeta.textContent).toContain("11/08/2026")
     expect(tarjeta.textContent).toContain("Freelance")
     expect(tarjeta.textContent).toContain("2 cuotas")
-    // La tarjeta también muestra la próxima cuota y se cobra sin desplegar.
     expect(tarjeta.textContent).toContain("Cuota 1/2 · vence hoy")
     expect(within(tarjeta).getByRole("button", { name: "Cobrar cuota 1/2 de Proyecto" })).toBeTruthy()
     expect(within(tarjeta).getByRole("button", { name: "Acciones de Proyecto" })).toBeTruthy()

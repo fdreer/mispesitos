@@ -37,7 +37,7 @@ describe("usdPosition", () => {
   it("una compra suma cantidad y costo, sin resultado", () => {
     const p = usdPosition([buy("2026-01-10", 100, 1000)])
     expect(p.usdCents).toBe(10_000)
-    expect(p.costArsCents).toBe(10_000_000) // $100.000,00
+    expect(p.costArsCents).toBe(10_000_000)
     expect(p.averageRate).toBe(1000)
     expect(p.realizedArsCents).toBe(0)
   })
@@ -58,7 +58,7 @@ describe("usdPosition", () => {
     ])
     expect(p.usdCents).toBe(0)
     expect(p.costArsCents).toBe(0)
-    expect(p.realizedArsCents).toBe(5_000_000) // $50.000,00 de ganancia
+    expect(p.realizedArsCents).toBe(5_000_000)
   })
 
   it("una venta con el dólar más bajo realiza pérdida", () => {
@@ -76,11 +76,10 @@ describe("usdPosition", () => {
     ])
     expect(p.usdCents).toBe(6_000)
     expect(p.averageRate).toBe(1000)
-    expect(p.realizedArsCents).toBe(2_000_000) // 40 * (1500-1000) = $20.000,00
+    expect(p.realizedArsCents).toBe(2_000_000)
   })
 
   it("un ingreso en dólares entra a la posición a su TC", () => {
-    // Un sueldo cobrado en USD entra igual que una compra.
     const p = usdPosition([
       buy("2026-01-10", 100, 1000),
       { date: "2026-02-10", usdCents: 10_000, rate: 1400, direction: "in" },
@@ -90,7 +89,6 @@ describe("usdPosition", () => {
   })
 
   it("un egreso pagado en dólares realiza resultado igual que una venta", () => {
-    // Sección 5.5: toda salida de dólares realiza, se venda o se gaste.
     const p = usdPosition([
       buy("2026-01-10", 100, 1000),
       { date: "2026-06-10", usdCents: 10_000, rate: 1500, direction: "out" },
@@ -118,8 +116,8 @@ describe("usdPosition", () => {
     ])
     expect(p.usdCents).toBe(0)
     expect(p.costArsCents).toBe(0)
-    expect(p.oversoldUsdCents).toBe(5_000) // 50 dólares que no estaban cargados
-    expect(p.realizedArsCents).toBe(2_500_000) // sólo los 50 que sí tenía
+    expect(p.oversoldUsdCents).toBe(5_000)
+    expect(p.realizedArsCents).toBe(2_500_000)
   })
 
   it("vender sin tener nada cargado no rompe ni divide por cero", () => {
@@ -131,8 +129,6 @@ describe("usdPosition", () => {
   })
 
   it("en el mismo día procesa primero la compra, venga como venga del array", () => {
-    // Comprar y vender 100 dólares el mismo día: se puede, y realiza $50.000.
-    // Si la venta se procesara primero, informaría sobreventa y cero resultado.
     const compraPrimero = usdPosition([
       buy("2026-06-10", 100, 1000),
       sell("2026-06-10", 100, 1500),
@@ -148,8 +144,6 @@ describe("usdPosition", () => {
   })
 
   it("dos salidas del mismo día dan el mismo resultado en cualquier orden", () => {
-    // Con la posición en descubierto, cuál de las dos salidas consume los
-    // dólares disponibles cambia el resultado. El desempate lo fija.
     const eventos = [
       buy("2026-01-10", 50, 1000),
       sell("2026-06-10", 60, 1500),
@@ -161,12 +155,6 @@ describe("usdPosition", () => {
   })
 
   it("las 720 permutaciones de los mismos eventos dan exactamente el mismo resultado", () => {
-    // La base devuelve las filas en el orden que se le antoja y el orden puede
-    // cambiar entre recargas. El usuario tiene que ver siempre el mismo número.
-    // Seis eventos elegidos para pisar todos los desempates a la vez: misma
-    // fecha con entrada y salida, dos salidas del mismo día de distinto monto,
-    // dos del mismo monto a distinto TC, y la posición en descubierto —el caso
-    // en el que el orden sí cambiaría el resultado si no hubiera desempate.
     const eventos = [
       buy("2026-01-10", 50, 1000),
       buy("2026-06-10", 30, 1300),
@@ -197,8 +185,6 @@ describe("usdPosition", () => {
   })
 
   it("no reordena el array que le pasan", () => {
-    // usdPosition ordena para calcular. Si ordenara sobre el array original,
-    // el llamador se quedaría con sus eventos movidos de lugar sin pedirlo.
     const eventos = [sell("2026-06-10", 100, 1500), buy("2026-01-10", 100, 1000)]
     const comoLlegó = JSON.parse(JSON.stringify(eventos)) as PositionEvent[]
 
@@ -208,9 +194,6 @@ describe("usdPosition", () => {
   })
 
   it("al liquidar toda la tenencia, el resultado es exactamente lo cobrado menos lo gastado", () => {
-    // La cuenta que el usuario puede hacer con una calculadora: vendí todo a
-    // tanto, lo había comprado a tanto, la diferencia es esto. Con TC de cuatro
-    // decimales, que es lo que permite la columna `numeric(12,4)`.
     const casos = [
       { compras: [[10_000, 1234.5678]], venta: [10_000, 1500.9999] },
       { compras: [[333, 1000.3333], [777, 1450.7777]], venta: [1_110, 1601.1111] },

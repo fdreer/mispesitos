@@ -9,13 +9,6 @@ import {
   type IsoDate,
 } from "@/lib/dates"
 
-/**
- * Atajos de fecha y corrimiento de período (§4 del plan v2).
- *
- * Viven acá como funciones puras para que la barra de filtros (y en la Fase 5,
- * Informes) compartan exactamente las mismas definiciones de "Este mes",
- * "Últimos 3 meses", etc., y se prueben sin reloj ni React.
- */
 export const DATE_PRESETS = [
   { id: "this_month", label: "Este mes" },
   { id: "last_month", label: "Mes pasado" },
@@ -28,7 +21,6 @@ export const DATE_PRESETS = [
 
 export type DatePresetId = (typeof DATE_PRESETS)[number]["id"]
 
-/** El rango `[from, to]` de un atajo, calculado desde `today`. */
 export function presetRange(preset: DatePresetId, today: IsoDate): { from: IsoDate; to: IsoDate } {
   const ym = monthKey(today)
   switch (preset) {

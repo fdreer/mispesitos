@@ -13,11 +13,6 @@ import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
 import { BASE_PATHS } from "@/lib/movement-routes"
 
-/**
- * Un resumen de tarjeta como un solo renglón (§1.4 del plan v2): "Visa
- * Galicia · vence 10/12 · $480.000". Sin botón de pago: un resumen se paga
- * desde su detalle, donde se elige la fecha y qué hacer con los dólares.
- */
 function StatementRow({ item }: { item: UpcomingStatement }) {
   const overdue = item.status === "overdue"
   return (

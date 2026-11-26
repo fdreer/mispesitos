@@ -7,21 +7,6 @@ export type PendingItem = {
   kind: "income" | "expense"
 }
 
-/**
- * Punto de partida de la proyección, en la MISMA escala que lo que se le va a
- * aplicar: pesos consolidados.
- *
- * Antes se arrancaba en `balances.arsCents` —sólo pesos— y encima se le
- * aplicaban cuotas en dólares ya convertidas a pesos. Para alguien con dólares
- * ahorrados la curva arrancaba por debajo de su saldo real y después le
- * descontaba deudas en dólares valuadas en pesos: dos tratamientos de moneda
- * en la misma serie. El spec (7.1) pide estos bloques consolidados en pesos.
- *
- * Devuelve null cuando no alcanza para consolidar honestamente: la cotización
- * de hoy sale de una API de terceros que puede fallar. Sin dólares en el saldo
- * no hay nada que consolidar y el rate no hace falta — ese caso sigue dando un
- * número exacto aunque la API esté caída.
- */
 export function projectionStartArsCents(
   balances: { arsCents: number; usdCents: number },
   todayRate: number | null,
@@ -31,15 +16,6 @@ export function projectionStartArsCents(
   return balances.arsCents + convertToArs(balances.usdCents, todayRate)
 }
 
-/**
- * Saldo proyectado mes a mes, partiendo de `startArsCents` y aplicando los
- * vencimientos pendientes por su fecha. Lo ya vencido pesa en el mes actual,
- * porque sigue debiéndose.
- *
- * Cada punto es el saldo AL CIERRE de su mes, no al principio: el primero ya
- * trae aplicado todo lo que vence este mes más lo atrasado, así que no es el
- * saldo de hoy y la pantalla no puede rotularlo como si lo fuera.
- */
 export function projectBalance(
   startArsCents: number,
   pending: PendingItem[],
@@ -56,7 +32,6 @@ export function projectBalance(
 
   for (const item of pending) {
     const key = monthKey(item.dueDate)
-    // Atrasado => pesa hoy. Más allá del horizonte => no se muestra.
     const bucket = key < currentMonth ? currentMonth : key
     if (bucket > lastMonth) continue
 

@@ -3,15 +3,6 @@ import { convertToArs } from "@/lib/money"
 import { assertCurrency } from "@/lib/movement-asserts"
 import { summarizeMovementStatus, type MovementStatus } from "@/lib/movement-status"
 
-/**
- * Cómputos puros sobre la lista de movimientos ya filtrada (Fase 4 del plan
- * v2): conteos de estado para las pastillas, totales por estado, orden,
- * agrupación y plurales correctos.
- *
- * Vive en `@/lib` para que el Server Component y los tests unitarios lo usen
- * sin tocar la base ni React.
- */
-
 export type InstallmentLike = {
   amountCents: number
   dueDate: IsoDate
@@ -64,12 +55,6 @@ export type FilterTotals = {
   paid: CurrencyBucket
 }
 
-/**
- * Totales de la lista por estado de cuota (§4: "Pendiente: $X · Vencido: $Y ·
- * Pagado: $Z"). Se calcula cuota por cuota —no por el estado entero del
- * movimiento— para respetar el criterio de lo percibido (§0): una compra en 3
- * cuotas con 1 pagada y 2 impagas suma 1/3 a Pagado y 2/3 a Pendiente/Vencido.
- */
 export function summarizeMovementTotals(
   movements: readonly MovementForList[],
   today: IsoDate,
@@ -96,10 +81,6 @@ export function summarizeMovementTotals(
   return totals
 }
 
-/**
- * Menor vencimiento impago de un movimiento, o `null` si todas sus cuotas
- * están pagas. Define tanto el orden por vencimiento como el grupo en egresos.
- */
 export function earliestUnpaidDueDate(installments: readonly InstallmentLike[]): IsoDate | null {
   let min: IsoDate | null = null
   for (const i of installments) {
@@ -129,14 +110,6 @@ function amountInArs(m: MovementForList): number {
   return currency === "ARS" ? m.amountCents : convertToArs(m.amountCents, Number(m.rate))
 }
 
-/**
- * Ordena los movimientos según la elección de la barra (§4):
- * - `due`: primero los impagos por su vencimiento más cercano (ascendente, así
- *   los vencidos quedan arriba); luego los pagados del más reciente al más viejo.
- * - `date`: fecha descendente, desempate por alta e id.
- * - `amount`: importe consolidado a pesos descendente, para comparar ARS y USD
- *   en una misma lista sin mezclar escalas.
- */
 export function sortMovements<T extends MovementForList>(
   movements: readonly T[],
   sort: MovementSort,
@@ -176,13 +149,6 @@ export function groupModeFor(kind: "income" | "expense", sort: MovementSort): Mo
   return kind === "income" || sort === "date" ? "month" : "none"
 }
 
-/**
- * Agrupa los movimientos ya ordenados (§5.3):
- * - `"due"`: Vencidos · Esta semana (próximos 7 días contando hoy) · Este mes
- *   · Más adelante · Pagados/Cobrados. Sólo devuelve grupos con al menos un ítem.
- * - `"month"`: por mes de `m.date` ("Noviembre 2026"), preservando el orden.
- * - `"none"`: un único grupo sin encabezado (para orden por importe).
- */
 export function groupMovements<T extends MovementForList>(
   movements: readonly T[],
   mode: MovementGroupMode,
@@ -240,7 +206,6 @@ export function groupMovements<T extends MovementForList>(
   return Object.values(buckets).filter((g) => g.items.length > 0)
 }
 
-/** Pluralización simple en español ("1 pendiente", "2 pendientes"). */
 export function pluralize(count: number, singular: string, plural: string): string {
   return `${count} ${count === 1 ? singular : plural}`
 }

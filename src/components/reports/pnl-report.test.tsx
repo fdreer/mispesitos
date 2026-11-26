@@ -60,14 +60,12 @@ describe("PnlReport", () => {
     expect(screen.getByText("Tasa de ahorro")).toBeTruthy()
 
     const tabla = screen.getByRole("table")
-    // Subcategorías ocultas hasta expandir el padre Hogar.
     expect(within(tabla).queryByText("Alquiler")).toBeNull()
 
     fireEvent.click(within(tabla).getByRole("button", { name: "Expandir Hogar" }))
     expect(within(tabla).getByText("Alquiler")).toBeTruthy()
     expect(within(tabla).getByText("Expensas")).toBeTruthy()
 
-    // Enlace de celda (Alquiler en octubre) con categoría, mes y por=pago.
     const links = within(tabla).getAllByRole("link")
     const alquilerOct = links.find((l) =>
       l.getAttribute("href")?.includes("categoryId=alquiler") &&
@@ -78,7 +76,6 @@ describe("PnlReport", () => {
       "/egresos?categoryId=alquiler&from=2026-10-01&to=2026-10-31&por=pago",
     )
 
-    // Activar variación %: Alquiler subió 50% entre octubre (100k) y noviembre (150k).
     expect(within(tabla).queryByText("+50%")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Variación %" }))
     expect(within(tabla).getByText("+50%")).toBeTruthy()

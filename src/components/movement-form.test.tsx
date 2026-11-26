@@ -5,12 +5,6 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import { MovementForm } from "@/components/movement-form"
 
-/**
- * Las dos fronteras del framework que no existen fuera del servidor de Next,
- * y nada más. Mismo criterio que `src/server/actions/actions.db.test.ts`:
- * la Server Action importa `@/db/client`, que abre una conexión a Postgres
- * apenas se lo importa; y `useRouter` necesita el router de Next.
- */
 const updateMovement = vi.fn(async () => ({ ok: true }))
 const createMovement = vi.fn(
   async (): Promise<
@@ -27,10 +21,6 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {}, push: () => {} }),
 }))
 
-/**
- * Radix (el Select de shadcn) usa dos APIs de puntero que jsdom no implementa.
- * No es un doble de nada nuestro: es rellenar un hueco del entorno.
- */
 Element.prototype.hasPointerCapture ??= () => false
 Element.prototype.scrollIntoView ??= () => {}
 global.ResizeObserver ??= class {
@@ -46,18 +36,12 @@ const CATEGORIAS = [
 afterEach(cleanup)
 
 describe("MovementForm", () => {
-  // Ya no hay forma de dejar `date` a medio completar: `DateField` (el
-  // Popover + Calendar que reemplazó al <input type="date"> nativo) sólo
-  // puede producir un día real, elegido del calendario. El guard que
-  // protegía contra la cadena vacía de un date input nativo a medio tipear
-  // se sacó junto con él (ver el comentario de `planKey` en movement-form.tsx).
 
   it("regenera el plan cuando la fecha cambia", () => {
     const { container } = render(
       <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
     )
 
-    // Con importe cargado, el plan de cuotas se genera en el render.
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
     expect(screen.getByLabelText("Importe de la cuota 1")).toBeTruthy()
 
@@ -93,11 +77,6 @@ describe("MovementForm", () => {
     ).toEqual(["100000"])
   })
 
-  // Las filas de cuota se MUESTRAN en pesos y se ENVÍAN en centavos: son dos
-  // unidades para el mismo dato, y el único lugar donde se cruzan es este
-  // componente. Si la conversión se rompe, el formulario sigue andando y
-  // guarda importes cien veces más chicos o más grandes sin ningún error a la
-  // vista, así que la cobertura va acá y no en el parser.
   it("las cuotas se muestran en pesos y viajan en centavos", () => {
     const { container } = render(
       <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
@@ -108,7 +87,6 @@ describe("MovementForm", () => {
 
     const visible1 = screen.getByLabelText<HTMLInputElement>("Importe de la cuota 1")
     const visible2 = screen.getByLabelText<HTMLInputElement>("Importe de la cuota 2")
-    // Con el separador de miles de §5.2 y sin ",00" de relleno.
     expect(visible1.value).toBe("500")
     expect(visible2.value).toBe("500")
 
@@ -124,7 +102,6 @@ describe("MovementForm", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
-    // El formato local, con coma decimal: es lo que la persona tipea.
     fireEvent.change(screen.getByLabelText("Importe de la cuota 1"), {
       target: { value: "1.000,50" },
     })
@@ -148,13 +125,6 @@ describe("MovementForm", () => {
   })
 })
 
-/**
- * Un movimiento de $1.200,00 en tres cuotas con vencimientos que NO son los
- * que `buildInstallments` generaría desde su fecha (la 2 y la 3 están corridas
- * a mano) y con la 1 ya paga. Esas dos cosas son lo que distingue "editar" de
- * "volver a cargar": si el formulario regenera el plan al abrirse, los
- * vencimientos vuelven a ser los automáticos y nadie se entera.
- */
 const MOVIMIENTO = {
   id: "11111111-1111-4111-8111-111111111111",
   userId: "u",
@@ -231,13 +201,6 @@ describe("MovementForm editando", () => {
     expect(screen.getByRole("button", { name: /^Fecha:/ }).textContent).toContain("03/05/2026")
   })
 
-  /*
-   * El corazón de esta pantalla. `buildInstallments` desde el 03/05 daría
-   * 03/06 y 03/07; los vencimientos guardados son 15/06 y 20/07. Si el primer
-   * render regenera el plan —que es lo que hace si `appliedPlanKey` arranca en
-   * null— las fechas movidas a mano se pierden en silencio al abrir el
-   * diálogo, sin que nadie haya tocado nada.
-   */
   it("no regenera el plan al abrirse: los vencimientos guardados sobreviven", () => {
     const { container } = editar()
 
@@ -316,7 +279,6 @@ describe("MovementForm editando", () => {
         fireEvent.submit(container.querySelector("form")!)
       })
 
-      // Una vez junto al campo y otra como error general del formulario.
       expect(screen.getAllByText(mensaje).length).toBeGreaterThanOrEqual(1)
       expect(
         screen.getByRole("button", { name: /Alquiler/ }).getAttribute("data-invalid"),
@@ -325,9 +287,6 @@ describe("MovementForm editando", () => {
   })
 })
 
-/**
- * El rediseño de §5.2 del plan v2 y el medio de pago de §1.4 (Fase 3).
- */
 const VISA = {
   id: "22222222-2222-4222-8222-222222222222",
   name: "Visa",
@@ -413,8 +372,6 @@ describe("MovementForm, el formulario de carga", () => {
 
     expect(screen.queryByRole("radio", { name: "Ya lo pagué" })).toBeNull()
     expect(valores(container, "creditCardId")).toEqual([VISA.id])
-    // Compra del 10/08 con cierre el 25: resúmenes de agosto, septiembre y
-    // octubre, que vencen el 5 del mes siguiente.
     expect(valores(container, "installmentDueDate")).toEqual([
       "2026-09-05",
       "2026-10-05",
@@ -424,9 +381,6 @@ describe("MovementForm, el formulario de carga", () => {
   })
 
   it("editando con la misma tarjeta y fecha, la compra se queda en su resumen", () => {
-    // El resumen de agosto se corrigió a un cierre del 05/08, antes de la
-    // compra del 10/08 que ya estaba adentro: recalcular la mandaría a
-    // septiembre. Corregir fechas no mueve compras.
     const corregida = {
       ...VISA,
       statements: [

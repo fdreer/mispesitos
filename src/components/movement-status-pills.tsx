@@ -21,12 +21,6 @@ type StatusOption = {
   iconClass?: string
 }
 
-/**
- * Pastillas de estado con conteo sobre el listado (§4 del plan v2):
- * Todos · Vencidos (n) · Pendientes (n) · Pagados. Reemplazan el desplegable
- * anterior y siguen la regla del sistema visual (§5.4 de PENDIENTES.md): lo
- * activo cambia el color de la etiqueta a Paper y refuerza el borde.
- */
 export function MovementStatusPills({
   basePath,
   query,

@@ -50,15 +50,6 @@ import { buildUsdPositionEvents, type PositionEvent } from "@/lib/position"
 
 export type Settings = typeof userSettings.$inferSelect
 
-/**
- * Memoizada por request, mismo motivo que `getOptionalUser` (@/server/session):
- * `requireSettings()` la llama desde el layout de (app) y otra vez desde cada
- * página, y cada llamada abre su propia transacción.
- *
- * Es la consulta que más se repite dentro de un mismo request, y desde que
- * `listUsdPositionEvents` (más abajo) también pasa por acá en vez de
- * seleccionar la fila por su cuenta, /cambios la resuelve una sola vez.
- */
 export const getSettings = cache(async (userId: string): Promise<Settings | null> => {
   const rows = await withUser(userId, (tx) =>
     tx.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1),
@@ -69,30 +60,9 @@ export const getSettings = cache(async (userId: string): Promise<Settings | null
 export type Category = typeof category.$inferSelect
 export type Movement = typeof movement.$inferSelect
 export type Installment = typeof installment.$inferSelect
-/**
- * La cuota tal como la ven las listas: con el período de su resumen cuando la
- * compra es con tarjeta, para que la fila diga "se paga con el resumen de
- * nov" y enlace a él.
- */
 export type InstallmentRow = Installment & { statementPeriod: string | null }
 export type MovementWithInstallments = Movement & { installments: InstallmentRow[] }
 
-
-/**
- * Sólo las categorías activas por default: la Task 16 permite archivar una
- * categoría precisamente para que deje de ofrecerse al cargar un movimiento.
- * La propia pantalla de categorías (Task 16) necesita ver también las
- * archivadas para listarlas, de ahí el parámetro en vez de duplicar la query.
- *
- * Memoizada por request, igual que `getSettings`. Desde que /ingresos y
- * /egresos transmiten la pantalla por partes (ver `movement-screen.tsx`), la
- * barra de filtros y la tabla son dos ramas independientes del árbol que piden
- * LA MISMA lista completa de categorías: sin este memo, cada carga abre dos
- * transacciones idénticas. La clave del memo son los argumentos tal como se
- * pasan, así que `(id, kind)` y `(id, kind, false)` son dos entradas distintas
- * con el mismo resultado — inofensivo, pero por eso las dos ramas llaman con
- * la misma forma.
- */
 export const listCategories = cache(async function listCategories(
   userId: string,
   kind?: "income" | "expense",
@@ -111,12 +81,6 @@ export const listCategories = cache(async function listCategories(
   })
 })
 
-/**
- * Cuántos movimientos tiene cada categoría, por id. Lo usa /categorias para
- * saber si darle la primera subcategoría a una categoría obliga a decidir a
- * dónde van sus movimientos (§2.1 del plan v2), y para decirle a la persona
- * cuántos son. Sólo trae las categorías con al menos uno.
- */
 export const countMovementsByCategory = cache(async function countMovementsByCategory(
   userId: string,
 ): Promise<Map<string, number>> {
@@ -132,28 +96,18 @@ export const countMovementsByCategory = cache(async function countMovementsByCat
 
 export type MovementFilters = {
   kind?: "income" | "expense" | "exchange"
-  /** Compatibilidad con llamadores simples; se combina con `categoryIds`. */
   categoryId?: string
-  /** Lista de categorías elegidas (puede incluir padres; trae sus hijas). */
   categoryIds?: string[]
-  /** Id de tarjeta, `"cash"` para efectivo/débito/transferencia, o undefined. */
   cardId?: string
   currency?: "ARS" | "USD"
   from?: string
   to?: string
-  /** `"date"` (default: `movement.date`) o `"paid"` (cuotas pagadas en ese rango). */
   dateField?: "date" | "paid"
   minCents?: number
   maxCents?: number
-  /** Texto libre contra descripción, categoría o importe. */
   search?: string
 }
 
-/**
- * `%` y `_` son comodines de LIKE: sin escaparlos, buscar "50%" traería TODA la
- * lista en vez de las descripciones que dicen "50%". La barra va primero o se
- * escaparía a sí misma en los dos reemplazos siguientes.
- */
 function escapeLike(term: string): string {
   return term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")
 }
@@ -167,9 +121,6 @@ function movementConditions(userId: string, filters: MovementFilters) {
     ...(filters.categoryIds ?? []),
   ]
   if (selectedCategories.length > 0) {
-    // Filtrar por un padre trae también lo de sus subcategorías: los
-    // movimientos van siempre a una hoja (decisión 7.4 del plan v2). La
-    // subconsulta corre bajo la misma RLS que la principal.
     const idsSql = sql.join(
       selectedCategories.map((id) => sql`${id}`),
       sql`, `,

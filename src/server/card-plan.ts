@@ -9,7 +9,6 @@ import { assignStatements, formatPeriod, paidStatementConflict } from "@/lib/car
 import type { IsoDate } from "@/lib/dates"
 import { failure, type ActionResult } from "@/server/actions/result"
 
-/** Una cuota tal como estaba guardada antes de editar el movimiento. */
 export type PreviousInstallment = {
   number: number
   amountCents: number
@@ -18,7 +17,6 @@ export type PreviousInstallment = {
   statementId: string | null
 }
 
-/** Una cuota lista para insertar: con su resumen, su vencimiento y su pago. */
 export type CardInstallmentRow = {
   amountCents: number
   dueDate: IsoDate
@@ -34,26 +32,6 @@ const fail = (message: string, field?: string): CardPlan => ({
   result: failure(message, field ? { [field]: [message] } : undefined),
 })
 
-/**
- * El plan de cuotas de una compra con tarjeta (§1.3 del plan v2), adentro de
- * la transacción que la guarda.
- *
- * Los IMPORTES vienen del formulario (la persona los puede ajustar, igual que
- * en una compra sin tarjeta). Los VENCIMIENTOS no: salen de los resúmenes en
- * los que cae cada cuota, que se buscan acá con la misma cuenta que mostró el
- * formulario (`assignStatements`), contra lo que hay en la base en este
- * momento. Los resúmenes que todavía no existen se crean con sus fechas
- * propuestas.
- *
- * Una cuota de una compra con tarjeta está pagada si y sólo si su resumen lo
- * está (lo vigila el trigger `installment_matches_statement`, migración
- * 0012), así que el pago de cada fila sale del resumen y no del formulario.
- * Por eso mismo una compra no puede caer en un resumen ya pagado, ni una
- * edición cambiar lo que ese resumen tenía: ver `paidStatementConflict`.
- *
- * Lo que se valida ANTES de escribir nada: si el plan no entra, la
- * transacción no deja resúmenes vacíos creados de paso.
- */
 export async function planCardInstallments(
   tx: Tx,
   userId: string,
@@ -62,13 +40,7 @@ export async function planCardInstallments(
     purchaseDate: IsoDate
     amounts: number[]
     previous: PreviousInstallment[]
-    /** La tarjeta que el movimiento ya tenía: una archivada se puede conservar. */
     previousCardId: string | null
-    /**
-     * La fecha de compra que el movimiento ya tenía. Con la misma tarjeta y
-     * la misma fecha, la primera cuota se queda en el resumen en el que
-     * estaba (ver el `firstPeriod` de `assignStatements`).
-     */
     previousPurchaseDate: IsoDate | null
   },
 ): Promise<CardPlan> {
@@ -81,8 +53,6 @@ export async function planCardInstallments(
     return fail("Esa tarjeta está archivada.", "creditCardId")
   }
 
-  // Una cuota pagada en efectivo no tiene resumen que la sostenga: pasar la
-  // compra a tarjeta borraría ese pago.
   if (input.previous.some((p) => p.paid && p.statementId === null)) {
     return fail("Tiene cuotas pagadas: desmarcalas antes de pasar la compra a tarjeta.")
   }
@@ -107,9 +77,6 @@ export async function planCardInstallments(
   const plan = assignStatements(card, input.purchaseDate, input.amounts.length, known, anchor)
   const byPeriod = new Map(known.map((s) => [s.period, s]))
 
-  // Pagados: los de esta tarjeta, y los de las cuotas que ya estaban pagas
-  // (una cuota paga con resumen implica un resumen pago), que pueden ser de
-  // OTRA tarjeta si la edición cambia el medio de pago.
   const paidIds = new Set([
     ...known.filter((s) => s.paidDate !== null).map((s) => s.id),
     ...input.previous.filter((p) => p.paid && p.statementId).map((p) => p.statementId!),

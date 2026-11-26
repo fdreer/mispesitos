@@ -9,10 +9,6 @@ import {
   type StatementForActions,
 } from "@/components/cards/statement-actions"
 
-/**
- * Las mismas dos fronteras que `movement-form.test.tsx`: la Server Action
- * (que abre una conexión a Postgres al importarse) y el router de Next.
- */
 const payStatement = vi.fn(
   async (): Promise<
     { ok: true } | { ok: false; message: string; fieldErrors?: Record<string, string[]> }

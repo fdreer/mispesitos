@@ -21,16 +21,9 @@ type DialogProps = {
   description: string
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Avisa que la acción está en vuelo, para que el disparador se apague. */
   onPendingChange?: (pending: boolean) => void
 }
 
-/**
- * La confirmación de borrado, sin disparador: la abre el botón "Borrar" de
- * /cambios o el ítem "Borrar" del menú ⋯ de cada fila de /ingresos y
- * /egresos. El resultado se avisa con un toast: el diálogo ya se cerró, así
- * que no hay dónde más mostrarlo.
- */
 export function DeleteMovementDialog({
   id,
   description,
@@ -70,7 +63,6 @@ export function DeleteMovementDialog({
   )
 }
 
-/** Botón suelto con su confirmación: el de cada operación de /cambios. */
 export function DeleteMovementButton({ id, description }: { id: string; description: string }) {
   const [open, setOpen] = useState(false)
   const [pending, setPending] = useState(false)

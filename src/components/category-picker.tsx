@@ -16,10 +16,6 @@ import { cn } from "@/lib/utils"
 
 type PickerCategory = TreeCategory & { icon: string | null }
 
-/**
- * La clave de localStorage de la última categoría usada, por tipo: la última
- * de egresos no tiene nada que ver con la última de ingresos.
- */
 const lastKey = (kind: "income" | "expense") => `mis-pesitos:ultima-categoria:${kind}`
 
 /**

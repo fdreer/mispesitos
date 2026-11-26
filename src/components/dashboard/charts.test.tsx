@@ -5,7 +5,6 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 
 import { CategoryPie } from "@/components/dashboard/charts"
 
-/** Recharts mide el contenedor; jsdom no tiene ResizeObserver. */
 global.ResizeObserver ??= class {
   observe() {}
   unobserve() {}
@@ -54,7 +53,6 @@ describe("CategoryPie", () => {
     const desglose = document.getElementById(hogar.getAttribute("aria-controls")!)!
     expect(within(desglose).getByText("Alquiler")).toBeTruthy()
     expect(within(desglose).getByText("Expensas")).toBeTruthy()
-    // Una categoría sin subcategorías no tiene nada que desplegar.
     expect(screen.queryByRole("button", { name: /Ocio/ })).toBeNull()
   })
 })

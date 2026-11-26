@@ -23,7 +23,6 @@ import {
 } from "@/server/card-queries"
 import { requireSettings } from "@/server/session"
 
-/** "$ 480.000 · US$ 120", o "Sin compras" si está en cero. */
 function Totals({ summary }: { summary: StatementSummary }) {
   const { arsCents, usdCents, count } = summary.totals
   if (count === 0) return <span className="text-muted-foreground">Sin compras</span>
@@ -39,12 +38,6 @@ function Totals({ summary }: { summary: StatementSummary }) {
   )
 }
 
-/**
- * Una tarjeta visual por tarjeta de crédito (§1.4 del plan v2): el resumen
- * actual —el último que cerró, con su vencimiento y si se pagó—, el próximo
- * que está acumulando, y el disponible si hay límite. Toda la tarjeta es un
- * enlace al detalle, donde se paga y se corrigen fechas.
- */
 function CardTile({
   card,
   statements,

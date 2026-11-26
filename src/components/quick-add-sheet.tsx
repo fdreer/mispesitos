@@ -27,19 +27,10 @@ export type QuickAddData = {
 }
 
 type Props = QuickAddData & {
-  /** Control externo opcional (usado en tests). */
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }
 
-/**
- * Hoja inferior casi a pantalla completa para carga rápida desde el botón "+"
- * de la barra de navegación móvil (§5.4 del plan v2).
- *
- * Permite alternar entre Egreso e Ingreso arriba sin salir de la pantalla
- * actual, arrancando en Ingreso cuando se abre desde `/ingresos` y en Egreso
- * en el resto de la app.
- */
 export function QuickAddSheet({
   expenseCategories,
   incomeCategories,
@@ -89,8 +80,6 @@ export function QuickAddSheet({
             ]}
           />
         </DialogHeader>
-        {/* `key={kind}` reinicia el formulario al alternar entre egreso e ingreso
-            para que las categorías, sugerencias y cuotas correspondan al tipo elegido. */}
         <MovementForm
           key={kind}
           kind={kind}

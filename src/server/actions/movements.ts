@@ -24,15 +24,6 @@ import { planCardInstallments } from "@/server/card-plan"
 import { queryMovementsView, type MovementWithInstallments } from "@/server/queries"
 import { requireUser } from "@/server/session"
 
-/**
- * Un movimiento sólo puede ir a una categoría HOJA (decisión 7.4 del plan v2):
- * una subcategoría, o una de primer nivel sin hijas. La base lo hace cumplir
- * con el trigger `movement_category_is_leaf` (migración 0011); esto es para
- * que la persona vea el error junto al campo y no un genérico al guardar.
- *
- * Desde el formulario no pasa —el selector no ofrece padres como opción—,
- * pero el borde de confianza es la Server Action.
- */
 const CATEGORIA_NO_HOJA = "Esa categoría tiene subcategorías: elegí una de ellas."
 const CATEGORIA_ARCHIVADA = "Esa categoría está archivada."
 
@@ -57,11 +48,6 @@ async function isCategoryArchived(tx: Tx, userId: string, categoryId: string): P
 const categoryNotLeaf = () => failure(CATEGORIA_NO_HOJA, { categoryId: [CATEGORIA_NO_HOJA] })
 const categoryArchived = () => failure(CATEGORIA_ARCHIVADA, { categoryId: [CATEGORIA_ARCHIVADA] })
 
-/**
- * El medio de pago que manda el formulario: vacío es efectivo/débito, y si
- * no, el id de una tarjeta (§1.2 del plan v2). `undefined` si llegó algo que
- * no es ninguna de las dos cosas.
- */
 function readCardId(formData: FormData): string | null | undefined {
   const raw = String(formData.get("creditCardId") ?? "")
   if (raw === "") return null
@@ -72,23 +58,10 @@ function readCardId(formData: FormData): string | null | undefined {
 const TARJETA_INVALIDA = "Esa tarjeta no existe."
 const invalidCard = () => failure(TARJETA_INVALIDA, { creditCardId: [TARJETA_INVALIDA] })
 
-/** Sólo un egreso se paga con tarjeta: la CHECK `movement_credit_card_only_expense` (0012). */
 const SOLO_EGRESOS = "Sólo un egreso se puede pagar con tarjeta."
 
-/**
- * Lo que la base rechaza con el trigger `installment_matches_statement`
- * (migración 0012). Desde el formulario no debería pasar —el plan lo arma
- * `planCardInstallments` con la misma regla—; si pasa es una carrera con otra
- * pestaña que pagó o corrigió un resumen en el medio.
- */
 const RESUMEN_CAMBIO = "Un resumen de la tarjeta cambió mientras cargabas. Probá de nuevo."
 
-/**
- * Las cuotas viajan en el FormData como campos repetidos, en el mismo orden:
- * installmentAmount[] e installmentDueDate[]. El emparejamiento es posicional,
- * así que si las dos listas no vienen del mismo largo no hay forma de saber qué
- * importe corresponde a qué vencimiento: se rechaza en vez de adivinar.
- */
 function readInstallments(formData: FormData): { amountCents: string; dueDate: string }[] | null {
   const amounts = formData.getAll("installmentAmount").map(String)
   const dates = formData.getAll("installmentDueDate").map(String)
@@ -128,9 +101,6 @@ export async function createMovement(
 
   const input = parsed.data
   if (cardId !== null && input.kind !== "expense") return failure(SOLO_EGRESOS)
-  // §1.3: una compra con tarjeta nunca es "ya pagada" al cargarla. Se paga
-  // cuando se paga su resumen. El formulario oculta la opción; esto es el
-  // borde de confianza.
   if (cardId !== null && settled) {
     return failure("Una compra con tarjeta se paga con el resumen: no se carga como pagada.")
   }
@@ -145,9 +115,6 @@ export async function createMovement(
       if (await isCategoryArchived(tx, user.id, input.categoryId)) return categoryArchived()
       if (await categoryHasChildren(tx, user.id, input.categoryId)) return categoryNotLeaf()
 
-      // Con tarjeta, los vencimientos y el resumen de cada cuota salen de la
-      // tarjeta, no del formulario. Se arma antes de insertar el movimiento
-      // para que un plan que no entra no deje nada escrito.
       const cardPlan =
         cardId === null
           ? null
@@ -200,8 +167,6 @@ export async function createMovement(
     if (!resultado.ok) return resultado
   } catch (error) {
     logDbError("createMovement", error)
-    // La carrera: otra pestaña le creó una subcategoría a esta categoría
-    // entre que se abrió el formulario y se guardó.
     if (isCheckViolation(error, "movement_category_is_leaf")) return categoryNotLeaf()
     if (isCheckViolation(error, "installment_matches_statement")) return failure(RESUMEN_CAMBIO)
     return failure("No pudimos guardar el movimiento. Probá de nuevo.")
@@ -211,38 +176,8 @@ export async function createMovement(
   return success()
 }
 
-/**
- * Los dos tipos que esta acción puede tocar. Un `exchange` NO entra: no tiene
- * cuotas ni categoría, y reescribirlo con la forma de un movimiento común
- * dejaría a /cambios leyendo una fila que ya no es un cambio. Va en el WHERE
- * y no en un chequeo posterior para que un id de cambio salga por la misma
- * rama que un id que no existe.
- */
 const EDITABLE_KINDS = ["income", "expense"]
 
-/**
- * Edita un movimiento ya guardado. Hasta ahora la única forma era borrarlo y
- * volver a cargarlo, que además se llevaba las cuotas ya marcadas como pagas.
- *
- * El plan de cuotas se rehace ENTERO con el que manda el formulario —es el
- * mismo que arma `buildInstallments`, y pasa por el mismo `movementSchema` que
- * el alta— pero el PAGO no se pierde: `paid`/`paid_date` se conservan
- * emparejando por NÚMERO de cuota. Un número que el plan nuevo no tiene se
- * rechaza antes de escribir nada (ver `highestPaidNumber`): bajar de 12 cuotas
- * a 3 con la 5 ya paga borraría el registro de un pago que sí ocurrió, y eso no
- * es una edición, es plata que desaparece.
- *
- * Lo que un cambio de importe SÍ hace es mover lo que dice una cuota ya paga:
- * si la 1 estaba paga en $100.000 y el total pasa a $360.000 en tres, la 1
- * queda paga en $120.000. Es exactamente lo que significa corregir el importe
- * de un movimiento cargado mal, y es la razón por la que el saldo tiene que
- * recalcularse — de ahí que se revalide el dashboard igual que en el alta.
- *
- * `kind` NO se escribe aunque el esquema lo exija (el formulario lo manda
- * porque es el mismo esquema del alta): un ingreso no se convierte en un
- * egreso, y si lo hiciera cambiaría de pantalla y esta acción estaría
- * revalidando la que la persona ya no está mirando.
- */
 export async function updateMovement(
   _prev: ActionResult | null,
   formData: FormData,
@@ -283,9 +218,6 @@ export async function updateMovement(
 
   try {
     const resultado = await withUser(user.id, async (tx) => {
-      // Validamos existencia y tipo editable ANTES de tocar `card_statement`:
-      // retornar `failure(...)` sin lanzar excepción commitea la transacción, así
-      // que no podemos crear resúmenes antes de saber que el movimiento existe.
       const [actual] = await tx
         .select({
           kind: movement.kind,

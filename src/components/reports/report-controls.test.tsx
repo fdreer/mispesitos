@@ -37,7 +37,6 @@ describe("ReportControls", () => {
     render(<ReportControls query={query} />)
 
     const flujoLink = screen.getByRole("link", { name: "Flujo de caja" })
-    // Al ir a Flujo de caja descarta categoryId pero conserva moneda y período.
     expect(flujoLink.getAttribute("href")).toBe(
       "/informes?tab=flujo&moneda=ARS&from=2026-01-01&to=2026-12-31",
     )

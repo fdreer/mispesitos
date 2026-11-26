@@ -41,7 +41,6 @@ const LINKS = [
   { href: "/ajustes", label: "Ajustes", icon: Settings },
 ]
 
-/** Rutas que se abren desde "Más" en la barra inferior móvil (§5.4 y §7.6). */
 const MORE_LINKS = [
   { href: "/tarjetas", label: "Tarjetas", icon: CreditCard },
   { href: "/informes", label: "Informes", icon: BarChart3 },
@@ -50,20 +49,6 @@ const MORE_LINKS = [
   { href: "/ajustes", label: "Ajustes", icon: Settings },
 ]
 
-/**
- * El riel de escritorio se expande solo con el cursor encima, así que no hay
- * estado de React que lo maneje: la expansión es CSS puro colgada del `group`
- * del riel. Estas constantes son las dos mitades de ese comportamiento.
- *
- * `gap-0` cuando está contraído no es un detalle: con `gap-2.5` puesto, la
- * separación se sigue midiendo entre el ícono y la etiqueta —que mide cero de
- * ancho pero existe— así que empujaba cada ícono 5px a la izquierda del centro
- * del riel. Era la razón por la que los íconos se veían corridos.
- *
- * `focus-within` además del `hover`: con el teclado no hay cursor, y un riel
- * que sólo reacciona al mouse deja a quien tabula navegando entre íconos sin
- * etiqueta visible.
- */
 const RAIL_COLLAPSED = "justify-center gap-0 px-0"
 const RAIL_EXPANDED = cn(
   "group-hover/rail:justify-start group-hover/rail:gap-2.5 group-hover/rail:px-2.5",
@@ -102,12 +87,6 @@ function DesktopNavLinks({ pathname }: { pathname: string }) {
           <Link
             key={link.href}
             href={link.href}
-            /*
-             * Un click en Chromium deja el link enfocado, y la navegación de
-             * Next no lo saca: sin este blur, `focus-within:w-56` se queda
-             * prendido para siempre después del primer click, y el riel no
-             * se contrae más aunque el cursor se vaya.
-             */
             onClick={(e) => {
               e.currentTarget.blur()
             }}
@@ -129,7 +108,6 @@ function DesktopNavLinks({ pathname }: { pathname: string }) {
 }
 
 type Props = {
-  /** Callback opcional para tests; en producción dispara el evento de QuickAddSheet. */
   onQuickAdd?: () => void
 }
 
@@ -139,9 +117,6 @@ export function AppSidebar({ onQuickAdd }: Props = {}) {
   const [pending, setPending] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
 
-  // Cierra la hoja "Más" al cambiar de pantalla (incluye volver atrás/adelante
-  // con el navegador). Ajuste de estado durante el render comparando contra el
-  // último pathname, igual que `movement-form.tsx`.
   const [lastPathname, setLastPathname] = useState(pathname)
   if (pathname !== lastPathname) {
     setLastPathname(pathname)
@@ -171,12 +146,6 @@ export function AppSidebar({ onQuickAdd }: Props = {}) {
 
   return (
     <>
-      {/*
-        Barra de navegación inferior fija en móvil (§5.4 y decisión §7.6):
-        Inicio · Egresos · + · Ingresos · Más.
-        La sidebar queda sólo en escritorio (`lg:block`). El botón central "+"
-        inicia la carga rápida sin solaparse con tablas ni gráficos.
-      */}
       <nav
         aria-label="Navegación móvil"
         className="fixed inset-x-0 bottom-0 z-40 border-t border-graphite bg-carbon/95 backdrop-blur pb-[env(safe-area-inset-bottom)] lg:hidden"
@@ -295,19 +264,6 @@ export function AppSidebar({ onQuickAdd }: Props = {}) {
         </div>
       </nav>
 
-      {/*
-        El riel de escritorio. El <aside> ocupa SIEMPRE 56px en el flujo y el
-        panel de adentro va absoluto encima: así, al expandirse, se monta sobre
-        el contenido en vez de correrlo. Un riel que empuja la página reflowea
-        la tabla entera cada vez que el cursor lo roza de paso.
-
-        Ya no hay botón de colapsar: el ancho lo decide el cursor (o el foco).
-
-        `isolate` en el propio <aside>, no sólo `z-30` en el panel de adentro:
-        así el riel forma su propio contexto de apilamiento pase lo que pase
-        arriba, y ningún elemento de página (cards, gráficos, lo que sea)
-        puede terminar pintándose por encima de él.
-      */}
       <aside className="sticky top-0 z-30 isolate hidden h-screen w-14 shrink-0 self-start lg:block">
         <div
           className={cn(

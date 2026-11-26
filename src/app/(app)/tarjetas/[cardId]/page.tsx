@@ -40,21 +40,6 @@ type Props = {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }
 
-/**
- * El detalle de una tarjeta y de UNO de sus resúmenes (§1.4 del plan v2): la
- * lista de cuotas que lo componen, los totales por moneda, "Pagar resumen" y
- * la corrección del cierre y el vencimiento.
- *
- * El resumen que se mira va en la URL (`?periodo=2026-11`), como los filtros
- * de /egresos: se puede compartir, recargar y volver atrás. Sin período, el
- * último que cerró si todavía no se pagó —es el que hay que pagar—, y si no,
- * el que está acumulando.
- *
- * Cualquier período válido se puede abrir, aunque el resumen no exista
- * todavía en la base: se muestra con sus fechas propuestas y en cero, y
- * corregirle las fechas lo crea. Es la forma de ajustar el cierre de un
- * resumen antes de que llegue la primera compra.
- */
 export default async function TarjetaPage({ params, searchParams }: Props) {
   const { cardId } = await params
   if (!z.uuid().safeParse(cardId).success) notFound()
@@ -85,8 +70,6 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
 
   const [installments, rate] = await Promise.all([
     statement.id ? listStatementInstallments(user.id, statement.id) : Promise.resolve([]),
-    // La cotización sólo hace falta para precargar el TC del pago en pesos.
-    // dolarapi puede tardar: no se la pide si no hay dólares que pagar.
     statement.totals.usdCents > 0 && statement.paidDate === null
       ? fetchSuggestedRate(settings.preferredRate as RatePreference)
       : Promise.resolve(null),
@@ -106,8 +89,6 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
     count: statement.totals.count,
   }
 
-  // Los períodos con resumen, más el que se mira y el que acumula, para la
-  // fila de accesos directos.
   const periods = [...new Set([...statements.map((s) => s.period), open.period, period])].sort()
   const usdPaidRate = statement.usdPaidRate ? Number(statement.usdPaidRate) : null
 

@@ -43,15 +43,10 @@ type Props = {
   cards?: CardOption[]
   today: IsoDate
   emptyMessage: string
-  /** Para distinguir la acción en estado vacío ("Cargar primer..." vs "Limpiar filtros"). */
   hasActiveFilters?: boolean
-  /** Ruta base para "Limpiar filtros" en estado vacío. */
   basePath?: string
-  /** Tipo de movimiento de la pantalla (para alta vacía y "Cargar más"). */
   kind?: "income" | "expense"
-  /** Modo de agrupación: por vencimientos (egresos), por mes (ingresos), o plano. */
   groupBy?: MovementGroupMode
-  /** Datos de paginado para "Cargar más" en móvil (§5.3). */
   query?: MovementQuery
   page?: number
   totalPages?: number

@@ -16,8 +16,6 @@ const ok = (body: unknown) =>
 
 describe("fetchSuggestedRate", () => {
   it("mapea compra y venta desde la perspectiva del usuario", async () => {
-    // La API informa desde la perspectiva de la casa de cambio:
-    // "venta" es a lo que ELLA vende, o sea lo que VOS pagás por comprar.
     stubFetch(() => ok({ compra: 1400, venta: 1450 }))
 
     const result = await fetchSuggestedRate("blue")
@@ -26,10 +24,6 @@ describe("fetchSuggestedRate", () => {
   })
 
   it("el TC de referencia es el punto medio, no un lado del spread", async () => {
-    // Un movimiento que no es una operación de cambio (un sueldo en dólares,
-    // un alquiler en dólares) se valúa siempre al mismo TC en ambos sentidos.
-    // Si entrara por sellRate y saliera por buyRate, cobrar y pagar el mismo
-    // día con la misma cotización inventaría una diferencia de cambio.
     stubFetch(() => ok({ compra: 1400, venta: 1450 }))
 
     const result = await fetchSuggestedRate("blue")
@@ -92,8 +86,6 @@ describe("fetchSuggestedRate", () => {
   })
 
   it("devuelve null si uno solo de los dos lados es inservible", async () => {
-    // Basta con que uno falle: pre-llenar la mitad del formulario con un
-    // número y la otra con basura es peor que dejarlo vacío.
     const mitades = [
       { compra: 1400 },
       { venta: 1450 },
@@ -110,8 +102,6 @@ describe("fetchSuggestedRate", () => {
   })
 
   it("devuelve null si el cuerpo no es JSON", async () => {
-    // Un proxy o un portal cautivo que responde 200 con una página HTML.
-    // `response.json()` tira, y eso no puede salir de esta función.
     stubFetch(
       () =>
         new Response("<html>bloqueado</html>", {
@@ -131,17 +121,12 @@ describe("fetchSuggestedRate", () => {
   })
 
   it("no convierte los números que vienen como texto", async () => {
-    // "1450" con comillas no es una cotización: es una API que cambió de forma.
-    // Coercionarla en silencio es peor que no sugerir nada.
     stubFetch(() => ok({ compra: "1400", venta: "1450" }))
 
     expect(await fetchSuggestedRate("blue")).toBeNull()
   })
 
   it("devuelve null si los números no son finitos", async () => {
-    // JSON no puede transportar NaN ni Infinity, pero el cuerpo lo puede armar
-    // cualquier cosa en el medio. Un TC infinito pre-llenaría el formulario con
-    // algo que después rompe todas las cuentas.
     for (const par of [
       { compra: Number.NaN, venta: 1450 },
       { compra: 1400, venta: Number.POSITIVE_INFINITY },
@@ -154,7 +139,6 @@ describe("fetchSuggestedRate", () => {
   })
 
   it("devuelve null si la espera se corta por timeout", async () => {
-    // Es lo que tira AbortSignal.timeout cuando vence.
     stubFetch(() =>
       Promise.reject(new DOMException("The operation was aborted.", "TimeoutError")),
     )
@@ -170,9 +154,6 @@ describe("fetchSuggestedRate", () => {
   })
 
   it("nunca tira, pase lo que pase con la respuesta", async () => {
-    // El contrato de la sección 5.6: una API de terceros no puede bloquear la
-    // carga de un movimiento. Si esta función tira, el render del formulario
-    // se cae con ella.
     const respuestasHostiles: (() => Response | Promise<Response>)[] = [
       () => {
         throw new Error("fetch explotó de entrada")

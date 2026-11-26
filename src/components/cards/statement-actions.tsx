@@ -35,9 +35,7 @@ import { convertToArs, formatMoney, parseDecimalInput } from "@/lib/money"
 import { payStatement, unpayStatement, updateStatementDates } from "@/server/actions/cards"
 import type { ActionResult } from "@/server/actions/result"
 
-/** Lo que estos controles necesitan de un resumen. */
 export type StatementForActions = {
-  /** Null si el resumen todavía no existe en la base (el que acumula, vacío). */
   id: string | null
   cardId: string
   cardName: string
@@ -50,10 +48,6 @@ export type StatementForActions = {
   count: number
 }
 
-/**
- * Un toast y un refresh por resultado exitoso, aunque el efecto corra más de
- * una vez (mismo patrón que `MovementForm` y el diálogo de /categorias).
- */
 function useOnSuccess(state: ActionResult | null, message: string, then: () => void) {
   const router = useRouter()
   const handled = useRef<ActionResult | null>(null)
@@ -67,12 +61,6 @@ function useOnSuccess(state: ActionResult | null, message: string, then: () => v
   }, [state, message, router, then])
 }
 
-/**
- * "Pagar resumen" (§1.3 del plan v2): un botón por resumen, con la fecha de
- * pago (hoy por defecto, nunca futura ni antes del cierre). Si el resumen
- * tiene dólares, se elige con qué se pagaron (decisión 7.1): con dólares, o
- * con pesos al TC que se informe, y se ve en el momento cuántos pesos son.
- */
 export function PayStatementButton({
   statement,
   today,
@@ -83,12 +71,6 @@ export function PayStatementButton({
   suggestedRate: number | null
 }) {
   const [open, setOpen] = useState(false)
-  // Un resumen abierto no se puede pagar: el pago no puede ser anterior al
-  // cierre ni posterior a hoy (`resolveStatementPayment`), y con el cierre en
-  // el futuro no queda ninguna fecha posible. Antes el botón abría el diálogo
-  // con el cierre precargado y la acción lo rechazaba por "posterior a hoy":
-  // un camino que sólo podía terminar en error. Si el cierre real fue antes,
-  // se corrige con "Corregir fechas" y ahí se habilita.
   const notClosedYet = statement.closingDate > today
   return (
     <>

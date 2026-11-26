@@ -4,7 +4,6 @@ import type { IsoDate } from "@/lib/dates"
 export type BalanceSettings = {
   initialArsCents: number
   initialUsdCents: number
-  /** Desde esta fecha cuentan los movimientos. Lo anterior ya está en el saldo inicial. */
   initialDate: IsoDate
 }
 
@@ -27,10 +26,6 @@ export type Balances = {
   usdCents: number
 }
 
-/**
- * Saldo actual por moneda, según la sección 5.2 del spec.
- * Una cuota cuenta por su fecha de pago real, no por su vencimiento.
- */
 export function computeBalances(
   settings: BalanceSettings,
   paid: PaidInstallment[],

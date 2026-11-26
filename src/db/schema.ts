@@ -29,16 +29,10 @@ export const userSettings = pgTable("user_settings", {
   initialBalanceUsdCents: bigint("initial_balance_usd_cents", { mode: "number" })
     .notNull()
     .default(0),
-  /**
-   * Pesos por dólar al que se compraron los dólares del saldo inicial. Sin este
-   * costo la posición en dólares arrancaría en cero mientras el saldo inicial
-   * muestra dólares, y /cambios reportaría una sobreventa que no existe.
-   */
   initialBalanceUsdRate: numeric("initial_balance_usd_rate", { precision: 12, scale: 4 })
     .notNull()
     .default("0"),
   initialBalanceDate: date("initial_balance_date").notNull(),
-  /** "oficial" | "blue" | "mep" */
   preferredRate: text("preferred_rate").notNull().default("blue"),
 })
 
@@ -50,36 +44,13 @@ export const category = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    /** "income" | "expense" */
     kind: text("kind").notNull(),
     archived: boolean("archived").notNull().default(false),
-    /**
-     * La categoría padre, o null si es de primer nivel (§2.1 del plan v2).
-     * Dos niveles y no más: lo hace cumplir el trigger
-     * `category_two_levels` (migración 0011), no el formulario. La FK no es
-     * sobre esta columna sola: es compuesta con `user_id` y `kind`, ver
-     * abajo.
-     */
     parentId: text("parent_id"),
-    /**
-     * Clave de la paleta fija de `@/lib/category-color` ("azul", "violeta"…),
-     * no un color CSS libre: la paleta es la que garantiza el contraste y que
-     * ningún tono se confunda con los de estado. Null = sin elección: la
-     * subcategoría hereda el del padre y la de primer nivel cae al hash del
-     * nombre, que es lo que todas tenían antes de la 0011.
-     */
     color: text("color"),
-    /** Nombre de un icono de la lista curada de `@/lib/category-icons`. */
     icon: text("icon"),
   },
   (t) => [
-    /*
-     * Único sólo entre las activas (permite archivar "Ocio" y volver a
-     * crearla) y, desde la 0011, sólo entre HERMANAS: "Hogar › General" y
-     * "Comida › General" conviven. El `coalesce` es para que las de primer
-     * nivel, con `parent_id` nulo, choquen entre sí: en un índice único dos
-     * NULL nunca son iguales.
-     */
     uniqueIndex("category_active_unique")
       .on(t.userId, t.kind, sql`coalesce(${t.parentId}, '')`, t.name)
       .where(sql`archived = false`),

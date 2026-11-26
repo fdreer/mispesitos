@@ -12,19 +12,10 @@ import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import { listExchanges, listUsdPositionEvents, type Movement } from "@/server/queries"
 import { requireSettings } from "@/server/session"
 
-/**
- * Una operación del historial. El botón de borrar es el mismo de /ingresos y
- * /egresos: hasta ahora ésta era la única lista de la app sin forma de sacar
- * una fila, y es justo donde más falta hacía —una compra cargada con la fecha
- * equivocada no se puede corregir, sólo borrar y volver a cargar.
- */
 function FilaDeCambio({ exchange }: { exchange: Movement }) {
   return (
     <li className="flex items-center justify-between gap-3 py-2.5">
       <div className="flex items-center gap-2">
-        {/* El sentido de la operación como badge y no como texto corrido: es
-            el único dato de la fila que se escanea, y en texto quedaba
-            enterrado entre la fecha y el TC. */}
         <Badge variant={exchange.direction === "buy" ? "success" : "warning"}>
           {exchange.direction === "buy" ? "Compra" : "Venta"}
         </Badge>
@@ -32,8 +23,6 @@ function FilaDeCambio({ exchange }: { exchange: Movement }) {
           {formatIsoForDisplay(exchange.date)} · a {Number(exchange.rate).toFixed(2)}
         </span>
       </div>
-      {/* `div` y no `span`: `DeleteMovementButton` monta un div, que no puede
-          vivir adentro de un span. */}
       <div className="flex items-center gap-2">
         <span className="tabular-nums">{formatMoney(exchange.amountCents, "USD")}</span>
         <DeleteMovementButton id={exchange.id} description={exchange.description} />
@@ -42,29 +31,11 @@ function FilaDeCambio({ exchange }: { exchange: Movement }) {
   )
 }
 
-/**
- * Todo lo que hay debajo del título, detrás de un Suspense: el título sale en
- * el primer flush en vez de esperar a la cotización, que sola puede tardar 3s
- * (TIMEOUT_MS en @/lib/rate) y era lo que hacía que esta pantalla entera se
- * quedara en el esqueleto genérico.
- *
- * Un solo límite y no uno por bloque, aunque acá los datos SÍ son separables:
- * si el formulario tuviera el suyo propio, React lo montaría primero sin
- * cotización y lo reemplazaría al llegar —dos instancias distintas—, así que
- * lo que la persona hubiera empezado a tipear en esos segundos se perdería al
- * hacer el cambio. Con un solo límite el formulario se monta una vez, ya con
- * su cotización adentro.
- */
 async function CambiosBody() {
   const { user, settings } = await requireSettings()
   const today = todayInAr()
 
   const [todosLosCambios, events, rate] = await Promise.all([
-    // Sin piso de fecha, y el corte se hace acá abajo en memoria: son pocas
-    // filas y hacen falta las dos mitades. Las que quedan por debajo del saldo
-    // inicial no pueden desaparecer de la pantalla —no aparecen en /ingresos ni
-    // en /egresos, así que ésta es la única donde se pueden ver y borrar— pero
-    // tampoco pueden mezclarse con las que sí mueven las tarjetas de arriba.
     listExchanges(user.id),
     listUsdPositionEvents(user.id),
     fetchSuggestedRate(settings.preferredRate as RatePreference),
@@ -77,9 +48,6 @@ async function CambiosBody() {
 
   return (
     <>
-      {/* Mismo tamaño y mismo patrón de encabezado que las tarjetas del
-          dashboard (`BalanceCards`): `size="sm"` y el ícono de ayuda al lado
-          del título, no una tarjeta más grande y muda al lado. */}
       <div className="grid gap-3 sm:grid-cols-3">
         <Card size="sm">
           <BalanceHeader
@@ -133,9 +101,6 @@ async function CambiosBody() {
 
       <ExchangeForm buyRate={rate?.buyRate ?? null} sellRate={rate?.sellRate ?? null} today={today} />
 
-      {/* Adentro de una tarjeta, como el resto de los bloques de la app: antes
-          era una lista suelta colgando debajo del formulario, sin nada que
-          dijera dónde empezaba el historial ni qué era. */}
       <Card size="sm">
         <CardHeader>
           <CardTitle className="text-base">Operaciones</CardTitle>
@@ -153,16 +118,6 @@ async function CambiosBody() {
             </ul>
           )}
 
-          {/*
-           * Las operaciones anteriores al saldo inicial, aparte y rotuladas. El
-           * piso de fecha de arriba está bien —no mueven las tarjetas, así que
-           * no pueden mezclarse con las que sí—, pero sin este bloque quedaban
-           * invisibles en toda la app: no salen en /ingresos ni en /egresos, y
-           * ésta era la única lista donde podían estar. Una fecha mal tipeada
-           * dejaba una fila muerta en `movement` que reaparecía en todos los
-           * saldos el día que se moviera la fecha del saldo inicial, sin que
-           * nadie hubiera podido verla ni borrarla.
-           */}
           {anteriores.length > 0 && (
             <div className="mt-6 space-y-2 border-t pt-4">
               <p className="text-muted-foreground text-sm">

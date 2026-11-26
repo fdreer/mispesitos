@@ -40,9 +40,6 @@ describe("verificarRolNoSalteaRls", () => {
   })
 
   it("rechaza cuando la fila no trae los atributos como booleanos", async () => {
-    // Una columna renombrada en la consulta, un driver que devuelve otra forma:
-    // con `undefined` el `||` da falsy y la verificación dejaría pasar la
-    // conexión sin haber confirmado nada. Falla cerrado.
     const filas: FilaRolPg[] = [
       { rolbypassrls: undefined, rolsuper: undefined },
       { rolbypassrls: false, rolsuper: undefined },
@@ -60,11 +57,6 @@ describe("verificarRolNoSalteaRls", () => {
   })
 
   it("una fila nula o ausente se trata como que no vino ninguna fila", async () => {
-    // `null` y `undefined` son falsy: los agarra el chequeo de la fila vacía y
-    // salen por ese motivo, no por el de los atributos. La aserción se ata al
-    // mensaje justamente para dejar constancia de por cuál de las dos ramas
-    // sale: un `.rejects.toThrow()` pelado no distingue una rama de la otra —ni
-    // de un TypeError, ni de un error del propio doble.
     for (const fila of [null, undefined]) {
       const doble = (async () => [fila]) as unknown as EjecutorConsultaRol
 
@@ -75,10 +67,6 @@ describe("verificarRolNoSalteaRls", () => {
   })
 
   it("rechaza cuando la consulta devuelve algo que no es una fila", async () => {
-    // El caso que faltaba: un valor TRUTHY que no es un objeto con los
-    // atributos. El chequeo de la fila vacía no lo agarra —pasa de largo— y sus
-    // "atributos" son undefined, así que sin el chequeo de tipos el `||` daría
-    // falsy y la conexión pasaría sin haber confirmado nada.
     for (const fila of ["ok", 42, true, []]) {
       const doble = (async () => [fila]) as unknown as EjecutorConsultaRol
 

@@ -23,11 +23,6 @@ import { createCategory, moveCategory, updateCategory } from "@/server/actions/c
 import type { ActionResult } from "@/server/actions/result"
 import type { Category } from "@/server/queries"
 
-/**
- * Lo que se está haciendo desde el menú ⋯ de una fila de /categorias. Un solo
- * diálogo para las tres cosas porque comparten casi todo: el aviso de a dónde
- * van los movimientos, el manejo del resultado, el cierre.
- */
 export type CategoryDialogMode =
   | { type: "create-child"; parent: Category }
   | { type: "edit"; category: Category }
@@ -35,9 +30,7 @@ export type CategoryDialogMode =
 
 type Props = {
   kind: "income" | "expense"
-  /** Todas las de este tipo, archivadas incluidas. */
   categories: Category[]
-  /** Movimientos por id de categoría (ver `countMovementsByCategory`). */
   movementCounts: Record<string, number>
   mode: CategoryDialogMode | null
   onClose: () => void
@@ -53,9 +46,6 @@ export function CategoryDialog({ mode, onClose, ...rest }: Props) {
   return (
     <Dialog open={mode !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
-        {/* El formulario se monta sólo con el diálogo abierto: así cada vez
-            arranca con el estado de la acción en limpio, sin el error de la
-            vez anterior. */}
         {mode && <CategoryDialogForm key={JSON.stringify(mode)} mode={mode} onClose={onClose} {...rest} />}
       </DialogContent>
     </Dialog>
@@ -82,8 +72,6 @@ function CategoryDialogForm({
     mode.type === "move" ? (mode.category.parentId ?? "") : "",
   )
 
-  // Un toast y un refresh por guardado, aunque el efecto corra más de una vez
-  // (mismo patrón que `MovementForm`).
   const handled = useRef<ActionResult | null>(null)
   useEffect(() => {
     if (state?.ok && handled.current !== state) {
@@ -100,12 +88,6 @@ function CategoryDialogForm({
     }
   }, [state, mode.type, router, onClose])
 
-  /*
-   * ¿El padre que recibe una hija tiene que soltar sus movimientos? Sólo si
-   * hoy es una hoja (no tiene hijas, ni siquiera archivadas: la misma pregunta
-   * que hace la base) y tiene movimientos (§2.1 del plan). En ese caso se
-   * pregunta a dónde van; el default es una "General" nueva.
-   */
   const receivingParent =
     mode.type === "create-child"
       ? mode.parent

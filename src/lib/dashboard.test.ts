@@ -5,15 +5,6 @@ import {
   projectionStartArsCents,
 } from "@/lib/dashboard"
 
-/**
- * La proyección aplica cuotas YA convertidas a pesos, así que su punto de
- * partida tiene que estar en esa misma escala. Arrancaba en el saldo en pesos
- * pelado: para alguien con dólares ahorrados, la curva empezaba por debajo de
- * su saldo real y después le descontaba deudas en dólares valuadas en pesos.
- *
- * NO BORRAR NI RELAJAR: si esto se pone en rojo, lo más probable es que el
- * punto de partida haya vuelto a ser sólo pesos.
- */
 describe("projectionStartArsCents", () => {
   it("consolida los dólares del saldo con la cotización de hoy", () => {
     expect(
@@ -28,32 +19,22 @@ describe("projectionStartArsCents", () => {
   })
 
   it("sin dólares en el saldo NO necesita cotización: sigue dando el número exacto", () => {
-    // El caso de la API caída para quien no tiene dólares. No hay nada que
-    // consolidar, así que no hay motivo para dejarlo sin gráfico.
     expect(projectionStartArsCents({ arsCents: 100_000_00, usdCents: 0 }, null)).toBe(
       100_000_00,
     )
   })
 
   it("con dólares y sin cotización devuelve null en vez de mentir", () => {
-    // dolarapi puede fallar o tardar (sección 5.6 del spec). Devolver el saldo
-    // en pesos acá sería exactamente el bug de origen: una curva que arranca
-    // por debajo del saldo real. Quien llama decide qué mostrar; lo que no
-    // puede es recibir un número que no es.
     expect(projectionStartArsCents({ arsCents: 100_000_00, usdCents: 500_00 }, null)).toBeNull()
   })
 
   it("un saldo en dólares negativo se consolida igual, restando", () => {
-    // computeBalances puede dejar el saldo en dólares negativo si se gastó de
-    // más: el consolidado tiene que reflejarlo, no clampearlo.
     expect(projectionStartArsCents({ arsCents: 100_000_00, usdCents: -200_00 }, 1_500)).toBe(
       100_000_00 - 300_000_00,
     )
   })
 
   it("redondea al centavo, sin fabricar fracciones", () => {
-    // 3,33 dólares a 1.234,5678 pesos. La conversión es la de @/lib/money, que
-    // es la única que multiplica por una cotización en toda la app.
     expect(projectionStartArsCents({ arsCents: 0, usdCents: 3_33 }, 1_234.5678)).toBe(
       Math.round(3_33 * 1_234.5678),
     )
@@ -115,9 +96,6 @@ describe("projectBalance", () => {
   })
 
   it("con hoy en un 31, el horizonte no repite ni saltea ningún mes", () => {
-    // El 31 de enero + 1 mes recorta al 28 de febrero. Si el recorte llegara al
-    // mes y no sólo al día, el horizonte devolvería febrero dos veces o se
-    // saltearía uno, y el gráfico mostraría un mes de más o de menos.
     for (const hoy of ["2026-01-31", "2026-03-31", "2026-05-31", "2028-02-29"]) {
       const meses = projectBalance(0, [], 13, hoy).map((p) => p.month)
 
@@ -158,7 +136,6 @@ describe("projectBalance", () => {
   })
 
   it("un vencimiento un mes después del último del horizonte no se cuenta", () => {
-    // El otro lado del borde de "un vencimiento exactamente en el último mes".
     const result = projectBalance(
       10_000_00,
       [{ dueDate: "2026-10-01", arsCents: 1_000_00, kind: "expense" }],
@@ -195,8 +172,6 @@ describe("projectBalance", () => {
       "2026-08-09",
     )
 
-    // Horizonte de 2 meses desde agosto: el último mes es septiembre. Un
-    // vencimiento del 20/09 cae justo en ese mes (no > lastMonth) y pesa ahí.
     expect(result).toEqual([
       { month: "2026-08", arsCents: 10_000_00 },
       { month: "2026-09", arsCents: 9_000_00 },
@@ -241,8 +216,6 @@ describe("monthlyTotals", () => {
   })
 
   it("cuenta los movimientos del primer y del último mes de la ventana", () => {
-    // El otro lado del borde del test anterior: el 01/06 y el 31/08 están
-    // adentro. Con la ventana corrida un mes, cualquiera de los dos se caería.
     const result = monthlyTotals(
       [
         { date: "2026-06-01", kind: "income", arsCents: 100_00 },
@@ -271,9 +244,6 @@ describe("monthlyTotals", () => {
   })
 
   it("con hoy en un 31, la ventana hacia atrás no repite ni saltea ningún mes", () => {
-    // Igual que en la proyección, pero con `addMonthsClamped` en negativo:
-    // el 31 de marzo menos un mes recorta al 28 de febrero, y el mes tiene que
-    // ser febrero, no marzo otra vez.
     for (const hoy of ["2026-01-31", "2026-03-31", "2026-05-31", "2028-02-29"]) {
       const meses = monthlyTotals([], 12, hoy).map((m) => m.month)
 
@@ -285,8 +255,6 @@ describe("monthlyTotals", () => {
   })
 
   it("un mes sin movimientos aparece igual, en cero", () => {
-    // El gráfico necesita el punto: si el mes vacío se salteara, la línea
-    // uniría julio con septiembre como si agosto no hubiera existido.
     const result = monthlyTotals([], 3, "2026-08-09")
 
     expect(result).toHaveLength(3)

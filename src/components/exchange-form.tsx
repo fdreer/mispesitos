@@ -18,7 +18,6 @@ import { createExchange } from "@/server/actions/movements"
 type Props = {
   buyRate: number | null
   sellRate: number | null
-  /** Hoy según el reloj de Buenos Aires, calculado en el servidor. */
   today: IsoDate
 }
 
@@ -39,23 +38,9 @@ export function ExchangeForm({ buyRate, sellRate, today }: Props) {
   }, [state, router])
 
   return (
-    // `max-w-lg`: sin tope se estiraba a los 1200px del contenedor de la
-    // página para tres campos y un botón, mucho más ancho de lo que ese
-    // contenido necesita.
     <form action={action} className="max-w-lg space-y-4 rounded-lg border p-4">
       <input type="hidden" name="direction" value={direction} />
 
-      {/*
-        El mismo segmentado que el filtro de estado de /ingresos y /egresos, y
-        no dos botones con `aria-pressed` a mano: son dos opciones excluyentes
-        —exactamente lo que `ToggleGroup type="single"` modela— y la versión
-        anterior tenía que repetir sus propios colores en hover para que el
-        `outline` no le pisara el estado elegido.
-
-        `value` nunca puede quedar vacío: Radix manda "" al clickear el que ya
-        está activo, y acá eso no es "ninguno de los dos" sino "no cambiar" —
-        una operación es compra o venta, no puede no ser ninguna.
-      */}
       <ToggleGroup
         type="single"
         spacing={0}
@@ -76,22 +61,12 @@ export function ExchangeForm({ buyRate, sellRate, today }: Props) {
         <div className="space-y-1">
           <Label htmlFor="date">Fecha</Label>
           <input type="hidden" name="date" value={date} />
-          {/* Mismo picker que el filtro de período de /ingresos y /egresos
-              (`movement-filters.tsx`), no el `<input type="date">` nativo: ese
-              abre el calendario del sistema operativo, que no respeta el tema
-              oscuro de la app. */}
           <Popover open={dateOpen} onOpenChange={setDateOpen}>
             <PopoverTrigger asChild>
               <Button
                 id="date"
                 type="button"
                 variant="outline"
-                // El <label htmlFor="date"> de arriba gana la resolución de
-                // nombre accesible y corta ahí sin leer el contenido del
-                // botón (mismo hallazgo D que el botón de "Período" en
-                // movement-filters.tsx): sin este aria-label, un lector de
-                // pantalla anuncia "Fecha, botón" sin importar qué día esté
-                // elegido.
                 aria-label={`Fecha: ${formatIsoForDisplay(date)}`}
                 className="w-full justify-start font-normal"
               >

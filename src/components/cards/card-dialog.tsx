@@ -22,7 +22,6 @@ import { cn } from "@/lib/utils"
 import { createCard, updateCard } from "@/server/actions/cards"
 import type { ActionResult } from "@/server/actions/result"
 
-/** Lo que el diálogo necesita de una tarjeta para editarla. */
 export type EditableCard = {
   id: string
   name: string
@@ -37,11 +36,6 @@ function centsToInput(cents: number | null): string {
   return formatAmountInput((cents / 100).toFixed(2).replace(".", ","))
 }
 
-/**
- * Alta y edición de una tarjeta, con su propio botón (§1.4 del plan v2). Un
- * solo componente para los dos modos porque piden lo mismo: nombre, días de
- * cierre y vencimiento habituales, límite opcional y color.
- */
 export function CardDialog({ card }: { card?: EditableCard }) {
   const [open, setOpen] = useState(false)
   return (
@@ -59,8 +53,6 @@ export function CardDialog({ card }: { card?: EditableCard }) {
       )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-          {/* Montado sólo abierto: cada apertura arranca sin el error de la
-              vez anterior, igual que el diálogo de /categorias. */}
           {open && <CardForm card={card} onClose={() => setOpen(false)} />}
         </DialogContent>
       </Dialog>

@@ -31,9 +31,6 @@ export async function saveSettings(
     return failure("Revisá los datos.", z.flattenError(parsed.error).fieldErrors)
   }
 
-  // Drizzle mapea las columnas `numeric` a string, no a number (ver
-  // src/db/schema.ts): el TC sale de Zod como number para poder compararlo en
-  // la validación cruzada, y hay que devolverlo a string antes de escribirlo.
   const values = {
     ...parsed.data,
     initialBalanceUsdRate: String(parsed.data.initialBalanceUsdRate),
@@ -47,11 +44,6 @@ export async function saveSettings(
         .where(eq(userSettings.userId, user.id))
         .limit(1)
 
-      // `onConflictDoUpdate` en vez de ramificar entre INSERT y UPDATE: entre
-      // el SELECT de arriba y esta línea puede colarse otro request del mismo
-      // usuario (dos clics en "Listo, empezar"). Con el INSERT pelado, el
-      // segundo chocaba contra la PK, la transacción entera volvía atrás y el
-      // usuario veía "no pudimos guardar" con los ajustes ya guardados.
       await tx
         .insert(userSettings)
         .values({ userId: user.id, ...values })
@@ -59,20 +51,6 @@ export async function saveSettings(
 
       if (existing.length > 0) return
 
-      // Primera vez: se precargan las categorías para que nadie arranque con
-      // una pantalla en blanco.
-      //
-      // `onConflictDoNothing` por la misma carrera: si el otro request ya las
-      // sembró, el índice único parcial (category_active_unique) las rechaza
-      // una por una en vez de tumbar la transacción. NO se llega acá en un
-      // guardado desde /ajustes —`existing` corta antes—, así que archivar una
-      // categoría y volver a guardar los ajustes no la resucita.
-      //
-      // Dos pasadas porque las subcategorías necesitan el id de su padre. Las
-      // hijas se siembran SÓLO bajo los padres que esta transacción insertó de
-      // verdad (`returning` no trae los que rechazó el índice): si el otro
-      // request ganó la carrera, los ids de acá no existen y colgarles hijas
-      // reventaría la FK de `parent_id` y con ella todo el guardado.
       const parents = await tx
         .insert(category)
         .values(

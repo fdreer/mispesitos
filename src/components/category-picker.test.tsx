@@ -24,11 +24,8 @@ const HOGAR = cat("h", "Hogar")
 const ALQUILER = cat("a", "Alquiler", "h")
 const EXPENSAS = cat("e", "Expensas", "h")
 const EDUCACION = cat("ed", "Educación")
-// Por nombre, como las trae la consulta: los padres quedan en ese orden
-// (Educación antes que Hogar) y cada hija debajo del suyo.
 const TODAS = [ALQUILER, EDUCACION, EXPENSAS, HOGAR]
 
-/** El selector controlado, como lo usa el formulario, dentro de un <form>. */
 function Montado({ inicial = "a", onSubmit }: { inicial?: string; onSubmit?: () => void }) {
   const [value, setValue] = useState(inicial)
   return (
@@ -47,10 +44,6 @@ function Montado({ inicial = "a", onSubmit }: { inicial?: string; onSubmit?: () 
 const valorEnviado = () =>
   new FormData(screen.getByTestId("form") as HTMLFormElement).get("categoryId")
 
-/**
- * Un localStorage de mentira: el de jsdom no siempre está disponible en este
- * entorno, y además así cada test arranca vacío.
- */
 beforeEach(() => {
   const datos = new Map<string, string>()
   Object.defineProperty(window, "localStorage", {
@@ -102,8 +95,6 @@ describe("CategoryPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: /Alquiler/ }))
     const buscador = screen.getByRole("combobox", { name: "Buscar categoría" })
 
-    // Arranca parado en la elegida (Alquiler). Una arriba es Educación: el
-    // encabezado "Hogar" que hay en el medio no es una parada.
     const activa = () => document.getElementById(buscador.getAttribute("aria-activedescendant")!)
     expect(activa()?.textContent).toBe("Alquiler")
     fireEvent.keyDown(buscador, { key: "ArrowUp" })
@@ -144,7 +135,6 @@ describe("la última usada", () => {
     expect(readLastCategory("income")).toBeNull()
   })
 
-  // Ventana privada o almacenamiento bloqueado: no recuerda, pero no rompe.
   it("si el almacenamiento tira, no rompe", () => {
     Object.defineProperty(window, "localStorage", {
       configurable: true,

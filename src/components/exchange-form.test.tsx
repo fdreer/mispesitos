@@ -5,7 +5,6 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import { ExchangeForm } from "@/components/exchange-form"
 
-/** Las dos fronteras de siempre: la Server Action y el router de Next. */
 const createExchange = vi.fn()
 const refresh = vi.fn()
 
@@ -42,12 +41,6 @@ describe("ExchangeForm", () => {
     expect(screen.getByLabelText("Tipo de cambio").getAttribute("value")).toBe("1400")
   })
 
-  /*
-   * El `key={direction}` del campo de TC existe para esto: sin remonte, el
-   * `defaultValue` nuevo no se aplica y al pasar a venta seguía ofreciendo el
-   * TC de compra —el número equivocado, en el campo que decide cuánta plata
-   * entra—.
-   */
   it("pasar a venta trae el TC de venta", () => {
     montar()
 
@@ -60,8 +53,6 @@ describe("ExchangeForm", () => {
   it("clickear el sentido ya activo no lo deja en ninguno", () => {
     montar()
 
-    // Radix manda "" al deseleccionar: una operación es compra o venta, nunca
-    // ninguna de las dos.
     fireEvent.click(screen.getByRole("radio", { name: "Comprar dólares" }))
 
     expect(campo("direction")?.value).toBe("buy")

@@ -42,12 +42,10 @@ describe("shiftPeriod", () => {
       from: "2026-02-01",
       to: "2026-02-28",
     })
-    // Trimestre entero -> trimestre anterior/siguiente.
     expect(shiftPeriod("2026-09-01", "2026-11-30", -1)).toEqual({
       from: "2026-06-01",
       to: "2026-08-31",
     })
-    // Año entero -> año anterior.
     expect(shiftPeriod("2026-01-01", "2026-12-31", -1)).toEqual({
       from: "2025-01-01",
       to: "2025-12-31",
@@ -55,7 +53,6 @@ describe("shiftPeriod", () => {
   })
 
   it("corre un rango arbitrario por su cantidad de días", () => {
-    // 10 días (1 al 10): el siguiente es 11 al 20.
     expect(shiftPeriod("2026-11-01", "2026-11-10", 1)).toEqual({
       from: "2026-11-11",
       to: "2026-11-20",

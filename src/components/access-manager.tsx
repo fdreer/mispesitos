@@ -24,7 +24,6 @@ import {
   setUserAccess,
 } from "@/server/actions/access"
 
-/** Genera una invitación y muestra el link, una sola vez, con botón de copiar. */
 export function InviteForm() {
   const [state, action, pending] = useActionState(createInvitation, null)
   const [copied, setCopied] = useState(false)
@@ -39,7 +38,6 @@ export function InviteForm() {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      // Sin permiso de portapapeles: el link queda seleccionable en el campo.
     }
   }
 
@@ -113,10 +111,6 @@ export function RevokeInvitationButton({ id }: { id: string }) {
   )
 }
 
-/**
- * Quitar el acceso pide confirmación (cierra sus sesiones al instante);
- * devolverlo no, porque no rompe nada.
- */
 export function UserAccessButton({
   userId,
   name,

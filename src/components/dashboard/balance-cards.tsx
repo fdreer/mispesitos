@@ -11,11 +11,6 @@ type Props = {
   paymentsNextMonth: { arsCents: number; count: number }
 }
 
-/**
- * El encabezado de las cinco tarjetas: siempre el mismo título atenuado, y el
- * ícono de ayuda sólo en las que tienen algo que aclarar. Una sola definición
- * para que los cuatro títulos no puedan separarse en tamaño o color.
- */
 export function BalanceHeader({ title, hint }: { title: string; hint?: React.ReactNode }) {
   return (
     <CardHeader className="pb-1">

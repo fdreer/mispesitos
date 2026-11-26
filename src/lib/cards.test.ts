@@ -17,9 +17,7 @@ import {
   type StatementSummary,
 } from "@/lib/cards"
 
-/** "Cierra el 25 y vence el 5": el caso más común en los bancos de acá. */
 const VISA = { closingDay: 25, dueDay: 5 }
-/** "Cierra el 3 y vence el 15": vence en el mismo mes del cierre. */
 const MASTER = { closingDay: 3, dueDay: 15 }
 
 describe("períodos", () => {
@@ -82,7 +80,6 @@ describe("firstStatementPeriod", () => {
     expect(firstStatementPeriod(VISA, "2026-11-10", [])).toBe("2026-11")
   })
 
-  // Decisión 7.2: el día del cierre entra en ese resumen.
   it("una compra el mismo día del cierre entra en ese resumen", () => {
     expect(firstStatementPeriod(VISA, "2026-11-25", [])).toBe("2026-11")
   })
@@ -104,8 +101,6 @@ describe("firstStatementPeriod", () => {
   })
 
   it("si el resumen siguiente cerró antes de la compra, va al otro", () => {
-    // El de diciembre corregido a un cierre del 25/11: una compra del 26/11
-    // ya no entra ni en noviembre (cierra el 25) ni en diciembre.
     const adelantado = { period: "2026-12", closingDate: "2026-11-25", dueDate: "2026-12-02" }
     expect(firstStatementPeriod(VISA, "2026-11-26", [adelantado])).toBe("2027-01")
     expect(firstStatementPeriod(VISA, "2026-11-24", [adelantado])).toBe("2026-11")
@@ -120,8 +115,6 @@ describe("assignStatements", () => {
   })
 
   it("con un primer resumen fijo, no lo recalcula aunque su cierre se haya corregido", () => {
-    // La compra del 26/11 entró en diciembre; después el cierre de diciembre
-    // se corrigió al 25/11. Editarla no la muda a enero.
     const diciembre = { period: "2026-12", closingDate: "2026-11-25", dueDate: "2026-12-02" }
     const plan = assignStatements(VISA, "2026-11-26", 2, [diciembre], "2026-12")
     expect(plan.map((s) => s.period)).toEqual(["2026-12", "2027-01"])

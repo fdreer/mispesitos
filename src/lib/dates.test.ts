@@ -24,8 +24,6 @@ describe("todayInAr", () => {
   })
 
   it("usa el día de Buenos Aires, no el de UTC", () => {
-    // 01:30 UTC del 10 son las 22:30 del 9 en Buenos Aires (UTC-3).
-    // Una implementación que lea UTC o la hora local del servidor devuelve el 10.
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-08-10T01:30:00Z"))
 
@@ -64,16 +62,12 @@ describe("addMonthsClamped", () => {
   })
 
   it("rechaza un día que no existe en vez de fabricar otra fecha", () => {
-    // Tienen la forma correcta y no son días. Antes salían de acá convertidas
-    // en silencio: "2026-13-45" en "2027-01-31" y "2026-00-00" en "2026-01-00",
-    // que ni siquiera es una fecha.
     expect(() => addMonthsClamped("2026-02-30", 1)).toThrow()
     expect(() => addMonthsClamped("2026-13-45", 1)).toThrow()
     expect(() => addMonthsClamped("2026-00-00", 1)).toThrow()
   })
 
   it("resta meses y cruza el año hacia atrás", () => {
-    // El dashboard arma la ventana de meses pasados con `months` negativos.
     expect(addMonthsClamped("2026-01-15", -3)).toBe("2025-10-15")
     expect(addMonthsClamped("2026-01-31", -2)).toBe("2025-11-30")
     expect(addMonthsClamped("2026-03-31", -1)).toBe("2026-02-28")
@@ -93,7 +87,7 @@ describe("isValidIsoDate", () => {
   })
 
   it("rechaza días que no existen aunque tengan la forma correcta", () => {
-    expect(isValidIsoDate("2026-02-29")).toBe(false) // 2026 no es bisiesto
+    expect(isValidIsoDate("2026-02-29")).toBe(false)
     expect(isValidIsoDate("2026-02-30")).toBe(false)
     expect(isValidIsoDate("2026-04-31")).toBe(false)
     expect(isValidIsoDate("2026-13-01")).toBe(false)
@@ -110,13 +104,6 @@ describe("isValidIsoDate", () => {
 })
 
 describe("isoToDate / dateToIso", () => {
-  // El picker de rango (movement-filters.tsx) corre en el navegador de quien
-  // usa la app, no en el servidor: "local" es la zona del navegador. Estos
-  // tests fuerzan la del propio negocio (Buenos Aires, UTC-3) porque es la
-  // que expone el bug — `new Date(iso)` interpreta el string como UTC, y acá
-  // eso cae en el día anterior. Si la máquina que corre el test ya tuviera
-  // esa zona por default el test pasaría igual sin forzarla, pero forzarla
-  // es lo que lo vuelve válido en cualquier CI, sea cual sea su zona.
   const ORIGINAL_TZ = process.env.TZ
   beforeEach(() => {
     process.env.TZ = "America/Argentina/Buenos_Aires"
@@ -131,9 +118,6 @@ describe("isoToDate / dateToIso", () => {
   })
 
   it("el día que se elige no se corre: getDate() local coincide con el día del string", () => {
-    // Con `new Date("2026-01-01")` (parseo UTC) esto daría 31 (diciembre)
-    // en vez de 1: medianoche UTC del 1/1 son las 21:00 del 31/12 en Buenos
-    // Aires.
     const date = isoToDate("2026-01-01")
     expect(date.getFullYear()).toBe(2026)
     expect(date.getMonth()).toBe(0)
@@ -141,21 +125,9 @@ describe("isoToDate / dateToIso", () => {
   })
 
   it("dateToIso lee componentes locales, no UTC", () => {
-    // Un Date armado a medianoche LOCAL con el constructor de componentes.
-    // Acá arriba la zona forzada es Buenos Aires (UTC-3), un offset
-    // NEGATIVO: la medianoche local del 1/1 cae en "2026-01-01T03:00:00Z",
-    // el mismo día en UTC. Una implementación rota que leyera
-    // `.toISOString().slice(0, 10)` también daría "2026-01-01" acá — este
-    // caso solo no alcanza para distinguir una lectura local de una UTC.
     const local = new Date(2026, 0, 1)
     expect(dateToIso(local)).toBe("2026-01-01")
 
-    // Con un offset POSITIVO (Berlín, UTC+1 en enero) la medianoche local
-    // del 1/1 son las 23:00 UTC del 31/12: `.toISOString().slice(0, 10)`
-    // daría "2025-12-31", un día antes. Sólo un offset positivo expone una
-    // lectura UTC rota, así que este es el caso que de verdad guarda la
-    // dirección de `dateToIso` (hallazgo E de la auditoría: el caso de
-    // arriba, solo, dejaba pasar una implementación rota).
     process.env.TZ = "Europe/Berlin"
     const localBerlin = new Date(2026, 0, 1)
     expect(dateToIso(localBerlin)).toBe("2026-01-01")

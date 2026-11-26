@@ -7,14 +7,6 @@ import {
   type MovementQuery,
 } from "@/lib/movement-query"
 
-/**
- * Estado URL de `/informes` (Fase 5 del plan v2, §3).
- *
- * Comparte la barra de filtros (`MovementQuery`) con /ingresos y /egresos y
- * suma los controles propios de la pantalla: pestaña, moneda de reporte
- * ("todo" | "ARS" | "USD") y granularidad de Flujo de caja.
- */
-
 export const REPORT_TABS = ["ingresos-gastos", "flujo"] as const
 export type ReportTab = (typeof REPORT_TABS)[number]
 
@@ -54,9 +46,6 @@ export function parseReportQuery(raw: RawParams): ReportQuery {
       ? (granularidadRaw as CashflowGranularity)
       : "mensual"
 
-  // En Informes el selector de moneda es propio (§3.3) y no hay filtro de
-  // estado ni de orden en la barra: se fijan en su default para no emitir
-  // chips duplicados ni contarlos en el badge móvil.
   const baseFilters = parseMovementQuery(raw, "date")
   const filters: MovementQuery =
     tab === "flujo"
@@ -79,10 +68,6 @@ export function parseReportQuery(raw: RawParams): ReportQuery {
   return { tab, currency, granularity, filters }
 }
 
-/**
- * Parámetros propios de /informes que `MovementFilters` debe conservar cada vez
- * que actualiza o limpia sus filtros. Omite los defaults para mantener URLs limpias.
- */
 export function reportExtraParams(query: ReportQuery): Record<string, string | undefined> {
   return {
     tab: query.tab === "flujo" ? "flujo" : undefined,
@@ -106,8 +91,6 @@ export function buildReportHref(
   const nextGranularity =
     nextTab === "flujo" ? (patch.granularity ?? query.granularity) : "mensual"
 
-  // Al pasar a Flujo de caja se descartan categoría/tarjeta/buscador/importe
-  // porque el saldo real de caja incluye todo.
   const baseFilters =
     nextTab === "flujo"
       ? {
@@ -139,10 +122,6 @@ function normalizePair(from: IsoDate, to: IsoDate): { from: IsoDate; to: IsoDate
   return from <= to ? { from, to } : { from: to, to: from }
 }
 
-/**
- * Rango efectivo para Ingresos vs Gastos: cuando no hay fechas en la URL usa
- * los últimos 12 meses (el mismo horizonte que las barras del dashboard).
- */
 export function effectivePnlRange(
   from: string,
   to: string,
@@ -160,11 +139,6 @@ export function effectivePnlRange(
   return { ...presetRange("last_12_months", today), isDefault: true }
 }
 
-/**
- * Rango efectivo para Flujo de caja:
- * - En granularidad semanal, siempre los próximos 3 meses desde `today` (§3.2).
- * - En mensual sin fechas, últimos 3 meses cerrados + mes en curso + próximos 6 meses.
- */
 export function effectiveCashflowRange(
   from: string,
   to: string,

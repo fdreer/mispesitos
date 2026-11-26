@@ -23,15 +23,11 @@ const BASE: CashflowInput = {
 describe("buildCashflowReport", () => {
   it("arranca cada mes con el saldo real acumulado previo e incluye compra/venta en cada moneda", () => {
     const paid = [
-      // Septiembre (fuera del rango visible, pero mueve el saldo inicial de octubre):
       { paidDate: "2026-09-10" as const, amountCents: 50_000, currency: "ARS", kind: "income", rate: "1" },
-      // Octubre (mes pasado real):
       { paidDate: "2026-10-05" as const, amountCents: 20_000, currency: "ARS", kind: "expense", rate: "1" },
-      // Antes del saldo inicial: se ignora igual que computeBalances.
       { paidDate: "2026-08-20" as const, amountCents: 999_999, currency: "ARS", kind: "income", rate: "1" },
     ]
     const exchanges = [
-      // Compra US$ 10 a $1.200 en octubre: salida de $12.000 en ARS y entrada de US$ 10 en USD.
       { date: "2026-10-20" as const, amountCents: 1_000, rate: "1200", direction: "buy" },
     ]
 
@@ -39,13 +35,12 @@ describe("buildCashflowReport", () => {
     const octArs = ars.rows.find((r) => r.key === "2026-10")!
     expect(octArs).toMatchObject({
       kind: "real",
-      initialCents: 150_000, // 100.000 + 50.000 de septiembre
+      initialCents: 150_000,
       inflowsCents: 0,
       outflowsCents: 20_000 + 1_200_000,
       closingCents: 150_000 - 20_000 - 1_200_000,
     })
 
-    // Invariante contra computeBalances en ARS y USD sin cuotas pendientes:
     const balances = computeBalances(
       {
         initialArsCents: BASE.settings.initialBalanceArsCents,
@@ -77,10 +72,8 @@ describe("buildCashflowReport", () => {
       closingCents: 11_000,
     })
 
-    // En "Todo en pesos", los cambios de divisa netean a 0 (no aparecen en entradas/salidas):
     const todo = buildCashflowReport({ ...BASE, paid, exchanges, currencyMode: "todo" })
     expect(todo.rows.find((r) => r.key === "2026-10")).toMatchObject({
-      // 100_000 ARS + US$100 * 1000 = 10_100_000 + 50_000 de septiembre = 10_150_000
       initialCents: 10_150_000,
       inflowsCents: 0,
       outflowsCents: 20_000,
@@ -91,15 +84,11 @@ describe("buildCashflowReport", () => {
     const view = buildCashflowReport({
       ...BASE,
       paid: [
-        // Ya pagado en noviembre:
         { paidDate: "2026-11-05", amountCents: 20_000, currency: "ARS", kind: "income", rate: "1" },
       ],
       pending: [
-        // Vencido impago (atrasado, < 2026-11-15): NO entra en noviembre, va a overdue:
         { id: "p1", dueDate: "2026-11-01", amountCents: 70_000, currency: "ARS", rate: "1", kind: "expense" },
-        // Pendiente del resto de noviembre (>= 2026-11-15):
         { id: "p2", dueDate: "2026-11-25", amountCents: 40_000, currency: "ARS", rate: "1", kind: "expense" },
-        // Diciembre (proyectado, resumen tarjeta incluido):
         { id: "p3", dueDate: "2026-12-10", amountCents: 30_000, currency: "ARS", rate: "1", kind: "expense" },
       ],
     })
@@ -112,7 +101,6 @@ describe("buildCashflowReport", () => {
       incomeCount: 0,
     })
 
-    // Noviembre: inicial 100k + real 20k - pendiente resto del mes 40k = 80k (sin p1 adentro)
     const nov = view.rows.find((r) => r.key === "2026-11")!
     expect(nov).toMatchObject({
       kind: "mixed",
@@ -123,7 +111,6 @@ describe("buildCashflowReport", () => {
       closingCents: 80_000,
     })
 
-    // Diciembre: inicial 80k - 30k = 50k. Con los 70k atrasados -> -20k -> falta $200,00 en diciembre!
     const dec = view.rows.find((r) => r.key === "2026-12")!
     expect(dec).toMatchObject({
       kind: "projected",
@@ -148,7 +135,6 @@ describe("buildCashflowReport", () => {
       pending: [
         { id: "p1", dueDate: "2026-11-15", amountCents: 30_000, currency: "ARS", rate: "1", kind: "expense" },
         { id: "p2", dueDate: "2026-11-23", amountCents: 150_000, currency: "ARS", rate: "1", kind: "expense" },
-        // Fuera del horizonte de 3 meses (> 2027-02-15):
         { id: "p3", dueDate: "2027-02-20", amountCents: 999_000, currency: "ARS", rate: "1", kind: "expense" },
       ],
     })

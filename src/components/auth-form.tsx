@@ -14,10 +14,6 @@ export function AuthForm({
   submitLabel,
 }: {
   mode: "login" | "registro"
-  /**
-   * Invitación con correo: sólo esa dirección puede usarla (lo hace cumplir
-   * el servidor), así que el campo viene completo y no se edita.
-   */
   fixedEmail?: string
   submitLabel?: string
 }) {

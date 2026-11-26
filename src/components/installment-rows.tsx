@@ -16,32 +16,18 @@ type Row = {
   amountCents: number
   paid: boolean
   paidDate?: string | null
-  /** El período del resumen de tarjeta en el que cae, si la compra es con tarjeta. */
   statementPeriod?: string | null
 }
 
 type Props = {
   rows: Row[]
   currency: "ARS" | "USD"
-  /**
-   * `today` llega como prop y no se calcula acá: estos son componentes cliente,
-   * y `todayInAr()` evaluado en el navegador puede dar un día distinto al que
-   * usó el servidor para el mismo render. Alrededor de medianoche eso es un
-   * mismatch de hidratación y un "vencida" que aparece o desaparece solo.
-   */
   today: IsoDate
-  /** Del movimiento: nombra la cuota en el toast y en la confirmación. */
   description: string
   kind: "income" | "expense"
-  /** La tarjeta de la compra, si es con tarjeta: las cuotas enlazan a su resumen. */
   cardId?: string | null
 }
 
-/**
- * El control de pago de una cuota. Una cuota de una compra con tarjeta no se
- * paga sola (§1.3 del plan v2): en lugar del botón va un enlace a su resumen,
- * que es donde se paga, y si ya está pagada, la fecha.
- */
 function PaymentControl({
   row,
   today,

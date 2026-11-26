@@ -2,12 +2,10 @@ import { describe, expect, it } from "vitest"
 
 import { buildDashboardView, type DashboardInput } from "@/lib/dashboard-view"
 
-/** Una categoría de egresos, de primer nivel salvo que se diga otra cosa. */
 function cat(id: string, name: string, parentId: string | null = null) {
   return { id, name, parentId, archived: false, color: null }
 }
 
-/** La torta sin ids, tonos ni desglose: lo que se compara en la mayoría de los casos. */
 function torta(view: ReturnType<typeof buildDashboardView>) {
   return view.pie.map(({ name, arsCents }) => ({ name, arsCents }))
 }
@@ -33,16 +31,12 @@ describe("buildDashboardView", () => {
     const view = buildDashboardView({
       ...BASE,
       paid: [
-        // Anterior al saldo inicial: ya está adentro de esos $1.000, contarlo
-        // acá lo contaría dos veces.
         { paidDate: "2026-08-01", amountCents: 50_000, currency: "ARS", kind: "income", categoryId: null, rate: "1" },
-        // Posterior: sí cuenta.
         { paidDate: "2026-08-07", amountCents: 20_000, currency: "ARS", kind: "income", categoryId: null, rate: "1" },
       ],
     })
 
     expect(view.monthIncomeArsCents).toBe(20_000)
-    // Y coincide con lo que el saldo hizo con las mismas dos filas.
     expect(view.arsCents).toBe(100_000 + 20_000)
   })
 
@@ -75,9 +69,6 @@ describe("buildDashboardView", () => {
       ],
     })
 
-    // La cuota 2 todavía no venció, pero su movimiento sí: el enlace tiene que
-    // llevar a la lista donde el movimiento aparece, o deja al usuario en una
-    // lista vacía.
     expect(view.upcomingPayments.map((u) => u.status)).toEqual(["overdue", "overdue"])
   })
 
@@ -183,7 +174,6 @@ describe("buildDashboardView", () => {
       todayRate: 1_500,
     })
 
-    // 100 dólares a 1500 son 150.000 pesos, más los 1.000 de saldo en pesos.
     expect(view.consolidatedArsCents).toBe(100_000 + 15_000_000)
   })
 
@@ -201,9 +191,6 @@ describe("buildDashboardView", () => {
   it("convierte USD al TC del propio movimiento, no al TC del día", () => {
     const view = buildDashboardView({
       ...BASE,
-      // Distinto del rate de la fila (1200) a propósito: si `toArs` usara
-      // este valor en vez del rate del movimiento, el resultado sería
-      // 15.000.000 en vez de 12.000.000.
       todayRate: 1_500,
       expenseCategories: [cat("cat-1", "Compras")],
       paid: [
@@ -218,10 +205,6 @@ describe("buildDashboardView", () => {
       ],
     })
 
-    // 10.000 centavos de dólar (100 USD) al 1200 son 12.000.000 centavos de
-    // peso ($120.000). Con currency "ARS" en todos lados, como venía el test
-    // net, este cálculo nunca se ejecutaba: el string del rate podía pasar
-    // sin convertir, o el rate equivocado, y los cuatro tests seguían verdes.
     const expectedArsCents = 12_000_000
 
     expect(view.monthExpenseArsCents).toBe(expectedArsCents)
@@ -233,13 +216,6 @@ describe("buildDashboardView", () => {
     const view = buildDashboardView({
       ...BASE,
       paid: [
-        // Exactamente initialBalanceDate, no un día después: es el borde que
-        // separa "ya está adentro del saldo inicial" de "es de este mes".
-        // `computeBalances` también lo incluye (su corte es `paidDate <
-        // initialDate`, así que el mismo día no cae). Si acá se usara `>` en
-        // vez de `>=`, esta fila saldría de la tarjeta pero seguiría adentro
-        // del saldo, y las dos volverían a desincronizarse — el defecto que
-        // esta tarea vino a arreglar.
         { paidDate: "2026-08-05", amountCents: 5_000, currency: "ARS", kind: "income", categoryId: null, rate: "1" },
       ],
     })
@@ -254,16 +230,11 @@ describe("buildDashboardView", () => {
       today: "2026-09-10",
       expenseCategories: [cat("cat-1", "Electro")],
       paid: [
-        // Televisor en 12 cuotas cargado en agosto: sólo cuentan las dos
-        // cuotas pagadas, cada una en su mes de pago, y no el $1.200.000.
         { paidDate: "2026-08-15", amountCents: 100_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
         { paidDate: "2026-09-02", amountCents: 100_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
-        // Ingreso cobrado en septiembre: barra de ingresos, no torta.
         { paidDate: "2026-09-05", amountCents: 50_000, currency: "ARS", kind: "income", categoryId: null, rate: "1" },
-        // Gasto sin categoría pagado este mes.
         { paidDate: "2026-09-06", amountCents: 7_000, currency: "ARS", kind: "expense", categoryId: null, rate: "1" },
       ],
-      // Lo impago no es percibido: no entra ni en la torta ni en las barras.
       pending: [
         {
           id: "ins-3",
@@ -300,10 +271,8 @@ describe("buildDashboardView", () => {
       ...BASE,
       expenseCategories: [cat("cat-1", "Comida")],
       paid: [
-        // Antes del saldo inicial (2026-08-05): ya está adentro del saldo.
         { paidDate: "2026-08-01", amountCents: 30_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
         { paidDate: "2026-07-20", amountCents: 9_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
-        // Después: cuenta en los tres bloques.
         { paidDate: "2026-08-07", amountCents: 10_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
       ],
     })

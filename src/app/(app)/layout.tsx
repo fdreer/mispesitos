@@ -8,9 +8,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   await requireSettings()
 
   return (
-    // Fila sólo desde `lg`: por debajo, el riel de escritorio no existe y la
-    // barra inferior fija móvil necesita padding inferior + safe-area en `main`
-    // para que el último bloque o botón nunca quede tapado.
     <div className="lg:flex">
       <AppSidebar />
       <Suspense fallback={null}>

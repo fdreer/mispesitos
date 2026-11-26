@@ -2,7 +2,6 @@ import Image from "next/image"
 
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 
-/** El marco de las pantallas de acceso: logo, título, bajada y contenido. */
 export function AuthCard({
   title,
   description,

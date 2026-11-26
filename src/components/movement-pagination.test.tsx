@@ -6,19 +6,12 @@ import { cleanup, render, screen } from "@testing-library/react"
 import { MovementPagination } from "@/components/movement-pagination"
 import { parseMovementQuery } from "@/lib/movement-query"
 
-/**
- * `next/link` fuera del server de Next busca el contexto del router y no lo
- * encuentra. Acá sólo importa el `href` que sale, así que un `<a>` alcanza.
- */
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
     <a href={href} {...props}>
       {children}
     </a>
   ),
-  // `LinkPending` (dentro de cada enlace) lo consume. Fuera de Next el hook no
-  // tiene de dónde sacar el estado: acá se responde "nada pendiente", que es
-  // el estado en el que este componente se dibuja siempre en los tests.
   useLinkStatus: () => ({ pending: false }),
 }))
 
@@ -45,14 +38,10 @@ afterEach(cleanup)
 
 describe("MovementPagination", () => {
   it("con una sola página no muestra nada", () => {
-    // Sin jest-dom en el repo: se compara el HTML, no con toBeEmptyDOMElement.
     expect(montar(1, 1).container.innerHTML).toBe("")
   })
 
   it("la página 1 no ofrece anterior y la última no ofrece siguiente", () => {
-    // `PaginationPrevious`/`PaginationNext` traen su propio `aria-label` (más
-    // descriptivo que el texto visible, que además se oculta en pantallas
-    // chicas), así que el nombre accesible real es ese, no "Anterior"/"Siguiente".
     montar(1, 3)
     expect(screen.queryByRole("link", { name: "Ir a la página anterior" })).toBeNull()
     expect(screen.getByRole("link", { name: "Ir a la página siguiente" })).toBeTruthy()
@@ -64,14 +53,6 @@ describe("MovementPagination", () => {
     expect(screen.queryByRole("link", { name: "Ir a la página siguiente" })).toBeNull()
   })
 
-  // Hallazgo F de la auditoría de esta rama: el test de arriba ubica los
-  // links por `aria-label` (el nombre accesible), pero nada afirmaba nada
-  // sobre el texto VISIBLE (el prop `text` que `movement-pagination.tsx` le
-  // pasa a `PaginationPrevious`/`PaginationNext`). Borrar `text="Anterior"`/
-  // `text="Siguiente"` de ese archivo deja los botones mostrando en pantalla
-  // "Previous"/"Next" (el default en inglés del primitivo) sin que ningún
-  // test lo note, porque el `aria-label` en español sigue estando y por sí
-  // solo ya alcanza para que el test de arriba pase.
   it("el texto visible en español sigue ahí, no sólo el aria-label (hallazgo F)", () => {
     montar(2, 3)
 

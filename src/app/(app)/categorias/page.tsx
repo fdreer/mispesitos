@@ -4,27 +4,8 @@ import { CategoryManager } from "@/components/category-manager"
 import { countMovementsByCategory, listCategories } from "@/server/queries"
 import { requireSettings } from "@/server/session"
 
-/**
- * Las dos tarjetas. Van detrás de un Suspense para que el título salga en el
- * primer flush, igual que en el resto de las pantallas; acá la consulta es
- * chica, así que la espera es corta — pero la alternativa era el esqueleto
- * genérico de `(app)/loading.tsx`, que promete cuatro tarjetas en fila y un
- * bloque grande, o sea la forma equivocada.
- *
- * Un solo límite y no uno por tarjeta: las dos salen de la MISMA consulta
- * (una sola lista, partida por `kind` acá abajo), así que dos límites
- * esperarían exactamente lo mismo.
- */
 async function CategoriasBody() {
   const { user } = await requireSettings()
-  // Con las archivadas incluidas: ésta es la pantalla para la que existe el
-  // tercer parámetro de listCategories. Sin él, archivar hacía desaparecer la
-  // fila y la categoría no volvía a verse desde ningún lado.
-  //
-  // El conteo de movimientos es para el caso de §2.1 del plan v2: darle la
-  // primera subcategoría a una categoría que ya tiene movimientos obliga a
-  // decir a dónde pasan. Viaja como objeto y no como Map: lo que cruza al
-  // componente de cliente tiene que ser serializable.
   const [categories, counts] = await Promise.all([
     listCategories(user.id, undefined, true),
     countMovementsByCategory(user.id),
@@ -47,11 +28,6 @@ async function CategoriasBody() {
   )
 }
 
-/**
- * Las mismas dos tarjetas, en gris. Sin div envolvente propio: así los dos
- * huecos son hijos directos del mismo `space-y-4` que después van a ocupar
- * las tarjetas de verdad, y el espacio entre ellas no cambia al llegar.
- */
 function CategoriasSkeleton() {
   return (
     <>
@@ -66,16 +42,6 @@ function CategoriasSkeleton() {
   )
 }
 
-/**
- * `max-w-2xl` y no el ancho completo: acá todo lo que se lee son nombres de
- * categoría y un botón al lado. Estirado a 1200px, cada fila dejaba medio
- * metro de vacío entre el nombre y su propio botón "Archivar", que es
- * justamente el par que hay que leer junto.
- *
- * `space-y-4` entre las dos tarjetas (no el `space-y-8` de antes): con la
- * tarjeta puesta, el borde ya separa los dos bloques y no hace falta que
- * además los separe el aire.
- */
 export default function CategoriasPage() {
   return (
     <div className="max-w-2xl space-y-6">

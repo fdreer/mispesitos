@@ -5,12 +5,6 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import { AuthForm } from "@/components/auth-form"
 
-/**
- * Las dos fronteras del framework, como en `movement-form.test.tsx`: el
- * cliente de better-auth (que pega contra `/api/auth` apenas se lo llama) y el
- * router de Next. Lo que se prueba acá es lo que hace este componente con lo
- * que esas dos devuelven.
- */
 const signIn = { email: vi.fn() }
 const signUp = { email: vi.fn() }
 const push = vi.fn()
@@ -31,7 +25,6 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-/** Completa correo y contraseña y manda el formulario. */
 async function enviar(email = "franco@ejemplo.com", password = "12345678") {
   fireEvent.change(screen.getByLabelText("Correo"), { target: { value: email } })
   fireEvent.change(screen.getByLabelText("Contraseña"), { target: { value: password } })

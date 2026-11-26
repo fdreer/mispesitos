@@ -15,7 +15,6 @@ describe("splitAmount", () => {
   })
 
   it("deja el resto en la última cuota", () => {
-    // $100,00 en 3 => 33,33 / 33,33 / 33,34
     expect(splitAmount(10_000, 3)).toEqual([3_333, 3_333, 3_334])
   })
 
@@ -30,24 +29,12 @@ describe("splitAmount", () => {
   })
 
   it("la suma cierra por fuerza bruta: 180.000 combinaciones de total y cuotas", () => {
-    // La invariante más cara de la app —si se pierde un centavo, el
-    // movimiento queda inconsistente contra sus cuotas para siempre— revisada
-    // exhaustivamente, no sobre una muestra elegida a dedo. Cubre a propósito
-    // los totales con menos centavos que cuotas (el reparto da cuotas de cero)
-    // y cantidades de cuotas mucho más grandes que las 120 que permite el
-    // formulario.
-    //
-    // Las fallas se juntan en una lista y se comparan una sola vez contra la
-    // lista vacía: 180.000 llamadas a expect() dentro del bucle tardan minutos
-    // y no dicen nada más que esto.
     const fallas: string[] = []
 
     for (let total = 0; total < 600; total++) {
       for (let count = 1; count <= 300; count++) {
         const parts = splitAmount(total, count)
         const suma = parts.reduce((a, b) => a + b, 0)
-        // Ninguna cuota puede salir negativa ni por encima del total: un
-        // reparto que "cierre" a fuerza de una cuota negativa no sirve.
         const partesSanas = parts.every(
           (p) => Number.isInteger(p) && p >= 0 && p <= total,
         )

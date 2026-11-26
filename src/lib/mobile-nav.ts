@@ -1,9 +1,3 @@
-/**
- * Helpers puros para la navegación compartida entre el riel de escritorio y la
- * barra inferior móvil (§5.4 y decisión §7.6 del plan v2).
- */
-
-/** Rutas que viven dentro de la hoja "Más" en la barra inferior móvil. */
 export const MORE_NAV_HREFS = [
   "/tarjetas",
   "/informes",
@@ -12,11 +6,6 @@ export const MORE_NAV_HREFS = [
   "/ajustes",
 ] as const
 
-/**
- * Marca una ruta como activa tanto en coincidencia exacta como en subrutas
- * (por ejemplo `/tarjetas/<id>` mantiene activo `/tarjetas` en escritorio y
- * "Más" en móvil).
- */
 export function isRouteActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`)
 }

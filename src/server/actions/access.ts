@@ -13,11 +13,6 @@ const PATH = "/ajustes/usuarios"
 
 export type CreateInvitationResult = ActionResult | { ok: true; link: string }
 
-/**
- * Genera una invitación y devuelve el link completo. El token en claro sólo
- * existe en esta respuesta: en la base queda su hash, así que si el admin lo
- * pierde, genera otra.
- */
 export async function createInvitation(
   _prev: CreateInvitationResult | null,
   formData: FormData,

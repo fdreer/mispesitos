@@ -45,9 +45,6 @@ describe("getMovementStatus", () => {
   })
 
   it("una cuota pagada tarde no deja el movimiento vencido", () => {
-    // La única vencida está paga: ya no se debe nada de ella. Si el estado
-    // mirara todas las cuotas en vez de sólo las impagas, este movimiento
-    // aparecería en rojo en la lista de vencidos para siempre.
     expect(
       getMovementStatus(
         [
@@ -72,7 +69,6 @@ describe("getMovementStatus", () => {
   })
 
   it("una sola cuota impaga que venció ayer alcanza para vencido", () => {
-    // El borde del otro lado del "vence hoy": un día antes ya es vencido.
     expect(getMovementStatus([{ paid: false, dueDate: "2026-08-09" }], TODAY)).toBe("overdue")
   })
 
@@ -90,18 +86,7 @@ describe("getMovementStatus", () => {
   })
 })
 
-/**
- * El badge de cada fila de la lista necesita el CONTEO, no sólo el estado, y
- * por eso lo recalculaba a mano mientras el filtro de la misma pantalla usaba
- * `getMovementStatus`. Coincidían de casualidad: el día que la regla de
- * "vencido" cambie, filtrar por "Vencido" habría mostrado filas con el badge
- * de "pendiente".
- *
- * NO BORRAR NI RELAJAR: el valor de estos tests no es cada número suelto, es
- * que el estado y los conteos salgan de la MISMA pasada.
- */
 describe("summarizeMovementStatus", () => {
-  /** Los mismos casos que usa el describe de arriba, con su conteo esperado. */
   const casos = [
     {
       nombre: "todas pagadas",
@@ -161,10 +146,6 @@ describe("summarizeMovementStatus", () => {
   })
 
   it("el estado que devuelve el resumen es EXACTAMENTE el que devuelve getMovementStatus", () => {
-    // Ésta es la garantía que el badge y el filtro necesitan: una sola regla,
-    // no dos que hoy coinciden. Si alguien vuelve a escribir el conteo aparte,
-    // este test no se entera —vive en el consumidor— pero sí se entera de que
-    // las dos funciones exportadas dejen de estar atadas entre sí.
     for (const { cuotas } of casos) {
       expect(summarizeMovementStatus([...cuotas], TODAY).status).toBe(
         getMovementStatus([...cuotas], TODAY),
@@ -182,15 +163,11 @@ describe("summarizeMovementStatus", () => {
       expect(overdueCount).toBeLessThanOrEqual(pendingCount)
       expect(status === "paid").toBe(pendingCount === 0)
       expect(status === "overdue").toBe(overdueCount > 0)
-      // El badge de "pendiente(s)" se muestra sólo en este caso, y con este
-      // número: si fuera 0, la lista mostraría un badge vacío.
       expect(status === "pending").toBe(pendingCount > 0 && overdueCount === 0)
     }
   })
 
   it("cuenta sólo las impagas, aunque haya pagadas vencidas de sobra", () => {
-    // El conteo del badge sale de las impagas, igual que el estado: una cuota
-    // vencida y pagada no puede sumar al número rojo.
     expect(
       summarizeMovementStatus(
         [

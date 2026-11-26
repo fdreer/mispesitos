@@ -75,7 +75,7 @@ describe("sortMovements", () => {
     date: "2026-11-15",
     amountCents: 100_00,
     currency: "USD",
-    rate: "1000", // 100_000 ARS
+    rate: "1000",
     installments: [{ amountCents: 100_00, dueDate: "2026-11-20", paid: false }],
   })
   const c = mov("c", {

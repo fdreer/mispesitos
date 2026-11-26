@@ -28,37 +28,20 @@ import {
 } from "@/server/actions/categories"
 import type { Category } from "@/server/queries"
 
-/**
- * Las categorías de un tipo, en árbol (§2.3 del plan v2): cada padre con sus
- * subcategorías, plegables; color e icono; alta de subcategoría desde el
- * padre; "Mover a…" para reubicar (que es también el "Agrupar" del plan, para
- * las categorías que ya existían y quedaron todas de primer nivel).
- *
- * Las acciones de cada fila van en un menú ⋯, como en los listados de
- * movimientos: con cuatro acciones por fila, una botonera no entraba en un
- * teléfono.
- */
 export function CategoryManager({
   kind,
   categories,
   movementCounts = {},
 }: {
   kind: "income" | "expense"
-  /** Todas las de este tipo, archivadas incluidas. */
   categories: Category[]
-  /** Movimientos por categoría; hace falta para crear la primera subcategoría. */
   movementCounts?: Record<string, number>
 }) {
   const router = useRouter()
   const [state, action, pending] = useActionState(createCategory, null)
   const [archiving, startTransition] = useTransition()
-  // El error del último intento de archivar o desarchivar, con la fila donde
-  // pasó: los dos caminos usan el mismo estado porque nunca hay dos en vuelo
-  // (`archiving` deshabilita todos los botones mientras uno viaja).
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null)
   const [dialog, setDialog] = useState<CategoryDialogMode | null>(null)
-  // Plegados y no desplegados: arrancan todos abiertos, porque con pocas
-  // categorías lo útil es ver todo de una; plegar es para cuando son muchas.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const closeDialog = useCallback(() => setDialog(null), [])
 
@@ -70,20 +53,9 @@ export function CategoryManager({
   }, [state, router])
 
   const labels = useMemo(() => categoryLabels(categories), [categories])
-  // El árbol de las ACTIVAS. Una hija activa nunca tiene un padre archivado
-  // (archivar un padre archiva sus hijas, y desarchivar una hija desarchiva el
-  // padre), así que no se pierde ninguna.
   const tree = useMemo(() => buildCategoryTree(categories.filter((c) => !c.archived)), [categories])
-  // Las archivadas, en una lista plana con su padre adelante: lo que importa
-  // de ellas es poder encontrarlas y desarchivarlas, no su lugar en el árbol.
   const archivadas = categories.filter((c) => c.archived)
 
-  // Mismo patrón que DeleteMovementButton/InstallmentRows: la Server Action
-  // devuelve un ActionResult que hay que mirar, nunca descartar con `void` —
-  // si archivar falla, el usuario tiene que enterarse en vez de ver la
-  // categoría seguir ahí sin explicación. Vale igual para desarchivar, que
-  // además tiene un modo de falla propio (el nombre chocado, ver
-  // `unarchiveCategory`).
   function handleArchivedToggle(id: string, archived: boolean) {
     setRowError(null)
     startTransition(async () => {
@@ -105,9 +77,6 @@ export function CategoryManager({
     })
   }
 
-  // Una función que devuelve JSX y no un componente: definido acá adentro,
-  // un componente sería un tipo nuevo en cada render, y React remontaría la
-  // fila entera —menú ⋯ abierto incluido— con cualquier cambio de estado.
   function renderRow(category: Category, depth: 0 | 1, childCount: number) {
     const Icon = categoryIcon(category.icon)
     const isCollapsed = collapsed.has(category.id)

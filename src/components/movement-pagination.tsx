@@ -10,26 +10,17 @@ import {
 import type { MovementSort } from "@/lib/movement-list-view"
 import { buildMovementHref, PAGE_SIZE, type MovementQuery } from "@/lib/movement-query"
 
-/** Cuántos números se muestran alrededor de la página actual. */
 const WINDOW = 5
 
 type Props = {
-  /** Ruta de la pantalla actual ("/ingresos" o "/egresos"), sin query. */
   basePath: string
   query: MovementQuery
   defaultSort?: MovementSort
-  /** La página que se está mostrando de verdad, ya ajustada por `paginate`. */
   page: number
   totalPages: number
-  /** Total de movimientos del filtro, para mostrar "21–40 de 134" en escritorio. */
   totalCount?: number
 }
 
-/**
- * Enlaces de paginado en escritorio con el rango visible ("21–40 de 134",
- * §5.3). En móvil se oculta cuando hay `totalCount`, porque ahí vive el botón
- * "Cargar más" en `MovementList`.
- */
 export function MovementPagination({
   basePath,
   query,

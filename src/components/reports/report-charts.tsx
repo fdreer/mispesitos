@@ -132,8 +132,6 @@ export function CashflowChart({
       kind: r.kind,
       neto: toUnits(r.netCents),
       saldoReal: isReal ? closing : null,
-      // El último punto real arranca también la línea punteada para que no haya
-      // un corte en el medio del gráfico entre pasado y presente/futuro.
       saldoProyectado: !isReal || isBridge ? closing : null,
     }
   })

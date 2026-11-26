@@ -33,7 +33,6 @@ describe("CardDialog", () => {
     fireEvent.change(screen.getByLabelText("Día de vencimiento"), { target: { value: "5" } })
     const limite = screen.getByLabelText<HTMLInputElement>("Límite (opcional)")
     fireEvent.change(limite, { target: { value: "2000000" } })
-    // El mismo formato que el importe de un movimiento.
     expect(limite.value).toBe("2.000.000")
     fireEvent.click(screen.getByRole("radio", { name: "Azul" }))
 

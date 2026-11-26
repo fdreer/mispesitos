@@ -2,11 +2,6 @@ import { describe, it, expect } from "vitest"
 
 import { isCheckViolation, isUniqueViolation } from "@/lib/db-errors"
 
-/**
- * Reproduce la forma real que arma Drizzle: un `DrizzleQueryError` cuyo
- * `cause` es el `PostgresError` de postgres.js. Confirmado a mano contra la
- * base real — ver .superpowers/sdd/task-16-report.md.
- */
 function drizzleQueryError(cause: unknown): Error {
   const error = new Error("Failed query: …")
   Object.assign(error, { cause })
@@ -65,7 +60,6 @@ describe("isCheckViolation", () => {
     expect(isCheckViolation(error, "category_two_levels")).toBe(true)
   })
 
-  // Un trigger diferido falla en el COMMIT, que no pasa por Drizzle.
   it("reconoce el error pelado de postgres.js, sin `cause`", () => {
     const error = Object.assign(new Error("Un movimiento no puede…"), {
       code: "23514",

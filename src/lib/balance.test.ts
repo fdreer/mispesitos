@@ -64,7 +64,6 @@ describe("computeBalances", () => {
     const exchanges: ExchangeMovement[] = [
       { date: "2026-03-01", direction: "buy", usdCents: 50_00, rate: 1_450 },
     ]
-    // 50 USD * 1450 = $72.500
     expect(computeBalances(settings, [], exchanges)).toEqual({
       arsCents: 100_000_00 - 72_500_00,
       usdCents: 550_00,
@@ -99,8 +98,6 @@ describe("computeBalances", () => {
   })
 
   it("incluye el cambio hecho exactamente en la fecha del saldo inicial", () => {
-    // El otro lado del borde que ya prueba "ignora los cambios anteriores".
-    // Un `<` que se vuelva `<=` deja afuera todo lo del día del saldo inicial.
     const exchanges: ExchangeMovement[] = [
       { date: "2026-01-01", direction: "buy", usdCents: 100_00, rate: 1_000 },
     ]
@@ -111,8 +108,6 @@ describe("computeBalances", () => {
   })
 
   it("una cuota en dólares no toca los pesos y una en pesos no toca los dólares", () => {
-    // Las dos monedas se llevan por separado: no hay conversión en el saldo.
-    // Un movimiento en USD que sumara pesos inventaría plata que no existe.
     const soloUsd = computeBalances(
       settings,
       [{ paidDate: "2026-02-05", currency: "USD", kind: "income", amountCents: 1_000_00 }],
@@ -131,11 +126,6 @@ describe("computeBalances", () => {
   })
 
   it("la pata en pesos de un cambio se redondea al centavo", () => {
-    // US$ 1,23 a 1450,5678 son $1.784,1983… — o sea 178.419,83… centavos, que
-    // redondeados al centavo dan 178.420. En centavos: 123 × 1450,5678.
-    // (El comentario decía "1.784,1983… centavos: 1.784", cien veces menos.
-    // La aserción siempre estuvo bien; el comentario era la trampa para el que
-    // viniera después a "corregirla".)
     const exchanges: ExchangeMovement[] = [
       { date: "2026-03-01", direction: "buy", usdCents: 123, rate: 1450.5678 },
     ]
@@ -146,8 +136,6 @@ describe("computeBalances", () => {
   })
 
   it("comprar y vender los mismos dólares al mismo TC deja todo como estaba", () => {
-    // Si las dos patas no usaran el mismo redondeo, ida y vuelta dejaría
-    // centavos colgados en el saldo en pesos.
     const exchanges: ExchangeMovement[] = [
       { date: "2026-03-01", direction: "buy", usdCents: 777, rate: 1450.5678 },
       { date: "2026-03-02", direction: "sell", usdCents: 777, rate: 1450.5678 },

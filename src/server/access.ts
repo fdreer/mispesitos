@@ -6,15 +6,6 @@ import { db } from "@/db/client"
 import { invitation, session, user } from "@/db/schema"
 import { generateInviteToken, hashInviteToken, inviteExpiry } from "@/lib/invitations"
 
-/**
- * Acceso a la instalación: quién entra y con qué invitación (§0.1 del plan v2).
- *
- * Todo esto corre FUERA de withUser(), con `db` directo: son las tablas de auth
- * (`user`, `session`) y `invitation`, a las que `app_user` tiene acceso
- * explícito (migraciones 0004 y 0010). Ninguna función de acá lee datos
- * financieros: el admin decide quién entra, no ve lo que cada uno carga.
- */
-
 export async function hasAnyUser(): Promise<boolean> {
   const rows = await db.execute(sql`SELECT EXISTS (SELECT 1 FROM "user") AS "exists"`)
   return Boolean((rows[0] as { exists: boolean } | undefined)?.exists)
@@ -29,7 +20,6 @@ function validInvitationWhere(tokenHash: string, now: Date) {
   )
 }
 
-/** La invitación del token, si todavía se puede usar. No la consume. */
 export async function findUsableInvitation(token: string) {
   const [row] = await db
     .select({ id: invitation.id, email: invitation.email, expiresAt: invitation.expiresAt })
@@ -39,12 +29,6 @@ export async function findUsableInvitation(token: string) {
   return row ?? null
 }
 
-/**
- * Consume la invitación en un solo UPDATE condicionado: si dos personas usan
- * el mismo link a la vez, una sola fila vuelve. Se llama ANTES de crear el
- * usuario; si después el alta falla, la invitación queda gastada y el admin
- * genera otra. Es el costo de no permitir nunca dos cuentas con un link.
- */
 export async function claimInvitation(token: string, email: string): Promise<boolean> {
   const rows = await db
     .update(invitation)

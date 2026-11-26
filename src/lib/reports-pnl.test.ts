@@ -69,16 +69,13 @@ describe("buildPnlReport", () => {
       currencyMode: "todo",
       categories: CATS,
       paidInstallments: [
-        // Mes anterior al rango (septiembre) para calcular variación de octubre:
         { paidDate: "2026-09-10", amountCents: 100_000_00, currency: "ARS", kind: "income", categoryId: "sueldo", rate: "1" },
         { paidDate: "2026-09-15", amountCents: 40_000_00, currency: "ARS", kind: "expense", categoryId: "alquiler", rate: "1" },
-        // Octubre:
         { paidDate: "2026-10-05", amountCents: 150_000_00, currency: "ARS", kind: "income", categoryId: "sueldo", rate: "1" },
         { paidDate: "2026-10-10", amountCents: 50_000_00, currency: "ARS", kind: "expense", categoryId: "alquiler", rate: "1" },
         { paidDate: "2026-10-12", amountCents: 10_000_00, currency: "ARS", kind: "expense", categoryId: "expensas", rate: "1" },
-        // Noviembre con USD convertido al rate histórico:
         { paidDate: "2026-11-05", amountCents: 150_000_00, currency: "ARS", kind: "income", categoryId: "sueldo", rate: "1" },
-        { paidDate: "2026-11-10", amountCents: 100_00, currency: "USD", kind: "expense", categoryId: "comida", rate: "1200" }, // $120.000
+        { paidDate: "2026-11-10", amountCents: 100_00, currency: "USD", kind: "expense", categoryId: "comida", rate: "1200" },
       ],
     })
 
@@ -91,14 +88,12 @@ describe("buildPnlReport", () => {
       savingsRatePct: 40,
     })
 
-    // Sueldo subió 50% en octubre respecto de septiembre, y 0% en noviembre:
     expect(view.incomeRows).toHaveLength(1)
     expect(view.incomeRows[0].name).toBe("Sueldo")
     expect(view.incomeRows[0].cells[0]).toMatchObject({ month: "2026-10", amountCents: 150_000_00 })
     expect(view.incomeRows[0].cells[0].variationPct).toBeCloseTo(50)
     expect(view.incomeRows[0].cells[1].variationPct).toBeCloseTo(0)
 
-    // Gastos: Comida ($120k) arriba de Hogar ($60k = Alquiler $50k + Expensas $10k):
     expect(view.expenseRows.map((r) => [r.name, r.totalCents])).toEqual([
       ["Comida", 120_000_00],
       ["Hogar", 60_000_00],

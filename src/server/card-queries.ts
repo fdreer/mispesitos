@@ -9,18 +9,8 @@ import { cardStatement, category, creditCard, installment, movement } from "@/db
 import { addPeriods, type KnownStatement, type StatementSummary } from "@/lib/cards"
 import { monthKey, type IsoDate } from "@/lib/dates"
 
-/**
- * Las consultas de tarjetas de crédito (§1 del plan v2, Fase 3). Aparte de
- * `@/server/queries` sólo por tamaño: siguen las mismas reglas (todo por
- * `withUser`, filtro explícito por `user_id` además de la RLS).
- */
-
 export type CreditCard = typeof creditCard.$inferSelect
 
-/**
- * Las tarjetas del usuario. Por default sólo las activas; /tarjetas pide
- * también las archivadas para poder desarchivarlas, igual que /categorias.
- */
 export const listCards = cache(async function listCards(
   userId: string,
   includeArchived = false,
@@ -53,11 +43,6 @@ export type StatementRow = StatementSummary & {
   usdPaidRate: string | null
 }
 
-/**
- * Los resúmenes de una tarjeta (o de todas), con el total de sus cuotas por
- * moneda. Un resumen sin cuotas sale igual, en cero: es el que se abrió para
- * corregirle las fechas antes de que llegue una compra.
- */
 export async function listStatementSummaries(
   userId: string,
   cardId?: string,

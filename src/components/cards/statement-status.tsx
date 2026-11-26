@@ -3,11 +3,6 @@ import { Check } from "lucide-react"
 import type { StatementSummary } from "@/lib/cards"
 import { formatIsoForDisplay, isOverdue, type IsoDate } from "@/lib/dates"
 
-/**
- * En qué está un resumen, en una línea: pagado, vencido, por vencer, o
- * todavía abierto. Con icono además del color en los dos extremos (§5.3 del
- * plan v2: el estado no puede depender sólo del color).
- */
 export function StatementStatus({
   statement,
   today,

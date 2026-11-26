@@ -14,40 +14,17 @@ import { logDbError } from "@/lib/log-db-error"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { requireUser } from "@/server/session"
 
-/**
- * Los ids de categoría los genera `randomUUID()`, igual que los de movimiento
- * y cuota: mismo criterio que `deleteMovementIdSchema`/`setInstallmentPaidSchema`
- * en @/server/actions/movements — validar que sea un UUID es el borde de
- * confianza mínimo, incluso cuando la RLS ya filtra por userId.
- */
 const categoryIdSchema = z.uuid("Esa categoría no existe.")
 
-/** Un campo opcional de formulario: vacío o ausente es "sin valor". */
 const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((v) => (v === "" || v === null ? undefined : v), schema.optional())
 
-/**
- * Nombre, color e icono: lo que se elige al crear y al editar. El color y el
- * icono son claves de las listas fijas (ver @/lib/category-color y
- * @/lib/category-icons); vacíos = "automático" / "sin icono".
- */
 const appearanceSchema = z.object({
   name: z.string().trim().min(1, "Poné un nombre.").max(60),
   color: optional(z.enum(CATEGORY_COLOR_KEYS, "Ese color no existe.")),
   icon: optional(z.enum(CATEGORY_ICON_KEYS, "Ese icono no existe.")),
 })
 
-/**
- * Qué pasa con los movimientos de una categoría que recibe su PRIMERA
- * subcategoría (§2.1 del plan: "pide a cuál subcategoría pasan esos
- * movimientos, por defecto una nueva General"):
- *
- * - "general": a una subcategoría nueva "General", creada en el momento.
- * - "child": a la subcategoría que se está creando o moviendo.
- *
- * Hace falta porque un movimiento sólo puede apuntar a una hoja (decisión
- * 7.4): el padre tiene que quedar vacío.
- */
 const movementsToSchema = z.enum(["general", "child"]).catch("general")
 
 const createSchema = appearanceSchema.extend({
@@ -56,23 +33,11 @@ const createSchema = appearanceSchema.extend({
   movementsTo: movementsToSchema,
 })
 
-/** Los mensajes de las reglas que hace cumplir la base (migración 0011). */
 const MENSAJE_TERCER_NIVEL = "Una subcategoría no puede tener subcategorías."
 const MENSAJE_PADRE_CON_MOVIMIENTOS =
   "La categoría todavía tiene movimientos. Recargá la página y probá de nuevo."
 
-/**
- * El error de la base traducido a un mensaje para la persona, o null si es
- * uno que no se espera (que cada llamador convierte en su genérico).
- *
- * Las Server Actions ya validan estas reglas antes de escribir; lo que llega
- * acá es la carrera (dos pestañas) o un camino que se olvidó de validar. La
- * base no deja pasar el dato, y la persona ve algo que entiende.
- */
 function knownDbError(error: unknown): { message: string; label: string } | null {
-  // "Con ese nombre" y no "en ese lugar": desde la 0011 el índice es único
-  // entre hermanas, pero para una de primer nivel el lugar es "arriba de
-  // todo", y el mensaje de siempre se sigue leyendo bien en los dos casos.
   if (isUniqueViolation(error, "category_active_unique")) {
     return { message: "Ya tenés una categoría con ese nombre.", label: "nombre repetido" }
   }
@@ -87,15 +52,6 @@ function knownDbError(error: unknown): { message: string; label: string } | null
 
 type ParentCheck = { ok: true; hadChildren: boolean } | { ok: false; message: string }
 
-/**
- * Valida que `parentId` pueda recibir una subcategoría: que exista, sea del
- * mismo tipo, esté activa y sea de primer nivel. La FK compuesta y el trigger
- * de la 0011 ya lo impiden en la base; validarlo acá es para dar un mensaje
- * que se entienda en vez del genérico.
- *
- * Devuelve además si ya tenía hijas: si no tenía, sus movimientos tienen que
- * pasar a una subcategoría (ver `reassignParentMovements`).
- */
 async function checkParent(
   tx: Tx,
   userId: string,
@@ -119,17 +75,6 @@ async function checkParent(
   return { ok: true, hadChildren: child !== undefined }
 }
 
-/**
- * Pasa los movimientos de `parentId` a una subcategoría, para que el padre
- * quede vacío y la regla de "sólo hojas" se siga cumpliendo. `childId` es la
- * que se está creando o moviendo; con `movementsTo = "general"` se crea (o se
- * reusa, si ya hay una activa con ese nombre abajo del padre) una "General".
- *
- * Corre en la misma transacción que crea o mueve la hija: el trigger
- * `movement_category_is_leaf` es diferido justamente para que este estado
- * intermedio —un padre con hija y con movimientos— no reviente antes de
- * llegar acá.
- */
 async function reassignParentMovements(
   tx: Tx,
   userId: string,
@@ -163,9 +108,6 @@ async function reassignParentMovements(
     .where(and(eq(movement.userId, userId), eq(movement.categoryId, parent.id)))
 }
 
-/**
- * Alta de una categoría: de primer nivel, o subcategoría si viene `parentId`.
- */
 export async function createCategory(
   _prev: ActionResult | null,
   formData: FormData,
@@ -212,10 +154,6 @@ export async function createCategory(
     })
     if (!result.ok) return result
   } catch (error) {
-    // Cualquier error que no sea una de las reglas conocidas —conexión
-    // caída, RLS, timeout— queda con un mensaje genérico: decirle "nombre
-    // repetido" a alguien cuando no lo es no le deja forma de entender qué
-    // pasa.
     const known = knownDbError(error)
     logDbError(known ? `createCategory: ${known.label}` : "createCategory", error)
     return failure(known?.message ?? "No pudimos crear la categoría. Probá de nuevo.")

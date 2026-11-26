@@ -16,28 +16,12 @@ const USER_A = "rls-test-user-a"
 const USER_B = "rls-test-user-b"
 const USUARIOS = [USER_A, USER_B]
 
-/**
- * Las policies de la app son copias del mismo predicado sobre tablas
- * distintas. Antes la cobertura de comportamiento era sólo sobre `category`: un
- * error en una sola de las otras no lo agarraba nada. Cada caso describe
- * cómo sembrar, leer, escribir a nombre ajeno y limpiar una tabla, y los tests
- * de aislamiento —adentro y afuera de withUser()— se corren parametrizados
- * sobre todas. La Fase 3 del plan v2 (migración 0012) sumó `credit_card` y
- * `card_statement`: entran al mismo array y heredan los mismos tests.
- *
- * El orden del array es el de siembra (respeta las FK); la limpieza va al revés.
- *
- * `leer` acepta cualquier cosa con `.select()`, no sólo un Tx: los tests de
- * adentro de withUser() le pasan un Tx real, y el test "fuera de withUser" le
- * pasa `db` directamente, sin transacción ni SET LOCAL ROLE.
- */
 type Consultable = Pick<typeof db, "select">
 
 type CasoTabla = {
   nombre: string
   sembrar: (tx: Tx, userId: string) => Promise<unknown>
   leer: (tx: Consultable) => Promise<{ userId: string }[]>
-  /** Un INSERT válido salvo por el user_id, que es el de otro usuario. */
   insertarAjena: (tx: Tx) => Promise<unknown>
   borrar: (tx: Tx) => Promise<unknown>
 }

@@ -12,14 +12,6 @@ import {
 import { BASE_PATHS } from "@/lib/movement-routes"
 import type { ReportCurrency } from "@/lib/report-query"
 
-/**
- * Informe "Ingresos vs Gastos" (§3.1 y §3.3 del plan v2), puro sin base ni React.
- *
- * Trabaja bajo el criterio de lo percibido (§0): cada cuota pagada cuenta en su
- * `paidDate`, ya pasada por `perceivedPayment` (los dólares de un resumen
- * pagado con pesos llegan convertidos a ARS al TC del pago).
- */
-
 export const MAX_REPORT_MONTHS = 60
 
 export type ReportCategory = TreeCategory & {
@@ -102,7 +94,6 @@ const SHORT_MONTH_FORMATTER = new Intl.DateTimeFormat("es-AR", {
   timeZone: "UTC",
 })
 
-/** `"2026-11"` -> `"nov 26"`. */
 export function formatShortMonth(yearMonth: string): string {
   const [year, month] = yearMonth.split("-").map(Number)
   if (!year || !month) return yearMonth
@@ -111,11 +102,6 @@ export function formatShortMonth(yearMonth: string): string {
     .trim()
 }
 
-/**
- * Lista ordenada de meses `YYYY-MM` entre `from` y `to` (inclusive).
- * Topada a `maxMonths` desde `to` hacia atrás para que una URL editada a mano
- * con un rango de siglos no genere miles de columnas.
- */
 export function monthsInRange(
   from: IsoDate,
   to: IsoDate,

@@ -3,19 +3,8 @@ import { addMonthsClamped, isValidIsoDate, monthKey, type IsoDate } from "@/lib/
 import { resolvePaidDate } from "@/lib/installments"
 import { convertToArs, type Currency } from "@/lib/money"
 
-/**
- * Las reglas de las tarjetas de crédito (§1.3 del plan v2), sin base ni React.
- *
- * Las usan los dos lados: la Server Action, que es la que decide en qué
- * resumen cae cada cuota, y el formulario, que muestra ANTES de guardar los
- * vencimientos que va a tener el plan. Si cada lado tuviera su copia, el
- * formulario podría prometer un vencimiento y la acción guardar otro.
- */
-
-/** "YYYY-MM". El mes del cierre de un resumen. */
 export type Period = string
 
-/** Lo que hace falta de una tarjeta para proponer las fechas de un resumen. */
 export type CardCycle = {
   closingDay: number
   dueDay: number
@@ -27,7 +16,6 @@ export type StatementDates = {
   dueDate: IsoDate
 }
 
-/** Un resumen que ya existe en la base: sus fechas son las reales, no las propuestas. */
 export type KnownStatement = StatementDates & {
   id: string
   paid: boolean
@@ -37,7 +25,6 @@ export function isValidPeriod(period: string): boolean {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(period)
 }
 
-/** Corre un período `n` meses (negativo para atrás). */
 export function addPeriods(period: Period, n: number): Period {
   return monthKey(addMonthsClamped(`${period}-01`, n))
 }

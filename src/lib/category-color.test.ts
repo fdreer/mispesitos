@@ -12,7 +12,6 @@ import {
   resolveCategoryHue,
 } from "@/lib/category-color"
 
-/** Suficientes nombres para barrer los tonos libres varias veces. */
 const NOMBRES = Array.from({ length: 5000 }, (_, i) => `categoría ${i}`)
 
 describe("categoryColor", () => {

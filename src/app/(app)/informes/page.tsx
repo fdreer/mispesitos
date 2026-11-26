@@ -131,8 +131,6 @@ async function InformeBody({
   }
 
   const range = effectivePnlRange(reportQuery.filters.from, reportQuery.filters.to, today)
-  // Traemos un mes extra antes de `range.from` para que la variación % de la
-  // primera columna tenga base contra el mes inmediatamente anterior.
   const prevMonthStart = `${monthKey(addMonthsClamped(`${monthKey(range.from)}-01`, -1))}-01`
 
   const [categories, paid] = await Promise.all([

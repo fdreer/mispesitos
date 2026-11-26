@@ -26,8 +26,6 @@ type Props = {
   defaults: {
     initialBalanceArs: string
     initialBalanceUsd: string
-    // `numeric` en Postgres llega como string por Drizzle (ver src/db/schema.ts):
-    // este default es coherente con eso, no un number disfrazado.
     initialBalanceUsdRate: string
     initialBalanceDate: string
     preferredRate: string
@@ -44,17 +42,6 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
   )
   const [dateOpen, setDateOpen] = useState(false)
 
-  /**
-   * Si el "Guardado." sigue en pantalla. NO alcanza con mirar `state?.ok`: el
-   * estado de `useActionState` vive hasta el próximo submit, así que guardar y
-   * después editar cualquier campo dejaba el cartel verde al lado de un valor
-   * sin guardar. En una app de finanzas es la señal equivocada sobre el campo
-   * equivocado.
-   *
-   * Mismo patrón que el `handledState` de `MovementForm`: un ajuste de estado
-   * durante el render disparado por el resultado de la Server Action, no un
-   * efecto.
-   */
   const [saved, setSaved] = useState(false)
   const [handledState, setHandledState] = useState<ActionResult | null>(null)
   if (state !== handledState) {
@@ -62,11 +49,6 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
     setSaved(state?.ok === true)
   }
 
-  /**
-   * Cualquier cambio apaga el cartel. Los tres campos de texto lo avisan por
-   * el `onChange` del form, que burbujea; el calendario y el Select no emiten
-   * evento nativo de cambio, así que lo llaman a mano.
-   */
   function markDirty() {
     setSaved(false)
   }
@@ -121,18 +103,12 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
       <div className="space-y-1.5">
         <Label htmlFor="initialBalanceDate">¿Desde qué fecha?</Label>
         <input type="hidden" name="initialBalanceDate" value={initialBalanceDate} />
-        {/* Mismo picker que el de /cambios (`exchange-form.tsx`), no el
-            `<input type="date">` nativo: ese abre el calendario del sistema
-            operativo, que no respeta el tema oscuro de la app. */}
         <Popover open={dateOpen} onOpenChange={setDateOpen}>
           <PopoverTrigger asChild>
             <Button
               id="initialBalanceDate"
               type="button"
               variant="outline"
-              // Mismo hallazgo D que en exchange-form.tsx: el <label
-              // htmlFor> de arriba gana la resolución de nombre accesible y
-              // corta ahí sin leer el contenido del botón.
               aria-label={`Desde qué fecha: ${formatIsoForDisplay(initialBalanceDate)}`}
               className="w-full justify-start font-normal"
             >

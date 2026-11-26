@@ -21,13 +21,6 @@ import type { Category, MovementWithInstallments } from "@/server/queries"
 
 type Kind = "income" | "expense"
 
-/**
- * El menú ⋯ de cada fila (§5.3 del plan v2): Editar y Borrar, con Borrar en
- * rojo y adentro del menú para que no quede al alcance de un toque suelto.
- *
- * Los dos diálogos viven FUERA del menú y se abren por estado: si colgaran del
- * ítem, cerrar el menú desmontaría el diálogo que el ítem acaba de abrir.
- */
 export function MovementRowActions({
   movement,
   kind,

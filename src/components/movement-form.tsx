@@ -32,71 +32,24 @@ import type { Category, MovementWithInstallments } from "@/server/queries"
 type Props = {
   kind: "income" | "expense"
   categories: Category[]
-  /** Cotización sugerida. null cuando dolarapi no respondió: se tipea a mano. */
   suggestedRate: number | null
-  /** Hoy según el reloj de Buenos Aires, calculado en el servidor. */
   today: IsoDate
-  /**
-   * El movimiento que se está editando, con sus cuotas. Ausente = alta.
-   *
-   * Es lo único que distingue los dos modos: de acá salen los valores
-   * iniciales, el campo oculto con el id, y a cuál de las dos Server Actions
-   * va el formulario.
-   */
   movement?: MovementWithInstallments
-  /**
-   * Las tarjetas para el campo "Medio de pago" (§1.4 del plan v2), con sus
-   * resúmenes. Sólo los egresos las usan; sin tarjetas, el campo no aparece.
-   */
   cards?: CardOption[]
-  /** Descripciones anteriores para autocompletar (§5.2 del plan v2). */
   suggestions?: DescriptionSuggestion[]
-  /** Se dispara junto con `router.refresh()` al guardar. El modal la usa para cerrarse solo. */
   onSaved?: () => void
 }
 
-/**
- * `amount` es lo que la persona ve y tipea: PESOS (o dólares), en el mismo
- * formato que el campo "Importe" de más arriba. Antes esta fila mostraba
- * centavos crudos —un gasto de $1.500,50 se editaba como "150050"— así que el
- * mismo formulario pedía dos unidades distintas y la única señal de cuál era
- * cuál estaba en un `aria-label` que nadie ve.
- *
- * Al servidor sigue viajando en centavos, por un campo oculto: el contrato de
- * `createMovement` y el esquema de Zod no cambian, sólo cambia lo que se
- * muestra. Ver `installmentCents` más abajo.
- */
 type Row = { amount: string; dueDate: string }
 
-/** Centavos -> el texto que se muestra, en formato local con miles. */
 function centsToInput(cents: number): string {
   return formatAmountInput((cents / 100).toFixed(2).replace(".", ","))
 }
 
-/**
- * El `numeric(12,4)` que devuelve Postgres ("1450.0000") al texto que va en el
- * campo del tipo de cambio.
- *
- * La coma no es cosmética: `parseDecimalInput` (@/lib/money) lee un punto
- * solitario seguido de exactamente tres dígitos como separador de MILES, así
- * que un TC de 1.234 puesto con punto volvería como 1234. Con coma decimal no
- * hay ninguna lectura ambigua, y es además cómo escribe decimales el resto del
- * formulario (ver `centsToInput`).
- */
 function rateToInput(rate: string): string {
   return String(Number(rate)).replace(".", ",")
 }
 
-/**
- * La clave que decide si hay que regenerar el plan de cuotas. Sale de acá y no
- * de una plantilla escrita dos veces porque el modo edición la necesita ANTES
- * del primer render —para sembrar `appliedPlanKey` con el plan que ya está
- * guardado— y si las dos formas se separaran, editar un movimiento pisaría sus
- * vencimientos reales con un plan recién generado en el primer render.
- *
- * El medio de pago entra en la clave desde la Fase 3: pasar de efectivo a una
- * tarjeta cambia todos los vencimientos (los pone el resumen).
- */
 function planKeyOf(totalCents: number, count: number, date: IsoDate, cardId: string): string {
   return `${totalCents}|${count}|${date}|${cardId}`
 }

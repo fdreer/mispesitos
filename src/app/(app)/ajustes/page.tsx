@@ -7,7 +7,6 @@ import { Card, CardContent } from "@/components/ui/card"
 import { getUserRole } from "@/server/access"
 import { requireSettings, requireUser } from "@/server/session"
 
-/** Sólo para el admin: el acceso a la pantalla de usuarios e invitaciones. */
 async function UsuariosLink() {
   const user = await requireUser()
   if ((await getUserRole(user.id)) !== "admin") return null
@@ -28,16 +27,6 @@ async function UsuariosLink() {
   )
 }
 
-/**
- * El formulario, con los valores guardados adentro. Detrás de un Suspense por
- * la misma razón que el resto de las pantallas: el título no depende de la
- * base y no tiene por qué esperarla.
- *
- * Es la pantalla que menos gana de las seis —una sola lectura de sesión y
- * ajustes, sin ninguna consulta cara— pero el esqueleto genérico de
- * `(app)/loading.tsx` prometía cuatro tarjetas en fila para un formulario de
- * una columna, que es peor que no prometer nada.
- */
 async function AjustesBody() {
   const { settings } = await requireSettings()
 
@@ -46,9 +35,6 @@ async function AjustesBody() {
       defaults={{
         initialBalanceArs: String(settings.initialBalanceArsCents / 100),
         initialBalanceUsd: String(settings.initialBalanceUsdCents / 100),
-        // `numeric` en Postgres llega como string por Drizzle: se pasa tal
-        // cual, sin pasar por Number(), para no arriesgar precisión de más
-        // por un ida y vuelta que no hace falta (ver src/db/schema.ts).
         initialBalanceUsdRate: settings.initialBalanceUsdRate,
         initialBalanceDate: settings.initialBalanceDate,
         preferredRate: settings.preferredRate,
@@ -58,7 +44,6 @@ async function AjustesBody() {
   )
 }
 
-/** El mismo formulario, en gris: cinco campos con su etiqueta y el botón. */
 function AjustesSkeleton() {
   return (
     <div className="space-y-4" aria-hidden>
@@ -73,12 +58,6 @@ function AjustesSkeleton() {
   )
 }
 
-/**
- * `max-w-md` y no el `max-w-sm` de antes: con 384px, la etiqueta más larga
- * ("¿A qué tipo de cambio promedio los compraste?") se partía en tres
- * renglones y el formulario quedaba más alto de etiquetas que de campos.
- * Adentro de una tarjeta, como el resto de los formularios de la app.
- */
 export default function AjustesPage() {
   return (
     <div className="max-w-md space-y-6">

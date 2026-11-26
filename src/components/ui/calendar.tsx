@@ -109,17 +109,6 @@ function Calendar({
             : "[&:first-child[data-selected=true]_button]:rounded-l-(--cell-radius)",
           defaultClassNames.day
         ),
-        /*
-         * `bg-accent` y no el `bg-muted` que trae shadcn de fábrica: en esta
-         * paleta `--muted` y `--popover` son el MISMO color (Obsidian,
-         * #161718 — ver globals.css), así que el relleno del rango quedaba
-         * pintado del color exacto del popover que lo contiene. Con un rango
-         * del 1 al 20 puesto se veían los dos extremos en lima y los
-         * dieciocho días del medio idénticos a los días sin elegir: el rango
-         * era invisible. `--accent` (Graphite, #23252a) es la superficie de
-         * hover del sistema, un escalón por encima del popover, que es
-         * justamente la relación que este relleno necesita.
-         */
         range_start: cn(
           "relative isolate z-0 rounded-l-(--cell-radius) bg-accent after:absolute after:inset-y-0 after:right-0 after:w-4 after:bg-accent",
           defaultClassNames.range_start
@@ -129,8 +118,6 @@ function Calendar({
           "relative isolate z-0 rounded-r-(--cell-radius) bg-accent after:absolute after:inset-y-0 after:left-0 after:w-4 after:bg-accent",
           defaultClassNames.range_end
         ),
-        // Mismo motivo que el rango: `bg-muted` sobre un popover Obsidian no
-        // marcaba el día de hoy en absoluto.
         today: cn(
           "rounded-(--cell-radius) bg-accent text-foreground data-[selected=true]:rounded-none",
           defaultClassNames.today

@@ -29,10 +29,6 @@ const GRANULARITY_OPTIONS: { value: CashflowGranularity; label: string }[] = [
   { value: "semanal", label: "Semanal (3 meses)" },
 ]
 
-/**
- * Pestañas de /informes, selector de moneda (ARS · USD · Todo en pesos) y
- * granularidad de Flujo de caja. Todo sincronizado con la URL (§3 y §4).
- */
 export function ReportControls({ query }: { query: ReportQuery }) {
   const { push } = useRouter()
   const [pending, startTransition] = useTransition()

@@ -4,19 +4,6 @@ import { useId } from "react"
 
 import { cn } from "@/lib/utils"
 
-/**
- * Un control segmentado (§5.2 del plan v2: "Moneda como segmentado ARS |
- * USD", "Ya lo pagué / Lo voy a pagar") hecho con radios nativos.
- *
- * Radios y no botones con `aria-pressed`: un grupo de opciones excluyentes ES
- * un radiogroup, y con radios nativos las flechas del teclado, el foco y lo
- * que anuncia un lector de pantalla salen solos, sin reimplementarlos. Es el
- * mismo recurso que los colores de /categorias (`ColorField`).
- *
- * Controlado: el valor vive en el formulario que lo usa, que casi siempre
- * necesita reaccionar al cambio (ocultar las cuotas, el campo de TC…). Si
- * lleva `name`, además viaja en el FormData.
- */
 export function Segmented<T extends string>({
   label,
   value,
@@ -27,7 +14,6 @@ export function Segmented<T extends string>({
   size = "default",
   wrap = false,
 }: {
-  /** El nombre accesible del grupo. */
   label: string
   value: T
   onChange: (next: T) => void
@@ -35,11 +21,6 @@ export function Segmented<T extends string>({
   name?: string
   className?: string
   size?: "default" | "sm"
-  /**
-   * Para listas de largo variable (el medio de pago, con una opción por
-   * tarjeta): las opciones toman su ancho y bajan de línea en vez de
-   * achicarse hasta cortar el nombre.
-   */
   wrap?: boolean
 }) {
   const groupName = useId()

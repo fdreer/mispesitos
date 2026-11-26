@@ -15,19 +15,6 @@ import {
 import type { CashflowGranularity, ReportCurrency } from "@/lib/report-query"
 import { formatShortMonth, monthsInRange } from "@/lib/reports-pnl"
 
-/**
- * Informe "Flujo de caja" (§3.2 y §3.3 del plan v2), puro sin base ni React.
- *
- * - Meses cerrados = real (cuotas pagadas desde `initialBalanceDate`, más
- *   compra/venta de dólares en ARS o USD).
- * - Mes en curso = real hasta hoy + pendiente del resto del mes (`dueDate >= today`).
- * - Meses futuros (y vista semanal a 3 meses) = proyectado (cuotas impagas por
- *   `dueDate`, incluidos resúmenes de tarjeta).
- * - Cuotas vencidas e impagas (`dueDate < today`) = aparte en `overdue` ("Atrasado"),
- *   nunca mezcladas en el mes en curso, y descontadas al evaluar el saldo
- *   proyectado negativo futuro.
- */
-
 export type CashflowPaidRow = {
   paidDate: IsoDate
   amountCents: number
@@ -140,8 +127,6 @@ function exchangeParts(
   currencyMode: ReportCurrency,
 ): { inflowCents: number; outflowCents: number } {
   const direction = assertExchangeDirection(row.direction)
-  // En "Todo en pesos" comprar o vender dólares mueve plata entre los dos
-  // bolsillos al mismo TC: no es entrada ni salida consolidada (§3.3).
   if (currencyMode === "todo") return { inflowCents: 0, outflowCents: 0 }
   if (currencyMode === "USD") {
     return direction === "buy"

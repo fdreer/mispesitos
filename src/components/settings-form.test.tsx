@@ -5,11 +5,6 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import { SettingsForm } from "@/components/settings-form"
 
-/**
- * Las dos fronteras de siempre (ver `movement-form.test.tsx`): la Server
- * Action, que importa `@/db/client` y abre una conexión apenas se la importa,
- * y el router de Next.
- */
 const saveSettings = vi.fn()
 const push = vi.fn()
 const refresh = vi.fn()
@@ -22,7 +17,6 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, refresh }),
 }))
 
-/** Dos APIs de puntero que jsdom no implementa y Radix usa. */
 Element.prototype.hasPointerCapture ??= () => false
 Element.prototype.scrollIntoView ??= () => {}
 
@@ -61,12 +55,6 @@ describe("SettingsForm", () => {
     expect(screen.getByRole("status").textContent).toBe("Guardado.")
   })
 
-  /*
-   * El motivo por el que `saved` existe aparte de `state.ok`: el estado de
-   * `useActionState` sobrevive hasta el próximo submit, así que sin esto el
-   * cartel verde se quedaba al lado de un valor ya editado y sin guardar.
-   * Los tres caminos que lo apagan son distintos y por eso van los tres.
-   */
   it("editar un campo de texto lo apaga", async () => {
     montar()
     await guardar()
@@ -86,7 +74,6 @@ describe("SettingsForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "jueves, 20 de agosto de 2026" }))
 
     expect(screen.queryByRole("status")).toBeNull()
-    // Y el valor que viaja al servidor es el nuevo, no el default.
     expect(
       document.querySelector<HTMLInputElement>('input[name="initialBalanceDate"]')?.value,
     ).toBe("2026-08-20")
@@ -113,10 +100,6 @@ describe("SettingsForm", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 
-  /**
-   * En /onboarding el éxito se ve porque la pantalla se va a /dashboard: ahí
-   * el cartel sobra y no tiene que salir.
-   */
   it("con redirectTo navega y no muestra el cartel", async () => {
     montar("/dashboard")
     await guardar()

@@ -40,7 +40,6 @@ type Kind = "income" | "expense"
 
 type Props = {
   kind: Kind
-  /** Los search params crudos de la URL, tal como llegan del page.tsx. */
   searchParams: Record<string, string | string[] | undefined>
 }
 

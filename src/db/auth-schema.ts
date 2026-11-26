@@ -15,13 +15,7 @@ export const user = pgTable(
       .defaultNow()
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
-    /**
-     * "admin" | "member". Campos propios, declarados también en
-     * `user.additionalFields` de src/auth.ts para que better-auth los lea y
-     * los devuelva en la sesión. Ver §0.1 del plan v2.
-     */
     role: text("role").notNull().default("member"),
-    /** Con valor, la persona no puede entrar: el admin le quitó el acceso. */
     disabledAt: timestamp("disabled_at"),
   },
   (table) => [

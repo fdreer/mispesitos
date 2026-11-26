@@ -20,15 +20,6 @@ import { requireSettings } from "@/server/session"
 const HORIZON_MONTHS = 6
 const HISTORY_MONTHS = 12
 
-/**
- * El encabezado de una tarjeta de gráfico: el título, y el criterio con el que
- * ese gráfico cuenta la plata detrás del ícono de ayuda.
- *
- * Ese criterio hay que explicarlo —los tres gráficos y las tarjetas de arriba
- * miden "el mes" de dos maneras distintas— pero impreso arriba de cada gráfico
- * ocupaba cuatro renglones de letra chica y empujaba el gráfico, que es lo que
- * la tarjeta viene a mostrar, fuera de la primera pantalla.
- */
 function ChartCardHeader({
   title,
   action,

@@ -1,16 +1,6 @@
 import type { CategoryColorKey } from "@/lib/category-color"
 import type { CategoryIconKey } from "@/lib/category-icons"
 
-/**
- * El set que recibe un usuario nuevo al terminar el onboarding (§2.2 del plan
- * v2), ya con jerarquía, color e icono.
- *
- * Sólo para usuarios NUEVOS: a quien ya tenía categorías no se le toca nada
- * (decisión 7.5), y las agrupa a mano desde /categorias.
- *
- * Las subcategorías no llevan color propio: heredan el del padre, que es lo
- * que hace que la torta de "Hogar" y sus badges se reconozcan entre sí.
- */
 export type DefaultCategory = {
   name: string
   kind: "income" | "expense"

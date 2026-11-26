@@ -22,11 +22,6 @@ const STATUS_BADGE: Record<InvitationStatus, { label: string; variant: "warning"
   vencida: { label: "Vencida", variant: "secondary" },
 }
 
-/**
- * Quién entra a la instalación (§0.1 del plan v2). Sólo el admin llega acá, y
- * acá no hay un solo dato financiero de nadie: cada usuario lleva sus finanzas
- * y RLS se encarga de que nadie más las vea.
- */
 export default async function UsuariosPage() {
   const admin = await requireAdmin()
   const [users, invitations] = await Promise.all([listUsers(), listInvitations()])

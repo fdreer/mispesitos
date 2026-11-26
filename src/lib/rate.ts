@@ -1,23 +1,11 @@
 export type RatePreference = "oficial" | "blue" | "mep"
 
 export type SuggestedRate = {
-  /** Pesos que pagás por comprar un dólar. SÓLO para el form de cambios. */
   buyRate: number
-  /** Pesos que recibís por vender un dólar. SÓLO para el form de cambios. */
   sellRate: number
-  /**
-   * Punto medio, para valuar un movimiento que NO es una operación de cambio:
-   * un sueldo cobrado en dólares, un alquiler pagado en dólares.
-   *
-   * Usar `buyRate` y `sellRate` acá fabrica resultado de la nada: cobrar y
-   * pagar mil dólares el mismo día con la misma cotización daría $50.000 de
-   * "ganancia por diferencia de cambio" que es puro spread de la casa de
-   * cambio. Un movimiento que no cruza el mostrador se valúa a un solo TC.
-   */
   referenceRate: number
 }
 
-// dolarapi llama "bolsa" a lo que en la calle se conoce como MEP.
 const ENDPOINTS: Record<RatePreference, string> = {
   oficial: "oficial",
   blue: "blue",
@@ -26,15 +14,8 @@ const ENDPOINTS: Record<RatePreference, string> = {
 
 const CACHE_SECONDS = 600
 
-// Sin esto, una conexión que nunca responde cuelga el render del formulario —
-// justo lo que esta función existe para evitar. El abort cae en el catch.
 const TIMEOUT_MS = 3_000
 
-/**
- * Cotización sugerida. SIEMPRE puede devolver null: la sección 5.6 del spec
- * exige que una API de terceros nunca bloquee la carga de un movimiento.
- * Quien la llama muestra el campo vacío y editable.
- */
 export async function fetchSuggestedRate(
   preference: RatePreference,
 ): Promise<SuggestedRate | null> {

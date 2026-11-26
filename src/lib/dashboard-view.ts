@@ -14,26 +14,6 @@ import {
 } from "@/lib/movement-asserts"
 import type { MovementStatus } from "@/lib/movement-status"
 
-/**
- * Todo el armado de datos del dashboard, sin tocar la base ni React. La página
- * queda de orquestadora: trae las filas, llama acá, pinta lo que sale.
- *
- * Vive separada por el mismo motivo que `buildUsdPositionEvents` (@/lib/position)
- * se separó de `listUsdPositionEvents`: es la parte que tiene reglas y que se
- * puede probar con filas armadas a mano, en milisegundos y sin red.
- *
- * Las filas entran CRUDAS, tal como salen de Drizzle: `rate` es el `numeric` de
- * Postgres, o sea string, y `kind`/`currency`/`direction` son `text`, o sea
- * string. La conversión y los asserts pasan una sola vez, acá adentro.
- */
-
-/**
- * Cuota pagada, del join con su movimiento. `paidDate` no es `string | null`
- * porque `listPaidInstallments` (@/server/queries) ya filtra `paid = true`, y
- * con `paid = true` la CHECK `installment_paid_date_required_when_paid`
- * (migración 0009) exige `paid_date` no nulo. El compilador sostiene ahora lo
- * que antes sostenía sólo un comentario al lado de un `!`.
- */
 type PaidRow = {
   paidDate: IsoDate
   amountCents: number
@@ -43,7 +23,6 @@ type PaidRow = {
   rate: string
 }
 
-/** Movimiento de tipo exchange. */
 type ExchangeRow = {
   date: IsoDate
   amountCents: number
@@ -51,7 +30,6 @@ type ExchangeRow = {
   direction: string | null
 }
 
-/** Cuota impaga, del join con su movimiento. */
 type PendingRow = {
   id: string
   number: number
@@ -62,11 +40,6 @@ type PendingRow = {
   currency: string
   rate: string
   kind: string
-  /**
-   * El resumen de tarjeta en el que cae la cuota, si la compra es con
-   * tarjeta (§1.4 del plan v2). Opcionales para que las filas sin tarjeta
-   * —y los tests anteriores a la Fase 3— no tengan que traerlos.
-   */
   statementId?: string | null
   statementPeriod?: string | null
   cardId?: string | null
@@ -80,22 +53,15 @@ export type DashboardInput = {
     initialBalanceUsdCents: number
     initialBalanceDate: IsoDate
   }
-  /** TC de VENTA del día, o null si la API de terceros no respondió. */
   todayRate: number | null
   paid: PaidRow[]
   exchanges: ExchangeRow[]
   pending: PendingRow[]
-  /** Con las archivadas: la torta tiene que poder nombrar un gasto viejo. */
   expenseCategories: TreeCategory[]
   horizonMonths: number
   historyMonths: number
 }
 
-/**
- * Una fila de la tarjeta de vencimientos. Exportado porque `Upcoming`
- * (@/components/dashboard/upcoming) lo consume: antes lo redeclaraba campo por
- * campo, dos definiciones de la misma forma que el compilador no sincroniza.
- */
 export type UpcomingItem = {
   id: string
   number: number
@@ -104,21 +70,11 @@ export type UpcomingItem = {
   description: string
   currency: "ARS" | "USD"
   kind: "income" | "expense"
-  /** Estado del MOVIMIENTO entero, no de esta cuota. */
   status: MovementStatus
 }
 
-/**
- * Un resumen de tarjeta como UN renglón de vencimientos (§1.4 del plan v2):
- * "Visa Galicia · vence 10/12 · $480.000", no cada cuota suelta. Se paga
- * desde /tarjetas, así que el renglón enlaza ahí en lugar de tener botón.
- *
- * Comparte `id`, `dueDate`, `kind` y `status` con `UpcomingItem` para que la
- * lista se pueda ordenar y filtrar sin preguntar qué es cada cosa.
- */
 export type UpcomingStatement = {
   type: "statement"
-  /** El id del resumen. */
   id: string
   cardId: string
   cardName: string
@@ -147,19 +103,16 @@ type DashboardView = {
   projection: { month: string; arsCents: number }[] | null
   upcomingPayments: UpcomingPayment[]
   upcomingReceivables: UpcomingItem[]
-  /** Por categoría padre, con el desglose por subcategoría (§2.3 del plan v2). */
   pie: SpendGroup[]
   bars: { month: string; incomeArsCents: number; expenseArsCents: number }[]
   todayRate: number | null
 }
 
-/** Cuántos vencimientos entran en la tarjeta antes de que sea una lista y no un aviso. */
 const MAX_UPCOMING = 20
 
 export function buildDashboardView(input: DashboardInput): DashboardView {
   const { today, settings, todayRate } = input
 
-  // Todo lo que no sea ARS se consolida con el rate del propio movimiento.
   const toArs = (cents: number, currency: string, movementRate: string) =>
     currency === "ARS" ? cents : convertToArs(cents, Number(movementRate))
 
@@ -183,8 +136,6 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
     })),
   )
 
-  // El consolidado valúa la tenencia en dólares al TC de VENTA: lo que se
-  // recibiría si se vendieran hoy, el lado conservador.
   const consolidatedArsCents =
     todayRate === null ? null : balances.arsCents + convertToArs(balances.usdCents, todayRate)
 

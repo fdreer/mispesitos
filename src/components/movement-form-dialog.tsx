@@ -31,23 +31,11 @@ type Props = {
   categories: Category[]
   suggestedRate: number | null
   today: IsoDate
-  /**
-   * Presente = editar ese movimiento; ausente = dar de alta uno nuevo. Es la
-   * misma prop que distingue los dos modos de `MovementForm`, y acá además
-   * cambia el título.
-   */
   movement?: MovementWithInstallments
-  /** Para el medio de pago y el autocompletado (ver `MovementForm`). */
   cards?: CardOption[]
   suggestions?: DescriptionSuggestion[]
-  /**
-   * Abierto desde afuera, sin disparador propio: es como lo usa el menú ⋯ de
-   * cada fila (`MovementRowActions`), donde "Editar" es un ítem del menú y no
-   * un botón suelto.
-   */
   open?: boolean
   onOpenChange?: (open: boolean) => void
-  /** Texto del botón disparador cuando no es controlado ("Nuevo" por defecto). */
   triggerLabel?: string
 }
 
@@ -83,9 +71,6 @@ export function MovementFormDialog({
         <DialogHeader>
           <DialogTitle>{(movement ? EDIT_TITLES : TITLES)[kind]}</DialogTitle>
         </DialogHeader>
-        {/* Cada apertura arranca del movimiento tal como está guardado: el
-            portal de Radix desmonta este contenido al cerrar, así que el
-            estado del formulario no sobrevive de una apertura a la otra. */}
         <MovementForm
           kind={kind}
           categories={categories}

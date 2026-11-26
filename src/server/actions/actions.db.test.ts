@@ -38,27 +38,6 @@ import {
 import type { ActionResult } from "@/server/actions/result"
 import { saveSettings } from "@/server/actions/settings"
 
-/**
- * Tests de la capa de ESCRITURA contra la base real: las Server Actions con su
- * Zod, su withUser(), su transacción, sus policies de RLS y sus constraints.
- *
- * Sólo se reemplazan las DOS fronteras del framework que no existen fuera del
- * servidor de Next, y nada más:
- *
- * - `next/cache`, porque `revalidatePath()` necesita el contexto de una request.
- *   De paso queda observable: qué rutas revalida cada acción es comportamiento.
- * - `@/server/session`, porque `requireUser()` lee la sesión de las cabeceras
- *   HTTP. Devuelve el usuario de prueba que siembra este archivo, que es el
- *   mismo id que después viaja a `withUser()` y a las policies.
- *
- * Todo lo demás corre de verdad. Si algún día hay que doblar la base, el schema
- * o `withUser`, el test dejó de probar lo que importa.
- *
- * Los ids llevan el prefijo `actions-test-` / `act-` para no pisarse con
- * `src/server/queries.db.test.ts` ni con `src/db/rls.db.test.ts`, que corren
- * contra la misma base.
- */
-
 const sesion = vi.hoisted(() => ({ userId: "" }))
 
 vi.mock("@/server/session", () => ({
@@ -67,84 +46,30 @@ vi.mock("@/server/session", () => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
-/** El actor de casi todos los casos: tiene categorías y va cargando movimientos. */
 const USUARIO_A = "actions-test-a"
-/** El otro: existe, tiene datos propios y nada de lo de A puede tocarlos. */
 const USUARIO_B = "actions-test-b"
-/** Recién llegado: sin ajustes y sin categorías, para el onboarding. */
 const USUARIO_NUEVO = "actions-test-nuevo"
-/**
- * Otro recién llegado, aparte de USUARIO_NUEVO: el caso de carrera necesita
- * arrancar sin ajustes y sin categorías, y los dos tests de onboarding que ya
- * están dejan a USUARIO_NUEVO con las dos cosas.
- */
 const USUARIO_CARRERA = "actions-test-carrera"
-/**
- * NO se siembra en `user` a propósito. Es la forma de provocar un error real de
- * la base que NO es una violación de unicidad (la FK `category.user_id → user.id`
- * lo rechaza con 23503), que es lo que hace falta para probar que
- * `createCategory` no le dice "nombre repetido" a cualquier cosa que salga mal.
- */
 const USUARIO_FANTASMA = "actions-test-fantasma"
 
-/**
- * Un id de sesión que Postgres NO puede leer, y la palanca de los tres `catch`
- * que no se pueden ejercitar con el fantasma.
- *
- * `withUser()` manda el id a la base adentro del claim `{"sub": ...}`, donde el
- * caracter NUL viaja escapado como `\u0000`: `set_config` lo guarda sin
- * chistar, pero la policy —que hace `::json ->> 'sub'` para saber de quién es
- * cada fila— revienta al convertirlo a texto ("unsupported Unicode escape
- * sequence"). Es la misma clase de falla REAL que la fecha "0000-01-01": forma
- * válida, la base la rechaza. No hay ningún doble.
- *
- * Hace falta porque `deleteMovement`, `setInstallmentPaid` y `archiveCategory`
- * no insertan nada: con un usuario que no existe, su UPDATE/DELETE no falla,
- * simplemente no toca ninguna fila y salen por la rama de "no encontramos",
- * que es otro camino. Ésta es la forma de que la escritura falle de verdad.
- *
- * NO se agrega a `USUARIOS_A_LIMPIAR`: no escribe nada (no puede) y limpiarlo
- * haría reventar la limpieza por el mismo motivo.
- */
 const USUARIO_QUE_LA_BASE_NO_PUEDE_LEER = "actions-test-\u0000"
 
 const USUARIOS_SEMBRADOS = [USUARIO_A, USUARIO_B, USUARIO_NUEVO, USUARIO_CARRERA]
-/** El fantasma nunca llega a escribir nada, pero se limpia igual por las dudas. */
 const USUARIOS_A_LIMPIAR = [...USUARIOS_SEMBRADOS, USUARIO_FANTASMA]
 
-/**
- * Las categorías de A se siembran con ids legibles: `createMovement` sólo pide
- * que `categoryId` sea un string no vacío, así que no necesitan ser UUID.
- */
 const CAT_A_COMIDA = "act-cat-a-comida"
 const CAT_A_SUELDO = "act-cat-a-sueldo"
 
-/**
- * Las filas de B sí llevan UUID: son las que se le pasan a `deleteMovement`,
- * `setInstallmentPaid` y `archiveCategory` en los casos de "recurso ajeno", y
- * esas tres acciones validan el formato del id antes de llegar a la base. Con un
- * id no-UUID el rechazo llegaría por el motivo equivocado y el test no probaría
- * el aislamiento sino la validación.
- */
 const CAT_B = randomUUID()
 const MOV_B = randomUUID()
 const INS_B = randomUUID()
 
-/**
- * La precarga del onboarding, aplanada: desde la Fase 2 cada categoría por
- * default puede traer subcategorías, y las dos cosas son filas de `category`.
- */
 const PRECARGA = DEFAULT_CATEGORIES.flatMap((c) => [
   { name: c.name, kind: c.kind, parentName: null as string | null },
   ...(c.children ?? []).map((h) => ({ name: h.name, kind: c.kind, parentName: c.name })),
 ])
 
-/** Los ids que generan las acciones son `randomUUID()`: v4, variante RFC. */
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-
-// --------------------------------------------------------------------------
-// Utilidades
-// --------------------------------------------------------------------------
 
 function comoUsuario(id: string) {
   sesion.userId = id
@@ -152,13 +77,6 @@ function comoUsuario(id: string) {
 
 type CampoDeFormulario = string | string[] | undefined
 
-/**
- * Arma el FormData que recibe una Server Action. `undefined` significa CAMPO
- * AUSENTE (el formulario no lo mandó, `formData.get()` devuelve null), que no es
- * lo mismo que campo vacío: varias acciones tienen un `?? ""` o un `?? "1"` que
- * sólo se activa con el ausente. Un array se agrega repetido, que es como viajan
- * las cuotas.
- */
 function formulario(campos: Record<string, CampoDeFormulario>): FormData {
   const datos = new FormData()
   for (const [clave, valor] of Object.entries(campos)) {
@@ -168,11 +86,6 @@ function formulario(campos: Record<string, CampoDeFormulario>): FormData {
   return datos
 }
 
-/**
- * Estrecha un ActionResult a su rama de rechazo. Si la acción salió bien,
- * revienta acá con un mensaje entendible en vez de dejar que el test siga y
- * falle diez líneas después contra `undefined`.
- */
 function rechazo(resultado: ActionResult): {
   message: string
   fieldErrors?: Record<string, string[]>
@@ -181,13 +94,6 @@ function rechazo(resultado: ActionResult): {
   return resultado
 }
 
-/**
- * Varias acciones hacen `console.error` en su camino de error. Apagarlo en la
- * app sería tapar información útil en producción, y dejarlo salir ensucia la
- * salida de los tests. Acá se captura y se devuelve: el ruido se convierte en
- * una aserción más, y encima una que vale — la etiqueta dice POR QUÉ RAMA salió
- * el error, que es justo lo que un mensaje genérico no deja ver.
- */
 async function conErroresDeConsola<T>(
   ejecutar: () => Promise<T>,
 ): Promise<{ resultado: T; etiquetas: string[] }> {
@@ -201,11 +107,6 @@ async function conErroresDeConsola<T>(
 }
 
 const rutasRevalidadas = () => vi.mocked(revalidatePath).mock.calls
-
-// --------------------------------------------------------------------------
-// Lecturas de control. Van por withUser() igual que la app: fuera de ahí, el
-// rol `app_user` no ve una sola fila de estas cuatro tablas.
-// --------------------------------------------------------------------------
 
 const movimientosPorDescripcion = (userId: string, descripcion: string) =>
   withUser(userId, (tx) =>
@@ -246,11 +147,6 @@ const ajustesDe = (userId: string) =>
     tx.select().from(userSettings).where(eq(userSettings.userId, userId)),
   )
 
-/**
- * Ajustes y cantidad de categorías en UNA sola transacción: es el estado que un
- * `saveSettings` rechazado no puede haber movido ni por un lado ni por el otro
- * (ni los ajustes, ni la precarga de categorías).
- */
 const estadoDeOnboarding = (userId: string) =>
   withUser(userId, async (tx) => ({
     ajustes: await tx.select().from(userSettings).where(eq(userSettings.userId, userId)),
@@ -259,14 +155,7 @@ const estadoDeOnboarding = (userId: string) =>
     ).length,
   }))
 
-// --------------------------------------------------------------------------
-// Siembra y limpieza
-// --------------------------------------------------------------------------
-
 async function sembrarUsuario(id: string) {
-  // `user` es la única tabla que se escribe con la conexión de la app y fuera
-  // de withUser: la migración 0004 le da a `app_user` una policy sin condición
-  // sobre las tablas de better-auth.
   await db.insert(user).values({
     id,
     name: id,
