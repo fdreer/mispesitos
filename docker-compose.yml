@@ -26,7 +26,8 @@ services:
   # Corre en cada `up`, es idempotente y termina: crea los roles que faltan,
   # aplica migraciones nuevas y fija la contraseña de app_user.
   migrate:
-    image: ghcr.io/fdreer/mispesitos-migrator:latest
+    image: ghcr.io/fdreer/mispesitos:latest
+    command: ["node", "scripts/db-setup.mjs"]
     restart: "no"
     environment:
       MIGRATION_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-mispesitos_postgres_local_only}@db:5432/mispesitos

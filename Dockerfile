@@ -1,10 +1,8 @@
-# Mis Pesitos — imagen self-hosted.
+# Mis Pesitos — imagen self-hosted única.
 #
-# Dos imágenes finales, elegidas con `target` (ver docker-compose.yml):
-#   - runner:   la app (server.js de la build standalone de Next).
-#   - migrator: corre scripts/db-setup.mjs (roles, migraciones, contraseña de
-#               app_user) y termina. Lleva node_modules completos porque el
-#               migrador de drizzle no entra en el trazado de la standalone.
+# Por defecto arranca la app (server.js de la build standalone de Next).
+# Para correr las migraciones de la base se invoca la misma imagen con:
+#   node scripts/db-setup.mjs (ver servicio `migrate` en docker-compose.yml).
 
 FROM node:24-alpine AS base
 WORKDIR /app
@@ -36,15 +34,6 @@ RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" \
     BETTER_AUTH_URL="http://localhost:3000" \
     ./node_modules/.bin/next build
 
-FROM base AS migrator
-ENV NODE_ENV=production
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json ./
-COPY drizzle ./drizzle
-COPY scripts ./scripts
-USER node
-CMD ["node", "scripts/db-setup.mjs"]
-
 FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
@@ -54,6 +43,10 @@ ENV NODE_ENV=production \
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
+# El migrador de drizzle no entra en el trazado de la build standalone.
+COPY --from=deps --chown=node:node /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
+COPY --chown=node:node drizzle ./drizzle
+COPY --chown=node:node scripts/db-setup.mjs ./scripts/db-setup.mjs
 COPY --chown=node:node scripts/docker-entrypoint.sh ./docker-entrypoint.sh
 RUN sed -i 's/\r$//' ./docker-entrypoint.sh && chmod +x ./docker-entrypoint.sh && mkdir -p /app/data && chown node:node /app/data
 USER node
