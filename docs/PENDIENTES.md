@@ -664,7 +664,8 @@ navegación real, así que en los tests siempre se dibuja apagado.
 Tres pendientes que ya no eran arreglos sino alcance nuevo, elegidos
 explícitamente. El cuarto candidato —el favicon, §1.4— sigue abierto, y la
 sección 1 entera también: se decidió dejar el dashboard como está (§1.1, caja y
-devengado conviviendo con sus rótulos).
+devengado conviviendo con sus rótulos). *Revisado el 2026-11-26: §1.1 y la fecha
+de pago se resolvieron en la Fase 1 del plan v2, ver §12.*
 
 | Qué | Dónde | Sección |
 |---|---|---|
@@ -748,3 +749,65 @@ que dependa de un click se puede probar ahí. Lo que **nadie miró funcionando**
    se ve mal se va a ver mal igual antes y después de que lleguen los datos.
 4. **Desarchivar una categoría.** El botón, el error de nombre repetido cayendo
    en la fila correcta, y la fila volviendo al bloque de activas.
+
+---
+
+## 12. Fase 1 del plan v2 (2026-11-26)
+
+La fase "Base" de `docs/superpowers/specs/2026-11-26-v2-plan.md` (§6), apoyada en
+el criterio de lo percibido (§0) y en §5.1 / §5.3 / §5.5 de ese plan.
+
+| Qué | Dónde | Sección |
+|---|---|---|
+| Torta y barras suman cuotas pagadas por `paid_date`, igual que "Este mes" | `src/lib/dashboard-view.ts`, `src/server/queries.ts` (`listPaidInstallments` trae `categoryId`), `src/app/(app)/dashboard/page.tsx` | §1.1 |
+| Toasts (shadcn `sonner`) para confirmar las acciones | `src/components/ui/sonner.tsx`, `src/app/layout.tsx`, formularios y botones de acción | — |
+| Fecha de pago elegible, hoy por defecto y nunca futura | `resolvePaidDate` en `src/lib/installments.ts`, `setInstallmentPaid`, `installment-paid-button.tsx` | §2 |
+| "Pagar"/"Cobrar" en la fila y en la tarjeta móvil, con la próxima cuota y "Deshacer" | `nextUnpaidInstallment` y `describeNextInstallment` en `src/lib/installments.ts`, `movement-row-actions.tsx`, `installment-toasts.ts` | — |
+| Menú ⋯ por fila con Editar y Borrar (en rojo) | `movement-row-actions.tsx`, `movement-form-dialog.tsx` y `delete-movement-button.tsx` controlables desde afuera | — |
+
+La suite pasó a 447 tests; falla sólo el que ya fallaba antes (el tope de 120
+filas en `movement-form.test.tsx`). `tsc --noEmit` y `eslint` limpios (queda el
+aviso previo de `<img>` en `app-sidebar.tsx`), y `next build` pasa dentro de la
+imagen de Docker.
+
+### 12.1 Qué se decidió
+
+- **Un solo corte para los tres bloques.** La torta y las barras usan el mismo
+  filtro que la tarjeta "Este mes": sólo lo pagado desde la fecha del saldo
+  inicial, porque lo anterior ya está adentro de ese saldo. Así la torta y la
+  barra del mes en curso suman exactamente lo que la tarjeta. La contracara: las
+  barras de meses anteriores al saldo inicial quedan en cero aunque haya cuotas
+  pagadas cargadas con esas fechas.
+- **La próxima cuota es la impaga de número más bajo**, no la de vencimiento
+  más cercano: "Cuota 3/12" tiene que hablar de la tercera aunque un vencimiento
+  se haya editado a mano.
+- **"Pagar" desde la fila siempre usa hoy.** Para otra fecha está el calendario
+  de cada cuota, con la fila desplegada. Una fecha futura se rechaza en el
+  servidor: con lo percibido, una cuota existe el día que la plata sale.
+- **Marcar no confirma, desmarcar sí.** Marcar tiene el toast con "Deshacer"
+  como red; desmarcar saca plata de lo percibido y pide confirmación.
+- **Los ingresos dicen "Cobrar" / "Cobrada"** en lugar de "Pagar" / "Pagada".
+- **La celda de acciones corta la propagación de clics y teclas.** React
+  propaga los eventos a través de los portales: sin eso, pagar desplegaba la
+  fila, y escribir un espacio en el formulario de edición la plegaba y se comía
+  el espacio.
+- **`listMovementRows` se borró**: era sólo del dashboard, que ya no lee
+  movimientos sino cuotas pagadas.
+- **El Toaster no usa `next-themes`**: la app tiene un solo tema (§2).
+
+### 12.2 Lo que se verificó y lo que no
+
+Verificado en el navegador, escritorio y móvil, contra la instalación Docker
+local (no contra la base de `.env.local`): pagar desde la fila sin desplegarla,
+"Deshacer", marcar con una fecha anterior, el calendario con los días futuros
+deshabilitados, la confirmación al desmarcar, Editar y Borrar desde el menú ⋯,
+un único toast por guardado, y la torta sumando cuotas y no el total del
+movimiento.
+
+**`pnpm test:db` no se corrió**, por el mismo motivo que §11.3: apunta a la base
+de `.env.local`. El test de `listPaidInstallments` se actualizó para esperar
+`categoryId`.
+
+Quedó afuera de esta fase, aunque §5.1 del plan lo lista: **"Pagar todos los
+vencidos"** como acción masiva y el **check con `aria-label`** en lugar del botón
+"Marcar pagada".

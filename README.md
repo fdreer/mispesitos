@@ -46,8 +46,8 @@ falta para señalar estado.
 | `/login`, `/registro` | Correo y contraseña, más "Continuar con Google". En una instalación vacía, `/registro` crea la cuenta de administrador; después, sólo con invitación |
 | `/invitacion/<token>` | El link que comparte el admin: guarda la invitación y manda a `/registro` |
 | `/onboarding` | Saldo inicial en pesos y en dólares, el TC al que se compraron esos dólares, la fecha desde la que se cuenta, y qué dólar usar de referencia. Precarga 15 categorías |
-| `/dashboard` | Saldos por moneda, total consolidado, vencimientos del próximo mes, proyección a 6 meses, egresos del mes por categoría y los últimos 12 meses |
-| `/ingresos`, `/egresos` | Alta con plan de cuotas editable, lista con filtro por estado (pendiente / pagado / vencido), marcar cuotas pagadas y borrar |
+| `/dashboard` | Saldos por moneda, total consolidado, vencimientos del próximo mes, proyección a 6 meses, gastos del mes por categoría y lo cobrado y pagado en los últimos 12 meses. Todo lo que habla de "el mes" cuenta lo percibido: cuotas pagadas, por su fecha de pago |
+| `/ingresos`, `/egresos` | Alta con plan de cuotas editable, lista con filtros. Cada fila muestra la próxima cuota ("Cuota 3/12 · vence 15/12") y la paga en un toque, con "Deshacer"; cada cuota se puede marcar con otra fecha de pago (nunca futura). Editar y Borrar en el menú ⋯ de la fila |
 | `/cambios` | Compra y venta de dólares, tenencia, TC promedio ponderado y diferencia de cambio realizada |
 | `/categorias` | ABM con archivado. Las archivadas dejan de ofrecerse en la carga pero siguen mostrándose en los movimientos viejos |
 | `/ajustes` | Editar el saldo inicial y la preferencia de dólar |
@@ -242,6 +242,9 @@ corras contra producción, ni dos veces en paralelo.**
   usuario ante Postgres para que apliquen las políticas de RLS.
 - **Toda Server Action valida su entrada con Zod** antes de tocar la base. El formulario
   también valida, pero la que manda es la del servidor.
+- **Las acciones se confirman con un toast** (shadcn `sonner`, un único `<Toaster>` en
+  `src/app/layout.tsx`). Los errores se muestran junto al control que falló, no en un
+  toast que desaparece.
 - **La base es la última red, no sólo el depósito.** Las claves foráneas llevan adentro
   el `user_id` y el `kind`, así que un movimiento no puede referenciar la categoría de
   otro usuario ni una de un tipo que no le corresponde, aunque el código se olvide de
