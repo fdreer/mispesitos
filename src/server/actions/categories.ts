@@ -114,7 +114,7 @@ async function checkParent(
   const [child] = await tx
     .select({ id: category.id })
     .from(category)
-    .where(eq(category.parentId, parentId))
+    .where(and(eq(category.parentId, parentId), eq(category.userId, userId)))
     .limit(1)
   return { ok: true, hadChildren: child !== undefined }
 }
@@ -299,17 +299,23 @@ export async function moveCategory(
   try {
     const result = await withUser(user.id, async (tx) => {
       const [current] = await tx
-        .select({ kind: category.kind, name: category.name, parentId: category.parentId })
+        .select({
+          kind: category.kind,
+          name: category.name,
+          parentId: category.parentId,
+          archived: category.archived,
+        })
         .from(category)
         .where(and(eq(category.id, id), eq(category.userId, user.id)))
       if (!current) return failure("No encontramos esa categoría.")
+      if (current.archived) return failure("Desarchivá la categoría antes de moverla.")
       if ((current.parentId ?? undefined) === parentId) return success()
 
       if (parentId) {
         const [child] = await tx
           .select({ id: category.id })
           .from(category)
-          .where(eq(category.parentId, id))
+          .where(and(eq(category.parentId, id), eq(category.userId, user.id)))
           .limit(1)
         if (child) {
           return failure(
@@ -320,7 +326,10 @@ export async function moveCategory(
         const check = await checkParent(tx, user.id, parentId, current.kind)
         if (!check.ok) return failure(check.message)
 
-        await tx.update(category).set({ parentId }).where(eq(category.id, id))
+        await tx
+          .update(category)
+          .set({ parentId })
+          .where(and(eq(category.id, id), eq(category.userId, user.id)))
         if (!check.hadChildren) {
           await reassignParentMovements(
             tx,
@@ -332,7 +341,10 @@ export async function moveCategory(
           )
         }
       } else {
-        await tx.update(category).set({ parentId: null }).where(eq(category.id, id))
+        await tx
+          .update(category)
+          .set({ parentId: null })
+          .where(and(eq(category.id, id), eq(category.userId, user.id)))
       }
       return success()
     })

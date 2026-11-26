@@ -162,8 +162,29 @@ export async function planCardInstallments(
         paidDate: cardStatement.paidDate,
       })
       .from(cardStatement)
-      .where(and(eq(cardStatement.cardId, card.id), inArray(cardStatement.period, missing)))
+      .where(
+        and(
+          eq(cardStatement.cardId, card.id),
+          eq(cardStatement.userId, userId),
+          inArray(cardStatement.period, missing),
+        ),
+      )
     for (const s of created) byPeriod.set(s.period, s)
+
+    // Carrera: otra pestaña creó y pagó alguno de los resúmenes faltantes entre
+    // el SELECT inicial y el INSERT ... ON CONFLICT DO NOTHING. No podemos meter
+    // cuotas nuevas en un resumen que ya quedó pagado.
+    const newlyPaidIdx = plan.findIndex((p) => {
+      const s = byPeriod.get(p.period)
+      return s !== undefined && s.paidDate !== null && !paidIds.has(s.id)
+    })
+    if (newlyPaidIdx !== -1) {
+      const period = plan[newlyPaidIdx].period
+      return fail(
+        `La cuota ${newlyPaidIdx + 1} cae en el resumen de ${formatPeriod(period)} de ${card.name}, ` +
+          "que ya está pagado. Desmarcalo para cambiar sus compras.",
+      )
+    }
   }
 
   return {

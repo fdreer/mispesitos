@@ -200,7 +200,7 @@ export function activeFilterCount(query: MovementQuery): number {
 }
 
 /**
- * Los filtros que entiende la consulta (`listMovements`, `listMovementsPage`),
+ * Los filtros que entiende la consulta (`listMovements`, `queryMovementsView`),
  * con `undefined` donde no hay filtro. `kind` no sale de acá: lo pone la
  * pantalla, no la URL.
  */

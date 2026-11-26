@@ -438,4 +438,13 @@ describe("movementSchema", () => {
     expect(result.success).toBe(false)
     expect(fieldError(result, "installments")).toBeDefined()
   })
+
+  it("rechaza una cuota con importe vacío en lugar de convertirlo en 0", () => {
+    const result = movementSchema.safeParse({
+      ...validMovement,
+      installments: [{ amountCents: "", dueDate: "2026-08-10" }],
+    })
+    expect(result.success).toBe(false)
+    expect(fieldError(result, "installments.0.amountCents")).toBeDefined()
+  })
 })

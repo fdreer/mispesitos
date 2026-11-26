@@ -99,6 +99,13 @@
       "when": 1795718479736,
       "tag": "0013_indices_listados_y_filtros",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795724366552,
+      "tag": "0014_refuerzo_integridad_y_permisos",
+      "breakpoints": true
     }
   ]
 }

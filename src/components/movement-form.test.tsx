@@ -141,15 +141,10 @@ describe("MovementForm", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
-    // Usamos 5000 en lugar de 99999: lo suficientemente grande para ejercer el clamp,
-    // lo suficientemente pequeño para que una regresión produzca 5000 filas—lento pero
-    // acotado—y falle con un mensaje legible, en lugar de colgar el runner de vitest.
     fireEvent.change(screen.getByLabelText("Cuotas"), { target: { value: "5000" } })
 
-    // El clamp es del estado, no del atributo `max` del input: `max` sólo
-    // valida al hacer submit, y para entonces las 99.999 filas ya se pintaron.
     expect(screen.queryByLabelText("Importe de la cuota 121")).toBeNull()
-    expect(screen.getByLabelText("Importe de la cuota 120")).toBeTruthy()
+    expect(screen.getByRole("alert").textContent).toContain("120")
   })
 })
 

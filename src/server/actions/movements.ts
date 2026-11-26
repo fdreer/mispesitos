@@ -8,17 +8,21 @@ import { z } from "zod"
 import { withUser, type Tx } from "@/db/client"
 import { category, installment, movement } from "@/db/schema"
 import { isCheckViolation } from "@/lib/db-errors"
-import { todayInAr, type IsoDate } from "@/lib/dates"
+import { isValidIsoDate, todayInAr, type IsoDate } from "@/lib/dates"
 import { highestPaidNumber, resolvePaidDate } from "@/lib/installments"
 import { logDbError } from "@/lib/log-db-error"
-import { assertInstallmentMovementKind } from "@/lib/movement-asserts"
-import { BASE_PATHS } from "@/lib/movement-routes"
+import {
+  CURRENCY_VALUES,
+  SEARCH_MAX,
+  SORT_VALUES,
+  STATUS_VALUES,
+  type MovementQuery,
+} from "@/lib/movement-query"
 import { exchangeSchema, movementSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { planCardInstallments } from "@/server/card-plan"
 import { queryMovementsView, type MovementWithInstallments } from "@/server/queries"
 import { requireUser } from "@/server/session"
-import type { MovementQuery } from "@/lib/movement-query"
 
 /**
  * Un movimiento sólo puede ir a una categoría HOJA (decisión 7.4 del plan v2):
@@ -30,17 +34,28 @@ import type { MovementQuery } from "@/lib/movement-query"
  * pero el borde de confianza es la Server Action.
  */
 const CATEGORIA_NO_HOJA = "Esa categoría tiene subcategorías: elegí una de ellas."
+const CATEGORIA_ARCHIVADA = "Esa categoría está archivada."
 
-async function categoryHasChildren(tx: Tx, categoryId: string): Promise<boolean> {
+async function categoryHasChildren(tx: Tx, userId: string, categoryId: string): Promise<boolean> {
   const [child] = await tx
     .select({ id: category.id })
     .from(category)
-    .where(eq(category.parentId, categoryId))
+    .where(and(eq(category.parentId, categoryId), eq(category.userId, userId)))
     .limit(1)
   return child !== undefined
 }
 
+async function isCategoryArchived(tx: Tx, userId: string, categoryId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ archived: category.archived })
+    .from(category)
+    .where(and(eq(category.id, categoryId), eq(category.userId, userId)))
+    .limit(1)
+  return Boolean(row?.archived)
+}
+
 const categoryNotLeaf = () => failure(CATEGORIA_NO_HOJA, { categoryId: [CATEGORIA_NO_HOJA] })
+const categoryArchived = () => failure(CATEGORIA_ARCHIVADA, { categoryId: [CATEGORIA_ARCHIVADA] })
 
 /**
  * El medio de pago que manda el formulario: vacío es efectivo/débito, y si
@@ -127,7 +142,8 @@ export async function createMovement(
 
   try {
     const resultado = await withUser(user.id, async (tx) => {
-      if (await categoryHasChildren(tx, input.categoryId)) return categoryNotLeaf()
+      if (await isCategoryArchived(tx, user.id, input.categoryId)) return categoryArchived()
+      if (await categoryHasChildren(tx, user.id, input.categoryId)) return categoryNotLeaf()
 
       // Con tarjeta, los vencimientos y el resumen de cada cuota salen de la
       // tarjeta, no del formulario. Se arma antes de insertar el movimiento
@@ -191,11 +207,7 @@ export async function createMovement(
     return failure("No pudimos guardar el movimiento. Probá de nuevo.")
   }
 
-  revalidatePath("/dashboard")
-  // Del mapa compartido, no armada acá: `BASE_PATHS` existe para que la ruta
-  // de cada tipo esté escrita una sola vez. Repetirla acá dejaba la acción
-  // revalidando la ruta vieja el día que el mapa cambie, sin que nada falle.
-  revalidatePath(BASE_PATHS[input.kind])
+  revalidatePath("/", "layout")
   return success()
 }
 
@@ -268,13 +280,30 @@ export async function updateMovement(
 
   const input = parsed.data
   if (cardId !== null && input.kind !== "expense") return failure(SOLO_EGRESOS)
-  // Se llena adentro de la transacción y se lee después, para revalidar. Queda
-  // en `null` por cualquiera de las dos salidas tempranas, que es justo cuando
-  // no hay nada que revalidar.
-  let kindGuardado: "income" | "expense" | null = null
 
   try {
     const resultado = await withUser(user.id, async (tx) => {
+      // Validamos existencia y tipo editable ANTES de tocar `card_statement`:
+      // retornar `failure(...)` sin lanzar excepción commitea la transacción, así
+      // que no podemos crear resúmenes antes de saber que el movimiento existe.
+      const [actual] = await tx
+        .select({
+          kind: movement.kind,
+          creditCardId: movement.creditCardId,
+          date: movement.date,
+          categoryId: movement.categoryId,
+        })
+        .from(movement)
+        .where(
+          and(
+            eq(movement.id, id.data),
+            eq(movement.userId, user.id),
+            inArray(movement.kind, EDITABLE_KINDS),
+          ),
+        )
+      if (!actual) return failure("Ese movimiento no existe.")
+      if (cardId !== null && actual.kind !== "expense") return failure(SOLO_EGRESOS)
+
       const previas = await tx
         .select({
           number: installment.number,
@@ -286,7 +315,13 @@ export async function updateMovement(
         .from(installment)
         .where(and(eq(installment.movementId, id.data), eq(installment.userId, user.id)))
 
-      if (await categoryHasChildren(tx, input.categoryId)) return categoryNotLeaf()
+      if (
+        input.categoryId !== actual.categoryId &&
+        (await isCategoryArchived(tx, user.id, input.categoryId))
+      ) {
+        return categoryArchived()
+      }
+      if (await categoryHasChildren(tx, user.id, input.categoryId)) return categoryNotLeaf()
 
       const masAlta = highestPaidNumber(previas)
       if (masAlta > input.installments.length) {
@@ -296,15 +331,14 @@ export async function updateMovement(
         )
       }
 
-      const [actual] = await tx
-        .select({ creditCardId: movement.creditCardId, date: movement.date })
-        .from(movement)
-        .where(and(eq(movement.id, id.data), eq(movement.userId, user.id)))
+      if (cardId === null && previas.some((p) => p.statementId !== null && p.paid)) {
+        return failure(
+          "Tiene cuotas en un resumen de tarjeta ya pagado: desmarcalo antes de cambiar el medio de pago.",
+        )
+      }
 
       // Con tarjeta: el plan sale de los resúmenes, y una edición no puede
       // cambiar lo que tenía un resumen ya pagado (ver `planCardInstallments`).
-      // Sin tarjeta: si la compra ERA con tarjeta y alguna cuota está en un
-      // resumen pagado, pasarla a efectivo le sacaría plata a ese pago.
       const cardPlan =
         cardId === null
           ? null
@@ -313,15 +347,10 @@ export async function updateMovement(
               purchaseDate: input.date,
               amounts: input.installments.map((c) => c.amountCents),
               previous: previas,
-              previousCardId: actual?.creditCardId ?? null,
-              previousPurchaseDate: actual?.date ?? null,
+              previousCardId: actual.creditCardId,
+              previousPurchaseDate: actual.date,
             })
       if (cardPlan && !cardPlan.ok) return cardPlan.result
-      if (cardId === null && previas.some((p) => p.statementId !== null && p.paid)) {
-        return failure(
-          "Tiene cuotas en un resumen de tarjeta ya pagado: desmarcalo antes de cambiar el medio de pago.",
-        )
-      }
 
       const actualizado = await tx
         .update(movement)
@@ -342,16 +371,9 @@ export async function updateMovement(
             inArray(movement.kind, EDITABLE_KINDS),
           ),
         )
-        // El `kind` sale de la fila, no del formulario: es el que decide qué
-        // pantalla revalidar, y el del formulario es un dato del cliente que
-        // esta acción a propósito no escribe.
-        .returning({ id: movement.id, kind: movement.kind })
+        .returning({ id: movement.id })
 
       if (actualizado.length === 0) return failure("Ese movimiento no existe.")
-
-      // El WHERE ya acotó a `EDITABLE_KINDS`; el assert es lo que convierte esa
-      // garantía en el tipo, con el mismo criterio que el resto de la app.
-      kindGuardado = assertInstallmentMovementKind(actualizado[0].kind)
 
       const pagoPorNumero = new Map(previas.map((p) => [p.number, p]))
 
@@ -408,10 +430,7 @@ export async function updateMovement(
     return failure("No pudimos guardar los cambios. Probá de nuevo.")
   }
 
-  // El importe y las fechas de las cuotas pagas pueden haber cambiado, así que
-  // el saldo del dashboard ya no es el que estaba calculado.
-  revalidatePath("/dashboard")
-  if (kindGuardado) revalidatePath(BASE_PATHS[kindGuardado])
+  revalidatePath("/", "layout")
   return success()
 }
 
@@ -481,12 +500,46 @@ export async function deleteMovement(id: string): Promise<ActionResult> {
   }
 
   try {
-    // Las cuotas caen solas por el ON DELETE CASCADE.
-    await withUser(user.id, (tx) =>
-      tx
+    const result = await withUser(user.id, async (tx) => {
+      // Una cuota de tarjeta pagada implica un resumen pagado (trigger
+      // `installment_matches_statement`). Borrar la compra alteraría en silencio
+      // el total de un resumen cerrado y ya pagado.
+      const [paidStatementInstallment] = await tx
+        .select({ id: installment.id })
+        .from(installment)
+        .where(
+          and(
+            eq(installment.movementId, parsed.data),
+            eq(installment.userId, user.id),
+            eq(installment.paid, true),
+          ),
+        )
+        .limit(1)
+
+      // Solo bloqueamos cuando la cuota paga pertenece a un resumen de tarjeta:
+      // en efectivo/débito borrar un movimiento pagado sigue estando permitido.
+      if (paidStatementInstallment) {
+        const [onCard] = await tx
+          .select({ creditCardId: movement.creditCardId })
+          .from(movement)
+          .where(and(eq(movement.id, parsed.data), eq(movement.userId, user.id)))
+          .limit(1)
+        if (onCard?.creditCardId !== null && onCard?.creditCardId !== undefined) {
+          return failure(
+            "Tiene cuotas en un resumen de tarjeta ya pagado: desmarcalo antes de borrar la compra.",
+          )
+        }
+      }
+
+      // Las cuotas caen solas por el ON DELETE CASCADE.
+      const deleted = await tx
         .delete(movement)
-        .where(and(eq(movement.id, parsed.data), eq(movement.userId, user.id))),
-    )
+        .where(and(eq(movement.id, parsed.data), eq(movement.userId, user.id)))
+        .returning({ id: movement.id })
+      if (deleted.length === 0) return failure("Ese movimiento no existe.")
+      return success()
+    })
+    if (!result.ok) return result
   } catch (error) {
     logDbError("deleteMovement", error)
     return failure("No pudimos borrar el movimiento.")
@@ -559,6 +612,29 @@ export async function setInstallmentPaid(
   return success()
 }
 
+const fetchPageDateSchema = z
+  .string()
+  .refine((v) => v === "" || isValidIsoDate(v), "Fecha inválida.")
+
+const fetchMovementListPageSchema = z.object({
+  kind: z.enum(["income", "expense"]),
+  page: z.number().int().min(1).max(10_000),
+  query: z.object({
+    search: z.string().max(SEARCH_MAX),
+    categoryIds: z.array(z.string().min(1).max(100)).max(100),
+    cardId: z.string().min(1).max(100),
+    currency: z.enum(["all", ...CURRENCY_VALUES]),
+    status: z.enum(["all", ...STATUS_VALUES]),
+    from: fetchPageDateSchema,
+    to: fetchPageDateSchema,
+    dateField: z.enum(["date", "paid"]),
+    minCents: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
+    maxCents: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
+    sort: z.enum(SORT_VALUES),
+    page: z.number().int().min(1).max(10_000),
+  }),
+})
+
 /**
  * Trae la página siguiente para el botón "Cargar más" en móvil (§5.3),
  * manteniendo los mismos filtros, estado y orden de la URL.
@@ -569,8 +645,18 @@ export async function fetchMovementListPage(
   page: number,
 ): Promise<{ items: MovementWithInstallments[]; page: number; totalPages: number; totalCount: number }> {
   const user = await requireUser()
+  const parsed = fetchMovementListPageSchema.safeParse({ kind, query, page })
+  if (!parsed.success) {
+    return { items: [], page: 1, totalPages: 1, totalCount: 0 }
+  }
+
   const today = todayInAr()
-  const view = await queryMovementsView(user.id, kind, { ...query, page }, today)
+  const view = await queryMovementsView(
+    user.id,
+    parsed.data.kind,
+    { ...parsed.data.query, page: parsed.data.page },
+    today,
+  )
   return {
     items: view.items,
     page: view.page,

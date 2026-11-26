@@ -2,7 +2,6 @@ import Link from "next/link"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 
-import { googleEnabled } from "@/auth"
 import { AuthCard, AuthNotice } from "@/components/auth-card"
 import { AuthForm } from "@/components/auth-form"
 import { INVITE_COOKIE, INVITE_INVALID_MESSAGE, authErrorMessage } from "@/lib/invitations"
@@ -31,7 +30,7 @@ const loginLink = (
  * - **Sin invitación:** el aviso de instalación privada, sin formulario.
  *
  * La página sólo decide qué mostrar. Quién puede crear una cuenta lo decide el
- * hook de src/auth.ts, que también cubre el alta con Google.
+ * hook de src/auth.ts.
  */
 export default async function RegistroPage({ searchParams }: Props) {
   if (await getOptionalUser()) redirect("/dashboard")
@@ -47,7 +46,7 @@ export default async function RegistroPage({ searchParams }: Props) {
         description="Sos la primera persona en esta instalación. Después vas a poder invitar a quien quieras."
       >
         {error && <AuthNotice>{error}</AuthNotice>}
-        <AuthForm mode="registro" googleEnabled={googleEnabled} submitLabel="Crear cuenta de administrador" />
+        <AuthForm mode="registro" submitLabel="Crear cuenta de administrador" />
       </AuthCard>
     )
   }
@@ -59,7 +58,7 @@ export default async function RegistroPage({ searchParams }: Props) {
     return (
       <AuthCard title="Crear cuenta" description="Te invitaron a Mis Pesitos. Tus finanzas son solo tuyas.">
         {error && <AuthNotice>{error}</AuthNotice>}
-        <AuthForm mode="registro" googleEnabled={googleEnabled} fixedEmail={inv.email ?? undefined} />
+        <AuthForm mode="registro" fixedEmail={inv.email ?? undefined} />
         {loginLink}
       </AuthCard>
     )

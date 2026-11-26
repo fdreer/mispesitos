@@ -966,6 +966,94 @@ describe("queryMovementsView", () => {
       MOV.junioTemprano,
     ])
   })
+
+  it("conserva statusCounts al filtrar por estado, pero acota totales e ítems al estado elegido", async () => {
+    const view = await queryMovementsView(
+      USUARIO_A,
+      "expense",
+      parseMovementQuery({ status: "overdue" }, "due"),
+      "2026-04-20",
+    )
+
+    // Las pastillas mantienen el conteo de los 4 egresos antes de filtrar por estado.
+    expect(view.statusCounts).toEqual({
+      all: 4,
+      overdue: 1,
+      pending: 1,
+      paid: 2,
+    })
+    expect(view.totalCount).toBe(1)
+    expect(view.page).toBe(1)
+    expect(view.totalPages).toBe(1)
+    expect(ids(view.items)).toEqual([MOV.comida])
+    // Comida tiene cuota 1 pagada ($45), cuota 2 vencida ($60) y cuota 3 pendiente ($75):
+    // los totales se calculan cuota por cuota sobre los movimientos filtrados.
+    expect(view.totals).toEqual({
+      paid: { arsCents: 45_00, usdCents: 0 },
+      overdue: { arsCents: 60_00, usdCents: 0 },
+      pending: { arsCents: 75_00, usdCents: 0 },
+    })
+  })
+
+  it("ordena por date y por amount consolidado en ARS", async () => {
+    const porFecha = await queryMovementsView(
+      USUARIO_A,
+      "expense",
+      parseMovementQuery({ sort: "date" }, "due"),
+      "2026-04-20",
+    )
+    expect(ids(porFecha.items)).toEqual([
+      MOV.junioTarde,
+      MOV.junioTemprano,
+      MOV.alquiler,
+      MOV.comida,
+    ])
+
+    // Alquiler son USD 300 * 1300 = ARS 390.000, muy por encima de comida (ARS 180) y kioscos (ARS 10).
+    const porImporte = await queryMovementsView(
+      USUARIO_A,
+      "expense",
+      parseMovementQuery({ sort: "amount" }, "due"),
+      "2026-04-20",
+    )
+    expect(ids(porImporte.items)).toEqual([
+      MOV.alquiler,
+      MOV.comida,
+      MOV.junioTarde,
+      MOV.junioTemprano,
+    ])
+  })
+
+  it("hace clamp de page a 1..totalPages y devuelve totales en cero cuando no hay resultados", async () => {
+    const fueraDeRango = await queryMovementsView(
+      USUARIO_A,
+      "expense",
+      parseMovementQuery({ page: "99" }, "due"),
+      "2026-04-20",
+    )
+    expect(fueraDeRango.page).toBe(1)
+    expect(fueraDeRango.totalPages).toBe(1)
+    expect(fueraDeRango.totalCount).toBe(4)
+
+    const vacio = await queryMovementsView(
+      USUARIO_A,
+      "expense",
+      parseMovementQuery({ search: "inexistente-xyz", page: "3" }, "due"),
+      "2026-04-20",
+    )
+    expect(vacio).toEqual({
+      items: [],
+      page: 1,
+      totalPages: 1,
+      totalCount: 0,
+      statusCounts: { all: 0, overdue: 0, pending: 0, paid: 0 },
+      totals: {
+        pending: { arsCents: 0, usdCents: 0 },
+        overdue: { arsCents: 0, usdCents: 0 },
+        paid: { arsCents: 0, usdCents: 0 },
+      },
+    })
+  })
 })
 
 describe("listPaidInstallments", () => {

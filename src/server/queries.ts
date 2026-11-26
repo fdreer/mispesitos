@@ -36,9 +36,6 @@ import {
   assertPaidDate,
 } from "@/lib/movement-asserts"
 import {
-  summarizeMovementCounts,
-  summarizeMovementTotals,
-  sortMovements,
   type FilterTotals,
   type StatusCounts,
 } from "@/lib/movement-list-view"
@@ -46,11 +43,9 @@ import {
   CARD_FILTER_CASH,
   movementFiltersFromQuery,
   PAGE_SIZE,
-  paginate,
   type MovementQuery,
   type Page,
 } from "@/lib/movement-query"
-import { getMovementStatus } from "@/lib/movement-status"
 import { buildUsdPositionEvents, type PositionEvent } from "@/lib/position"
 
 export type Settings = typeof userSettings.$inferSelect
@@ -241,7 +236,7 @@ function movementConditions(userId: string, filters: MovementFilters) {
 
 /**
  * El orden de las dos listas. El `id` al final no lo pide ninguna pantalla: es
- * el desempate que hace determinista al LIMIT/OFFSET de `listMovementsPage`.
+ * el desempate que hace determinista al LIMIT/OFFSET de `queryMovementsView`.
  * Sin él, dos movimientos del mismo día cargados en la misma transacción
  * comparten `(date, created_at)` y Postgres puede devolverlos en distinto orden
  * en cada consulta — o sea, la misma fila en dos páginas y otra en ninguna.
@@ -251,6 +246,7 @@ const MOVEMENT_ORDER = [desc(movement.date), desc(movement.createdAt), desc(move
 /** Le cuelga a cada movimiento sus cuotas, ordenadas por número. */
 async function conCuotas(
   tx: Tx,
+  userId: string,
   movements: Movement[],
 ): Promise<MovementWithInstallments[]> {
   if (movements.length === 0) return []
@@ -260,9 +256,12 @@ async function conCuotas(
     .from(installment)
     .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
     .where(
-      inArray(
-        installment.movementId,
-        movements.map((m) => m.id),
+      and(
+        eq(installment.userId, userId),
+        inArray(
+          installment.movementId,
+          movements.map((m) => m.id),
+        ),
       ),
     )
     .orderBy(asc(installment.number))
@@ -277,11 +276,7 @@ async function conCuotas(
   return movements.map((m) => ({ ...m, installments: byMovement.get(m.id) ?? [] }))
 }
 
-/**
- * Los movimientos que pasan el filtro, con las cuotas colgadas. Sin tope: el único llamador que queda es
- * la lista filtrada por estado, que no puede recortar en SQL (ver
- * `listMovementsPage`).
- */
+/** Los movimientos que pasan el filtro, con las cuotas colgadas. */
 export async function listMovements(
   userId: string,
   filters: MovementFilters = {},
@@ -293,55 +288,7 @@ export async function listMovements(
       .where(and(...movementConditions(userId, filters)))
       .orderBy(...MOVEMENT_ORDER)
 
-    return conCuotas(tx, movements)
-  })
-}
-
-/**
- * Una página de movimientos, recortada por la base y no en memoria.
- *
- * Es la consulta de /ingresos y /egresos cuando NO hay filtro de estado, que es
- * la vista con la que se entra a las dos pantallas. `listMovements` traía cada
- * movimiento que matchea el WHERE más todas sus cuotas para mostrar veinte: con
- * 5.000 movimientos son 5.000 filas y sus cuotas por carga. Acá el `count(*)`
- * lo resuelve el índice y el SELECT trae exactamente las veinte filas de la
- * página, así que el costo deja de crecer con el historial.
- *
- * NO sirve para el filtro de estado: el estado no es una columna, se deriva de
- * las cuotas (`getMovementStatus`), y un LIMIT en SQL no sabe cuántas filas van
- * a sobrevivir a un filtro que se aplica después. Esa rama sigue trayendo todo
- * y cortando en memoria con `paginate`.
- *
- * El clamp de la página es el mismo criterio que `paginate` (@/lib/movement-query):
- * pedir una página que ya no existe —pasa siempre que un filtro achica la lista
- * con el `?page=` viejo en la URL— devuelve la última, no una tabla en blanco.
- */
-export async function listMovementsPage(
-  userId: string,
-  filters: MovementFilters,
-  page: number,
-): Promise<Page<MovementWithInstallments>> {
-  return withUser(userId, async (tx) => {
-    const conditions = movementConditions(userId, filters)
-
-    const [total] = await tx
-      .select({ value: count() })
-      .from(movement)
-      .where(and(...conditions))
-
-    const totalCount = total?.value ?? 0
-    const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
-    const current = Math.min(Math.max(1, page), totalPages)
-
-    const movements = await tx
-      .select()
-      .from(movement)
-      .where(and(...conditions))
-      .orderBy(...MOVEMENT_ORDER)
-      .limit(PAGE_SIZE)
-      .offset((current - 1) * PAGE_SIZE)
-
-    return { items: await conCuotas(tx, movements), page: current, totalPages, totalCount }
+    return conCuotas(tx, userId, movements)
   })
 }
 
@@ -352,10 +299,11 @@ export type MovementListView = Page<MovementWithInstallments> & {
 
 /**
  * Consulta compartida de /ingresos, /egresos y la carga incremental móvil:
- * trae lo que pasa los filtros SQL una sola vez, calcula los conteos por
- * estado (antes del filtro de estado, para que las pastillas conserven sus
- * números al cambiar de estado), corta por estado, calcula totales, ordena y
- * pagina.
+ * resuelve en SQL los conteos por estado (antes del filtro de estado, para que
+ * las pastillas conserven sus números al cambiar de estado), los totales por
+ * estado de cuota y moneda (respetando lo percibido), el ordenamiento (`due`,
+ * `date`, `amount` consolidado a ARS) y la paginación (`LIMIT`/`OFFSET`),
+ * trayendo a Node sólo las cuotas de la página actual.
  */
 export async function queryMovementsView(
   userId: string,
@@ -363,22 +311,152 @@ export async function queryMovementsView(
   query: MovementQuery,
   today: IsoDate,
 ): Promise<MovementListView> {
-  const matching = await listMovements(userId, {
-    kind,
-    ...movementFiltersFromQuery(query),
+  return withUser(userId, async (tx) => {
+    const baseConditions = movementConditions(userId, {
+      kind,
+      ...movementFiltersFromQuery(query),
+    })
+    const baseWhere = and(...baseConditions)
+
+    const instStats = tx.$with("inst_stats").as(
+      tx
+        .select({
+          movementId: installment.movementId,
+          pendingCount: sql<number>`count(*) filter (where ${installment.paid} = false)`.as(
+            "pending_count",
+          ),
+          overdueCount:
+            sql<number>`count(*) filter (where ${installment.paid} = false and ${installment.dueDate} < ${today})`.as(
+              "overdue_count",
+            ),
+          earliestUnpaidDue:
+            sql<string | null>`min(${installment.dueDate}) filter (where ${installment.paid} = false)`.as(
+              "earliest_unpaid_due",
+            ),
+        })
+        .from(installment)
+        .where(eq(installment.userId, userId))
+        .groupBy(installment.movementId),
+    )
+
+    const [countsRow] = await tx
+      .with(instStats)
+      .select({
+        all: sql<number>`count(*)::int`,
+        overdue: sql<number>`count(*) filter (where coalesce(${instStats.overdueCount}, 0) > 0)::int`,
+        pending: sql<number>`count(*) filter (where coalesce(${instStats.pendingCount}, 0) > 0 and coalesce(${instStats.overdueCount}, 0) = 0)::int`,
+        paid: sql<number>`count(*) filter (where coalesce(${instStats.pendingCount}, 0) = 0)::int`,
+      })
+      .from(movement)
+      .leftJoin(instStats, eq(instStats.movementId, movement.id))
+      .where(baseWhere)
+
+    const statusCounts: StatusCounts = {
+      all: countsRow?.all ?? 0,
+      overdue: countsRow?.overdue ?? 0,
+      pending: countsRow?.pending ?? 0,
+      paid: countsRow?.paid ?? 0,
+    }
+
+    const totalCount = statusCounts[query.status]
+    const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+    const current = Math.min(Math.max(1, query.page), totalPages)
+
+    if (totalCount === 0) {
+      return {
+        items: [],
+        page: current,
+        totalPages,
+        totalCount: 0,
+        statusCounts,
+        totals: {
+          pending: { arsCents: 0, usdCents: 0 },
+          overdue: { arsCents: 0, usdCents: 0 },
+          paid: { arsCents: 0, usdCents: 0 },
+        },
+      }
+    }
+
+    const filteredConditions = [...baseConditions]
+    if (query.status === "paid") {
+      filteredConditions.push(sql`coalesce(${instStats.pendingCount}, 0) = 0`)
+    } else if (query.status === "overdue") {
+      filteredConditions.push(sql`coalesce(${instStats.overdueCount}, 0) > 0`)
+    } else if (query.status === "pending") {
+      filteredConditions.push(
+        sql`coalesce(${instStats.pendingCount}, 0) > 0 and coalesce(${instStats.overdueCount}, 0) = 0`,
+      )
+    }
+    const filteredWhere = and(...filteredConditions)
+
+    const [totalsRow] = await tx
+      .with(instStats)
+      .select({
+        pendingArs: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'ARS' and ${installment.paid} = false and ${installment.dueDate} >= ${today}), 0)`,
+        pendingUsd: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'USD' and ${installment.paid} = false and ${installment.dueDate} >= ${today}), 0)`,
+        overdueArs: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'ARS' and ${installment.paid} = false and ${installment.dueDate} < ${today}), 0)`,
+        overdueUsd: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'USD' and ${installment.paid} = false and ${installment.dueDate} < ${today}), 0)`,
+        paidArs: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'ARS' and ${installment.paid} = true), 0)`,
+        paidUsd: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'USD' and ${installment.paid} = true), 0)`,
+      })
+      .from(movement)
+      .leftJoin(instStats, eq(instStats.movementId, movement.id))
+      .innerJoin(
+        installment,
+        and(eq(installment.movementId, movement.id), eq(installment.userId, userId)),
+      )
+      .where(filteredWhere)
+
+    const totals: FilterTotals = {
+      pending: {
+        arsCents: Number(totalsRow?.pendingArs ?? 0),
+        usdCents: Number(totalsRow?.pendingUsd ?? 0),
+      },
+      overdue: {
+        arsCents: Number(totalsRow?.overdueArs ?? 0),
+        usdCents: Number(totalsRow?.overdueUsd ?? 0),
+      },
+      paid: {
+        arsCents: Number(totalsRow?.paidArs ?? 0),
+        usdCents: Number(totalsRow?.paidUsd ?? 0),
+      },
+    }
+
+    const orderBy =
+      query.sort === "date"
+        ? MOVEMENT_ORDER
+        : query.sort === "amount"
+          ? [
+              sql`case when ${movement.currency} = 'ARS' then ${movement.amountCents}::numeric else round(${movement.amountCents}::numeric * ${movement.rate}) end desc`,
+              ...MOVEMENT_ORDER,
+            ]
+          : [sql`${instStats.earliestUnpaidDue} asc nulls last`, ...MOVEMENT_ORDER]
+
+    const movementRows = await tx
+      .with(instStats)
+      .select({ movement })
+      .from(movement)
+      .leftJoin(instStats, eq(instStats.movementId, movement.id))
+      .where(filteredWhere)
+      .orderBy(...orderBy)
+      .limit(PAGE_SIZE)
+      .offset((current - 1) * PAGE_SIZE)
+
+    const items = await conCuotas(
+      tx,
+      userId,
+      movementRows.map((r) => r.movement),
+    )
+
+    return {
+      items,
+      page: current,
+      totalPages,
+      totalCount,
+      statusCounts,
+      totals,
+    }
   })
-  const statusCounts = summarizeMovementCounts(matching, today)
-  const filtered =
-    query.status === "all"
-      ? matching
-      : matching.filter((m) => getMovementStatus(m.installments, today) === query.status)
-  const totals = summarizeMovementTotals(filtered, today)
-  const sorted = sortMovements(filtered, query.sort)
-  return {
-    ...paginate(sorted, query.page),
-    statusCounts,
-    totals,
-  }
 }
 
 /** Todas las cuotas pagadas, para el cálculo de saldo. */

@@ -129,7 +129,10 @@ export const currency = z.enum(["ARS", "USD"])
  * `buildInstallments` del lado del cliente, que trabaja en centavos.
  */
 export const installmentInput = z.object({
-  amountCents: z.coerce.number().int().nonnegative(),
+  amountCents: z.preprocess(
+    (v) => (v === "" || v === null ? undefined : v),
+    z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  ),
   dueDate: isoDate,
 })
 

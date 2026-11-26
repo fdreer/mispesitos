@@ -11,13 +11,13 @@ import { AuthForm } from "@/components/auth-form"
  * router de Next. Lo que se prueba acá es lo que hace este componente con lo
  * que esas dos devuelven.
  */
-const signIn = { email: vi.fn(), social: vi.fn() }
+const signIn = { email: vi.fn() }
 const signUp = { email: vi.fn() }
 const push = vi.fn()
 const refresh = vi.fn()
 
 vi.mock("@/auth-client", () => ({
-  signIn: { email: (...args: unknown[]) => signIn.email(...args), social: (...args: unknown[]) => signIn.social(...args) },
+  signIn: { email: (...args: unknown[]) => signIn.email(...args) },
   signUp: { email: (...args: unknown[]) => signUp.email(...args) },
 }))
 
@@ -43,7 +43,7 @@ async function enviar(email = "franco@ejemplo.com", password = "12345678") {
 describe("AuthForm", () => {
   it("en modo login manda correo y contraseña, y navega al dashboard", async () => {
     signIn.email.mockResolvedValue({ error: null })
-    render(<AuthForm mode="login" googleEnabled={false} />)
+    render(<AuthForm mode="login" />)
 
     await enviar()
 
@@ -57,7 +57,7 @@ describe("AuthForm", () => {
 
   it("en modo registro manda también el nombre, por signUp", async () => {
     signUp.email.mockResolvedValue({ error: null })
-    render(<AuthForm mode="registro" googleEnabled={false} />)
+    render(<AuthForm mode="registro" />)
 
     fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Franco" } })
     await enviar()
@@ -72,7 +72,7 @@ describe("AuthForm", () => {
 
   it("muestra el mensaje del error y no navega", async () => {
     signIn.email.mockResolvedValue({ error: { message: "Credenciales inválidas." } })
-    render(<AuthForm mode="login" googleEnabled={false} />)
+    render(<AuthForm mode="login" />)
 
     await enviar()
 
@@ -82,7 +82,7 @@ describe("AuthForm", () => {
 
   it("un error sin mensaje igual dice algo: nunca un formulario mudo", async () => {
     signIn.email.mockResolvedValue({ error: {} })
-    render(<AuthForm mode="login" googleEnabled={false} />)
+    render(<AuthForm mode="login" />)
 
     await enviar()
 
@@ -91,7 +91,7 @@ describe("AuthForm", () => {
 
   it("el error del intento anterior no sobrevive al siguiente", async () => {
     signIn.email.mockResolvedValue({ error: { message: "Credenciales inválidas." } })
-    render(<AuthForm mode="login" googleEnabled={false} />)
+    render(<AuthForm mode="login" />)
     await enviar()
     expect(screen.getByText("Credenciales inválidas.")).toBeTruthy()
 
@@ -99,32 +99,5 @@ describe("AuthForm", () => {
     await enviar()
 
     expect(screen.queryByText("Credenciales inválidas.")).toBeNull()
-  })
-
-  /**
-   * El camino de Google no está verificado contra el proveedor real (falta de
-   * credenciales, ver docs/PENDIENTES.md), así que lo que sí se puede fijar es
-   * que el resultado se mira: era el único `onClick` de la app que lo
-   * descartaba, y con Google caído el botón no hacía nada visible.
-   */
-  it("con Google fallando muestra el error en vez de quedarse mudo", async () => {
-    signIn.social.mockResolvedValue({ error: { message: "Google dijo que no." } })
-    render(<AuthForm mode="login" googleEnabled />)
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Continuar con Google" }))
-    })
-
-    expect(signIn.social).toHaveBeenCalledWith({
-      provider: "google",
-      callbackURL: "/dashboard",
-      errorCallbackURL: "/login",
-    })
-    expect(screen.getByText("Google dijo que no.")).toBeTruthy()
-  })
-
-  it("sin Google configurado, el botón no está", () => {
-    render(<AuthForm mode="login" googleEnabled={false} />)
-    expect(screen.queryByRole("button", { name: "Continuar con Google" })).toBeNull()
   })
 })

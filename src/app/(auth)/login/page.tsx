@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation"
 
-import { googleEnabled } from "@/auth"
 import { AuthCard, AuthNotice } from "@/components/auth-card"
 import { AuthForm } from "@/components/auth-form"
 import { authErrorMessage } from "@/lib/invitations"
@@ -26,7 +25,7 @@ export default async function LoginPage({ searchParams }: Props) {
   return (
     <AuthCard title="Entrar a Mis Pesitos" description="Tus finanzas, ordenadas.">
       {error && <AuthNotice>{error}</AuthNotice>}
-      <AuthForm mode="login" googleEnabled={googleEnabled} />
+      <AuthForm mode="login" />
     </AuthCard>
   )
 }

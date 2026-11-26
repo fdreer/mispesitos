@@ -314,6 +314,15 @@ export const movement = pgTable(
       "movement_credit_card_only_expense",
       sql`"credit_card_id" IS NULL OR "kind" = 'expense'`,
     ),
+    // Borde de confianza en la base: valores válidos de dominio e importes positivos.
+    check("movement_kind_valid", sql`"kind" IN ('income', 'expense', 'exchange')`),
+    check("movement_currency_valid", sql`"currency" IN ('ARS', 'USD')`),
+    check("movement_amount_positive", sql`"amount_cents" > 0`),
+    check("movement_rate_positive", sql`"rate" > 0`),
+    check(
+      "movement_direction_valid",
+      sql`("kind" = 'exchange' AND "direction" IN ('buy', 'sell')) OR ("kind" <> 'exchange' AND "direction" IS NULL)`,
+    ),
   ],
 )
 
@@ -380,6 +389,9 @@ export const installment = pgTable(
       "installment_paid_date_required_when_paid",
       sql`"paid" = false OR "paid_date" IS NOT NULL`,
     ),
+    unique("installment_movement_id_number_unique").on(t.movementId, t.number),
+    check("installment_number_positive", sql`"number" >= 1`),
+    check("installment_amount_nonnegative", sql`"amount_cents" >= 0`),
     // Ver el comentario de la FK compuesta de `movement`. Misma razón.
     foreignKey({
       columns: [t.userId, t.movementId],

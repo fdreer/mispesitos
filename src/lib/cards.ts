@@ -354,7 +354,7 @@ export function cardOverview(
   const current =
     [...statements]
       .filter((s) => s.period < openPeriod)
-      .sort((a, b) => (a.period < b.period ? 1 : -1))[0] ?? null
+      .sort((a, b) => (a.period < b.period ? 1 : a.period > b.period ? -1 : 0))[0] ?? null
   return { open, current }
 }
 

@@ -280,7 +280,7 @@ function buildMonthlyRows(input: CashflowInput): CashflowRow[] {
   }
 
   for (const e of input.exchanges) {
-    if (e.date < input.settings.initialBalanceDate) continue
+    if (e.date < input.settings.initialBalanceDate || e.date > input.today) continue
     const { inflowCents, outflowCents } = exchangeParts(e, input.currencyMode)
     if (inflowCents === 0 && outflowCents === 0) continue
     addReal(monthKey(e.date), inflowCents, outflowCents)
@@ -310,6 +310,19 @@ function buildMonthlyRows(input: CashflowInput): CashflowRow[] {
 
   const rows: CashflowRow[] = []
   let running = 0
+
+  // Si la ventana de simulación (topada a 240 meses) arrancó después de
+  // `initMonth`, acumulamos el saldo inicial + lo real ocurrido entre
+  // `initMonth` y el primer mes simulado para no perder `initialSeed`.
+  const firstSimMonth = allMonths[0]
+  if (firstSimMonth && initMonth < firstSimMonth) {
+    running = initialSeed
+    for (const [ym, b] of realByMonth) {
+      if (ym >= initMonth && ym < firstSimMonth && ym <= currentMonth) {
+        running += b.inflows - b.outflows
+      }
+    }
+  }
 
   for (const m of allMonths) {
     const range = monthRange(m)

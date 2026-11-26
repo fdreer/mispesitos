@@ -122,15 +122,25 @@ export function monthsInRange(
   maxMonths = MAX_REPORT_MONTHS,
 ): string[] {
   if (from > to || maxMonths <= 0) return []
-  const startYm = monthKey(from)
-  const endYm = monthKey(to)
+  const [startY, startM] = monthKey(from).split("-").map(Number)
+  const [endY, endM] = monthKey(to).split("-").map(Number)
+  if (!startY || !startM || !endY || !endM) return []
+
+  const startIdx = startY * 12 + (startM - 1)
+  const endIdx = endY * 12 + (endM - 1)
+  const total = endIdx - startIdx + 1
+  if (total <= 0) return []
+
+  const count = Math.min(total, maxMonths)
+  const firstIdx = endIdx - count + 1
   const months: string[] = []
-  let cursor = startYm
-  while (cursor <= endYm) {
-    months.push(cursor)
-    cursor = monthKey(addMonthsClamped(`${cursor}-01`, 1))
+  for (let i = 0; i < count; i++) {
+    const idx = firstIdx + i
+    const year = Math.floor(idx / 12)
+    const month = (idx % 12) + 1
+    months.push(`${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}`)
   }
-  return months.length > maxMonths ? months.slice(-maxMonths) : months
+  return months
 }
 
 /**

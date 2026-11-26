@@ -62,7 +62,9 @@ export async function fetchSuggestedRate(
     return {
       buyRate: venta,
       sellRate: compra,
-      referenceRate: (compra + venta) / 2,
+      // Acotado a 4 decimales (la precisión de numeric(12,4) y typedRate) para
+      // que precargar el formulario con la sugerencia nunca falle la validación.
+      referenceRate: Math.round(((compra + venta) / 2) * 10_000) / 10_000,
     }
   } catch {
     return null

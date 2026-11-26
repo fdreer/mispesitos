@@ -4,8 +4,8 @@ import { cache } from "react"
 
 import { and, asc, count, desc, eq, gte, isNotNull, sql } from "drizzle-orm"
 
-import { withUser } from "@/db/client"
-import { cardStatement, creditCard, installment, movement } from "@/db/schema"
+import { withUser, type Tx } from "@/db/client"
+import { cardStatement, category, creditCard, installment, movement } from "@/db/schema"
 import { addPeriods, type KnownStatement, type StatementSummary } from "@/lib/cards"
 import { monthKey, type IsoDate } from "@/lib/dates"
 
@@ -216,6 +216,34 @@ export const listCardOptions = cache(async function listCardOptions(
 
 export type DescriptionSuggestion = { description: string; categoryId: string | null }
 
+async function queryDescriptionSuggestions(
+  tx: Tx,
+  userId: string,
+  kind: "income" | "expense",
+): Promise<DescriptionSuggestion[]> {
+  const distinct = tx
+    .selectDistinctOn([sql`lower(${movement.description})`], {
+      description: movement.description,
+      categoryId: movement.categoryId,
+      date: movement.date,
+    })
+    .from(movement)
+    .where(and(eq(movement.userId, userId), eq(movement.kind, kind)))
+    .orderBy(sql`lower(${movement.description})`, desc(movement.date), desc(movement.createdAt))
+    .as("distinct_descriptions")
+
+  const rows = await tx
+    .select({
+      description: distinct.description,
+      categoryId: distinct.categoryId,
+    })
+    .from(distinct)
+    .orderBy(desc(distinct.date), asc(distinct.description))
+    .limit(300)
+
+  return rows
+}
+
 /**
  * Descripciones ya usadas, con la categoría de la última vez (§5.2 del plan
  * v2: autocompletar y sugerir la categoría). Una por descripción —sin
@@ -226,19 +254,70 @@ export const listDescriptionSuggestions = cache(async function listDescriptionSu
   userId: string,
   kind: "income" | "expense",
 ): Promise<DescriptionSuggestion[]> {
-  const rows = await withUser(userId, (tx) =>
-    tx
-      .selectDistinctOn([sql`lower(${movement.description})`], {
-        description: movement.description,
-        categoryId: movement.categoryId,
-        date: movement.date,
+  return withUser(userId, (tx) => queryDescriptionSuggestions(tx, userId, kind))
+})
+
+/**
+ * Trae todos los catálogos que necesita `MobileQuickAddLoader` en UNA sola
+ * transacción `withUser` en vez de cinco conexiones concurrentes del pool.
+ */
+export const getQuickAddCatalogs = cache(async function getQuickAddCatalogs(
+  userId: string,
+  today: IsoDate,
+) {
+  const desde = addPeriods(monthKey(today), -13)
+  return withUser(userId, async (tx) => {
+    const categories = await tx
+      .select()
+      .from(category)
+      .where(eq(category.userId, userId))
+      .orderBy(asc(category.name))
+
+    const tarjetas = await tx
+      .select()
+      .from(creditCard)
+      .where(eq(creditCard.userId, userId))
+      .orderBy(asc(creditCard.name))
+
+    const resumenes = await tx
+      .select({
+        id: cardStatement.id,
+        cardId: cardStatement.cardId,
+        period: cardStatement.period,
+        closingDate: cardStatement.closingDate,
+        dueDate: cardStatement.dueDate,
+        paidDate: cardStatement.paidDate,
       })
-      .from(movement)
-      .where(and(eq(movement.userId, userId), eq(movement.kind, kind)))
-      .orderBy(sql`lower(${movement.description})`, desc(movement.date), desc(movement.createdAt)),
-  )
-  return rows
-    .sort((a, b) => (a.date < b.date ? 1 : -1))
-    .slice(0, 300)
-    .map(({ description, categoryId }) => ({ description, categoryId }))
+      .from(cardStatement)
+      .where(and(eq(cardStatement.userId, userId), gte(cardStatement.period, desde)))
+
+    const expenseSuggestions = await queryDescriptionSuggestions(tx, userId, "expense")
+    const incomeSuggestions = await queryDescriptionSuggestions(tx, userId, "income")
+
+    const cards: CardOption[] = tarjetas.map((c) => ({
+      id: c.id,
+      name: c.name,
+      closingDay: c.closingDay,
+      dueDay: c.dueDay,
+      color: c.color,
+      archived: c.archived,
+      statements: resumenes
+        .filter((s) => s.cardId === c.id)
+        .map((s) => ({
+          id: s.id,
+          period: s.period,
+          closingDate: s.closingDate,
+          dueDate: s.dueDate,
+          paid: s.paidDate !== null,
+        })),
+    }))
+
+    return {
+      expenseCategories: categories.filter((c) => c.kind === "expense"),
+      incomeCategories: categories.filter((c) => c.kind === "income"),
+      cards,
+      expenseSuggestions,
+      incomeSuggestions,
+    }
+  })
 })

@@ -232,7 +232,7 @@ export async function updateStatementDates(
       await tx
         .update(cardStatement)
         .set({ closingDate, dueDate })
-        .where(eq(cardStatement.id, existing.id))
+        .where(and(eq(cardStatement.id, existing.id), eq(cardStatement.userId, user.id)))
       await tx
         .update(installment)
         .set({ dueDate })
@@ -306,6 +306,7 @@ export async function payStatement(
         .where(
           and(eq(cardStatement.id, parsed.data.statementId), eq(cardStatement.userId, user.id)),
         )
+        .for("update")
       if (!statement) return failure("Ese resumen no existe.")
       if (statement.paidDate !== null) return failure("Ese resumen ya está pagado.")
 
@@ -313,7 +314,7 @@ export async function payStatement(
         .select({ amountCents: installment.amountCents, currency: movement.currency })
         .from(installment)
         .innerJoin(movement, eq(installment.movementId, movement.id))
-        .where(eq(installment.statementId, statement.id))
+        .where(and(eq(installment.statementId, statement.id), eq(installment.userId, user.id)))
 
       const resolved = resolveStatementPayment({
         closingDate: statement.closingDate,
@@ -333,7 +334,7 @@ export async function payStatement(
           paidDate: resolved.paidDate,
           usdPaidRate: resolved.usdPaidRate === null ? null : String(resolved.usdPaidRate),
         })
-        .where(eq(cardStatement.id, statement.id))
+        .where(and(eq(cardStatement.id, statement.id), eq(cardStatement.userId, user.id)))
       await tx
         .update(installment)
         .set({ paid: true, paidDate: resolved.paidDate })

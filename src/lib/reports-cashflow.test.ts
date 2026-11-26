@@ -200,4 +200,17 @@ describe("buildCashflowReport", () => {
       initialCents: 100_000,
     })
   })
+
+  it("ignora cambios de divisa con fecha futura de forma consistente con el saldo real", () => {
+    const view = buildCashflowReport({
+      ...BASE,
+      exchanges: [
+        { date: "2026-11-25", amountCents: 1_000, rate: "1200", direction: "buy" },
+      ],
+    })
+    const nov = view.rows.find((r) => r.key === "2026-11")!
+    expect(view.currentBalanceCents).toBe(100_000)
+    expect(nov.outflowsCents).toBe(0)
+    expect(nov.closingCents).toBe(100_000)
+  })
 })

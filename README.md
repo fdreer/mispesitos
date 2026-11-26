@@ -43,7 +43,7 @@ falta para señalar estado.
 | Ruta | Qué es |
 |---|---|
 | `/` | Sin landing: con sesión va al dashboard, sin sesión a `/login` |
-| `/login`, `/registro` | Correo y contraseña, más "Continuar con Google". En una instalación vacía, `/registro` crea la cuenta de administrador; después, sólo con invitación |
+| `/login`, `/registro` | Correo y contraseña. En una instalación vacía, `/registro` crea la cuenta de administrador; después, sólo con invitación |
 | `/invitacion/<token>` | El link que comparte el admin: guarda la invitación y manda a `/registro` |
 | `/onboarding` | Saldo inicial en pesos y en dólares, el TC al que se compraron esos dólares, la fecha desde la que se cuenta, y qué dólar usar de referencia. Precarga las categorías por default, ya agrupadas (Hogar › Alquiler, Comida › Supermercado…) y con color e icono |
 | `/dashboard` | Saldos por moneda, total consolidado, vencimientos del próximo mes, proyección a 6 meses (con enlace a Flujo de caja), gastos del mes por categoría padre (con el desglose por subcategoría a un clic) y lo cobrado y pagado en los últimos 12 meses. Todo lo que habla de "el mes" cuenta lo percibido: cuotas pagadas, por su fecha de pago |
@@ -66,7 +66,6 @@ falta para señalar estado.
    - `BETTER_AUTH_URL` — `http://localhost:3100`. Tiene que coincidir **exacto** con
      el puerto en el que corre el servidor (`pnpm dev` levanta en el **3100**, no en
      el 3000): si no coincide, better-auth rechaza todo con `INVALID_ORIGIN`.
-   - `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` — opcionales, ver más abajo.
 3. `pnpm db:setup` — crea los roles que falten, aplica las migraciones y, si
    definiste `APP_USER_PASSWORD`, le pone esa contraseña a `app_user`. Es
    idempotente. (`pnpm db:migrate` sigue existiendo y sólo migra.)
@@ -122,23 +121,6 @@ ALTER ROLE app_user LOGIN PASSWORD '<la-generada>';
 Ese valor va solamente en `DATABASE_URL`, dentro de `.env.local` (ignorado por
 git) y en las variables de entorno del hosting. En ningún archivo versionado.
 
-### Google OAuth es opcional
-
-`GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` pueden quedar vacías. La app funciona
-completa con correo y contraseña sin ellas: el proveedor de Google sólo se
-registra en better-auth (y el botón "Continuar con Google" sólo se renderiza)
-cuando **las dos** variables están presentes y no vacías (`src/auth.ts`). Al
-completarlas en `.env.local` el botón aparece solo, sin tocar código.
-
-La URI de redirección autorizada en Google Cloud tiene que ser
-`http://localhost:3100/api/auth/callback/google` — el mismo puerto que
-`BETTER_AUTH_URL`, o Google devuelve `redirect_uri_mismatch`. Al desplegar hay que
-agregar además la de producción, `https://<dominio>/api/auth/callback/google`.
-
-Si la pantalla de consentimiento está en modo **Prueba**, sólo pueden entrar las
-cuentas cargadas como usuarios de prueba; el resto ve "Acceso bloqueado: la app no
-completó la verificación". Se resuelve en Google Cloud, no en el código.
-
 ## Acceso privado e invitaciones
 
 - **La primera cuenta que se crea es la del administrador.** Con eso el registro
@@ -149,8 +131,8 @@ completó la verificación". Se resuelve en Google Cloud, no en el código.
   link de un solo uso que vence a los 7 días, opcionalmente atado a un correo. El
   link se muestra una sola vez: en la base sólo queda su hash.
 - **El cierre vive en el servidor**, en el hook de alta de usuario de better-auth
-  (`src/auth.ts`), así que cubre igual el registro con correo, el primer ingreso
-  con Google y una llamada directa a `/api/auth/sign-up/email`.
+  (`src/auth.ts`), así que cubre tanto el formulario de registro como una llamada
+  directa a `/api/auth/sign-up/email`.
 - **Quitar el acceso** cierra las sesiones de esa persona y le impide abrir
   otras. Sus datos no se borran; el acceso se puede devolver.
 - **El admin no ve finanzas ajenas.** La pantalla de usuarios sólo lee las tablas

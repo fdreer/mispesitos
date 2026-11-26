@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     // .gitignore; sin esto, lint tropieza con su propio HTML si la carpeta
     // quedó de una corrida anterior.
     "coverage/**",
+    // Worktrees locales de agentes; no forman parte del código activo.
+    ".claude/**",
   ]),
 ]);
 

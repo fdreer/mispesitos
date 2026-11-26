@@ -39,6 +39,14 @@ describe("fetchSuggestedRate", () => {
     expect(result!.referenceRate).toBeLessThan(result!.buyRate)
   })
 
+  it("redondea referenceRate a 4 decimales para respetar numeric(12,4)", async () => {
+    stubFetch(() => ok({ compra: 1000.0001, venta: 1000.0002 }))
+
+    const result = await fetchSuggestedRate("blue")
+
+    expect(result?.referenceRate).toBe(1000.0002)
+  })
+
   it("usa el endpoint correcto por preferencia", async () => {
     const spy = stubFetch(() => ok({ compra: 1, venta: 2 }))
 

@@ -43,6 +43,13 @@ describe("monthsInRange", () => {
     expect(months[0]).toBe("2026-01")
     expect(months[11]).toBe("2026-12")
   })
+
+  it("no se cuelga ni falla con rangos extremos hasta el año 9999", () => {
+    const months = monthsInRange("0001-01-01", "9999-12-31", 12)
+    expect(months).toHaveLength(12)
+    expect(months[0]).toBe("9999-01")
+    expect(months[11]).toBe("9999-12")
+  })
 })
 
 describe("computeVariationPct", () => {
