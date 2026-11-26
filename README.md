@@ -46,10 +46,11 @@ falta para señalar estado.
 | `/login`, `/registro` | Correo y contraseña, más "Continuar con Google". En una instalación vacía, `/registro` crea la cuenta de administrador; después, sólo con invitación |
 | `/invitacion/<token>` | El link que comparte el admin: guarda la invitación y manda a `/registro` |
 | `/onboarding` | Saldo inicial en pesos y en dólares, el TC al que se compraron esos dólares, la fecha desde la que se cuenta, y qué dólar usar de referencia. Precarga las categorías por default, ya agrupadas (Hogar › Alquiler, Comida › Supermercado…) y con color e icono |
-| `/dashboard` | Saldos por moneda, total consolidado, vencimientos del próximo mes, proyección a 6 meses, gastos del mes por categoría padre (con el desglose por subcategoría a un clic) y lo cobrado y pagado en los últimos 12 meses. Todo lo que habla de "el mes" cuenta lo percibido: cuotas pagadas, por su fecha de pago |
+| `/dashboard` | Saldos por moneda, total consolidado, vencimientos del próximo mes, proyección a 6 meses (con enlace a Flujo de caja), gastos del mes por categoría padre (con el desglose por subcategoría a un clic) y lo cobrado y pagado en los últimos 12 meses. Todo lo que habla de "el mes" cuenta lo percibido: cuotas pagadas, por su fecha de pago |
 | `/ingresos`, `/egresos` | Alta con el importe primero (con separador de miles), moneda y medio de pago segmentados, descripción con autocompletado que sugiere la categoría de la última vez, un selector de categoría con búsqueda, agrupado por padre, y cuotas con stepper y atajos (1·3·6·12); el plan queda colapsado en una línea y se edita a pedido. "Guardar y cargar otro" deja el formulario abierto. Una compra con tarjeta reparte sus cuotas en los resúmenes y vence con ellos. Barra de filtros unificada con la URL como fuente de verdad: buscador (descripción, categoría o importe), categoría multiselección (elegir un padre incluye sus hijas), medio de pago/tarjeta, moneda, importe mínimo/máximo, atajos de fecha (Este mes, Mes pasado, Próximos 30 días, Últimos 3/6/12 meses, Este año, Personalizado) con flechas ‹ ›, orden (vencimiento, fecha o importe), chips removibles y hoja inferior con botón Aplicar en móvil. Arriba de la lista: pastillas de estado con conteo (`Todos · Vencidos (n) · Pendientes (n) · Pagados`) y totales por estado (`Pendiente · Vencido · Pagado`). Listado agrupado (Vencidos / Esta semana / Este mes / Más adelante en egresos; por mes en ingresos), fechas relativas ("vence en 3 días"), plurales correctos, iconos además del color en estados, estados vacíos con acción ("Cargar primer egreso" / "Limpiar filtros"), "Cargar más" en móvil y rango visible ("21–40 de 134") en escritorio. Cada fila muestra la próxima cuota y la paga en un toque, con "Deshacer"; cada cuota se puede marcar con otra fecha de pago (nunca futura). Editar y Borrar en el menú ⋯ de la fila |
 | `/tarjetas` | Las tarjetas de crédito, cada una con su resumen actual, el próximo y el disponible (si tiene límite). Alta, edición y archivo |
 | `/tarjetas/<id>` | Los resúmenes de una tarjeta, período por período: cierre, vencimiento, total en pesos y en dólares y sus cuotas. Pagar el resumen (los dólares, con dólares o con pesos a un TC), desmarcarlo y corregir sus fechas con las que mandó el banco |
+| `/informes` | Dos pestañas con selector de moneda (`ARS · USD · Todo en pesos`) y la barra de filtros compartida con la URL como fuente de verdad: **Ingresos vs Gastos** (tarjetas resumen con tasa de ahorro, gráfico de barras + línea de resultado neto y tabla tipo estado con categorías padre plegables, totales por fila/columna, variación % opcional y cada importe como enlace al listado filtrado por cuota pagada) y **Flujo de caja** (saldo inicial · entradas · salidas · neto · saldo final, meses pasados reales con compra/venta de dólares vs mes en curso mixto vs futuro proyectado por `due_date` incluidos resúmenes de tarjeta, gráfico de neto + línea de saldo acumulado, aviso si el saldo proyectado queda negativo, cuotas vencidas aparte como `"Atrasado:"`, y granularidad mensual o semanal a 3 meses) |
 | `/cambios` | Compra y venta de dólares, tenencia, TC promedio ponderado y diferencia de cambio realizada |
 | `/categorias` | Árbol de dos niveles: cada categoría con sus subcategorías, plegables, con color (de una paleta fija) e icono. Desde el menú ⋯ de cada fila: agregar subcategoría, editar, "Mover a…" (para agrupar las que ya existían) y archivar. Archivar un padre archiva sus hijas; las archivadas dejan de ofrecerse en la carga pero siguen mostrándose en los movimientos viejos |
 | `/ajustes` | Editar el saldo inicial y la preferencia de dólar |
@@ -272,7 +273,14 @@ corras contra producción, ni dos veces en paralelo.**
   hash de su nombre, como antes.
 - **Los listados y filtros tienen a la URL como fuente de verdad** (`src/lib/movement-query.ts`,
   `src/lib/date-presets.ts`, `src/lib/movement-list-view.ts`). Una sola barra
-  (`MovementFilters`) comparte los controles para `/ingresos`, `/egresos` y el futuro
-  `/informes`. El servidor consulta con `queryMovementsView` (`src/server/queries.ts`)
-  para calcular en una sola pasada los conteos de estado, totales por estado de cuota,
-  orden y recorte; en móvil, "Cargar más" pide la página siguiente vía Server Action.
+  (`MovementFilters`) comparte los controles para `/ingresos`, `/egresos` y `/informes`.
+  El servidor consulta con `queryMovementsView` (`src/server/queries.ts`) para calcular en
+  una sola pasada los conteos de estado, totales por estado de cuota, orden y recorte; en
+  móvil, "Cargar más" pide la página siguiente vía Server Action.
+- **Los informes respetan lo percibido y el historial por moneda** (`src/lib/report-query.ts`,
+  `src/lib/reports-pnl.ts`, `src/lib/reports-cashflow.ts`). Ingresos vs Gastos consulta
+  cuotas pagadas vía `listPaidInstallmentsForReport` (`src/server/queries.ts`, con
+  `perceivedPayment` para dólares de tarjeta pagados con pesos) y enlaza cada celda a los
+  listados filtrando por cuota pagada (`?por=pago`). Flujo de caja combina saldos y
+  movimientos reales hasta hoy (con compras/ventas de dólares en cada moneda) con las
+  cuotas impagas futuras por `due_date`, separando aparte las cuotas vencidas.

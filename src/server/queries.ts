@@ -146,6 +146,8 @@ export type MovementFilters = {
   currency?: "ARS" | "USD"
   from?: string
   to?: string
+  /** `"date"` (default: `movement.date`) o `"paid"` (cuotas pagadas en ese rango). */
+  dateField?: "date" | "paid"
   minCents?: number
   maxCents?: number
   /** Texto libre contra descripción, categoría o importe. */
@@ -194,8 +196,21 @@ function movementConditions(userId: string, filters: MovementFilters) {
   }
 
   if (filters.currency) conditions.push(eq(movement.currency, filters.currency))
-  if (filters.from) conditions.push(gte(movement.date, filters.from))
-  if (filters.to) conditions.push(lte(movement.date, filters.to))
+  if (filters.dateField === "paid" && (filters.from || filters.to)) {
+    const paidBounds = [
+      sql`i."movement_id" = ${movement.id}`,
+      sql`i."user_id" = ${userId}`,
+      sql`i."paid" = true`,
+    ]
+    if (filters.from) paidBounds.push(sql`i."paid_date" >= ${filters.from}`)
+    if (filters.to) paidBounds.push(sql`i."paid_date" <= ${filters.to}`)
+    conditions.push(
+      sql`EXISTS (SELECT 1 FROM "installment" i WHERE ${sql.join(paidBounds, sql` AND `)})`,
+    )
+  } else {
+    if (filters.from) conditions.push(gte(movement.date, filters.from))
+    if (filters.to) conditions.push(lte(movement.date, filters.to))
+  }
   if (filters.minCents !== undefined) conditions.push(gte(movement.amountCents, filters.minCents))
   if (filters.maxCents !== undefined) conditions.push(lte(movement.amountCents, filters.maxCents))
 
@@ -395,6 +410,61 @@ export async function listPaidInstallments(userId: string) {
     // Y acá, en un solo lugar, una cuota en dólares cuyo resumen se pagó con
     // pesos pasa a contar como pesos (`perceivedPayment`): el saldo, la torta
     // y las barras salen de esta lista y ninguno tiene que saber de tarjetas.
+    return rows.map((r) => perceivedPayment({ ...r, paidDate: assertPaidDate(r.paidDate) }))
+  })
+}
+
+export type ReportPaidFilters = {
+  from?: IsoDate
+  to?: IsoDate
+  categoryIds?: string[]
+  cardId?: string
+  minCents?: number
+  maxCents?: number
+  search?: string
+}
+
+/**
+ * Cuotas pagadas para el informe de Ingresos vs Gastos (§3.1 del plan v2),
+ * acotadas por `paid_date` más los filtros de la barra compartida (categoría,
+ * tarjeta, importes, buscador). Pasa por `perceivedPayment` igual que
+ * `listPaidInstallments`.
+ */
+export async function listPaidInstallmentsForReport(
+  userId: string,
+  filters: ReportPaidFilters = {},
+) {
+  return withUser(userId, async (tx) => {
+    const conditions = [
+      eq(installment.userId, userId),
+      eq(installment.paid, true),
+      inArray(movement.kind, ["income", "expense"]),
+      ...movementConditions(userId, {
+        categoryIds: filters.categoryIds,
+        cardId: filters.cardId,
+        minCents: filters.minCents,
+        maxCents: filters.maxCents,
+        search: filters.search,
+      }),
+    ]
+    if (filters.from) conditions.push(gte(installment.paidDate, filters.from))
+    if (filters.to) conditions.push(lte(installment.paidDate, filters.to))
+
+    const rows = await tx
+      .select({
+        paidDate: installment.paidDate,
+        amountCents: installment.amountCents,
+        currency: movement.currency,
+        kind: movement.kind,
+        categoryId: movement.categoryId,
+        rate: movement.rate,
+        usdPaidRate: cardStatement.usdPaidRate,
+      })
+      .from(installment)
+      .innerJoin(movement, eq(installment.movementId, movement.id))
+      .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
+      .where(and(...conditions))
+
     return rows.map((r) => perceivedPayment({ ...r, paidDate: assertPaidDate(r.paidDate) }))
   })
 }

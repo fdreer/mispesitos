@@ -362,4 +362,37 @@ describe("MovementFilters", () => {
     expect(push).toHaveBeenCalledTimes(1)
     expect(push).toHaveBeenCalledWith("/egresos?categoryId=hogar&status=pending&min=2500")
   })
+
+  it("permite ocultar controles para /informes y conserva extraParams y el chip Pagado cuando por=pago", () => {
+    push.mockClear()
+    render(
+      <MovementFilters
+        basePath="/informes"
+        query={parseMovementQuery({ from: "2026-10-01", to: "2026-10-31", por: "pago" })}
+        today="2026-11-26"
+        categories={CATEGORIAS}
+        cards={TARJETAS}
+        showSearch={false}
+        showCategory={false}
+        showPaymentMethod={false}
+        showCurrency={false}
+        showAmount={false}
+        showSort={false}
+        showStatus={false}
+        extraParams={{ tab: "flujo", moneda: "USD" }}
+      />,
+    )
+
+    expect(screen.queryByLabelText("Buscar")).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Categoría:/ })).toBeNull()
+    expect(screen.queryByLabelText("Orden")).toBeNull()
+
+    const chips = screen.getByLabelText("Filtros activos")
+    expect(chips.textContent).toContain("Pagado:")
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Período anterior" })[0])
+    expect(push).toHaveBeenCalledWith(
+      "/informes?tab=flujo&moneda=USD&from=2026-09-01&to=2026-09-30&por=pago",
+    )
+  })
 })

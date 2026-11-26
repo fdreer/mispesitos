@@ -1,10 +1,11 @@
 import { Suspense } from "react"
+import Link from "next/link"
 
 import { BalanceCards } from "@/components/dashboard/balance-cards"
 import { CategoryPie, MonthlyBars, ProjectionChart } from "@/components/dashboard/charts"
 import { Upcoming } from "@/components/dashboard/upcoming"
 import { InfoHint } from "@/components/info-hint"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { buildDashboardView } from "@/lib/dashboard-view"
 import { todayInAr } from "@/lib/dates"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
@@ -28,13 +29,22 @@ const HISTORY_MONTHS = 12
  * ocupaba cuatro renglones de letra chica y empujaba el gráfico, que es lo que
  * la tarjeta viene a mostrar, fuera de la primera pantalla.
  */
-function ChartCardHeader({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartCardHeader({
+  title,
+  action,
+  children,
+}: {
+  title: string
+  action?: React.ReactNode
+  children: React.ReactNode
+}) {
   return (
     <CardHeader>
       <CardTitle className="flex items-center gap-1.5 text-base">
         {title}
         <InfoHint label={`Cómo se calcula: ${title}`}>{children}</InfoHint>
       </CardTitle>
+      {action && <CardAction>{action}</CardAction>}
     </CardHeader>
   )
 }
@@ -118,7 +128,17 @@ async function DashboardBody() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card size="sm">
-          <ChartCardHeader title={`Saldo proyectado a ${HORIZON_MONTHS} meses`}>
+          <ChartCardHeader
+            title={`Saldo proyectado a ${HORIZON_MONTHS} meses`}
+            action={
+              <Link
+                href="/informes?tab=flujo"
+                className="text-muted-foreground text-xs underline underline-offset-2 hover:text-foreground"
+              >
+                Ver informe
+              </Link>
+            }
+          >
             Arranca de tu saldo de hoy consolidado en pesos y le va aplicando las cuotas
             pendientes por su vencimiento. El primer punto ya tiene descontado lo que vence
             este mes y lo que está atrasado: no es tu saldo de hoy.

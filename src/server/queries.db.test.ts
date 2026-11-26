@@ -25,6 +25,7 @@ import {
   listExchanges,
   listMovements,
   listPaidInstallments,
+  listPaidInstallmentsForReport,
   listPendingInstallments,
   listUsdPositionEvents,
   queryMovementsView,
@@ -871,6 +872,70 @@ describe("listMovements", () => {
       })
     }
   })
+
+  it("con dateField='paid' filtra por paid_date de cuotas pagadas en vez de movement.date", async () => {
+    // MOV.viejo es del 2026-02-01, pero su cuota se pagó el 2026-03-01.
+    expect(
+      ids(
+        await listMovements(USUARIO_A, {
+          kind: "income",
+          dateField: "paid",
+          from: "2026-03-01",
+          to: "2026-03-05",
+        }),
+      ),
+    ).toEqual([MOV.viejo])
+
+    // MOV.comida es del 2026-03-10, pero su cuota 1 se pagó el 2026-03-20.
+    expect(
+      ids(
+        await listMovements(USUARIO_A, {
+          kind: "expense",
+          dateField: "paid",
+          from: "2026-03-18",
+          to: "2026-03-25",
+        }),
+      ),
+    ).toEqual([MOV.comida])
+  })
+})
+
+describe("listPaidInstallmentsForReport", () => {
+  it("filtra por paid_date, categorías (incluyendo padre), importes y buscador, sin fugas entre usuarios", async () => {
+    const marzo = await listPaidInstallmentsForReport(USUARIO_A, {
+      from: "2026-03-01",
+      to: "2026-03-31",
+    })
+    expect(marzo.map((p) => p.amountCents).sort((a, b) => a - b)).toEqual([45_00, 80_00, 200_00])
+
+    const HOGAR = "q-cat-a-hogar-rep"
+    try {
+      await withUser(USUARIO_A, async (tx) => {
+        await tx
+          .insert(category)
+          .values({ id: HOGAR, userId: USUARIO_A, name: "Hogar", kind: "expense" })
+        await tx.update(category).set({ parentId: HOGAR }).where(eq(category.id, CAT.alquiler))
+      })
+
+      const deHogar = await listPaidInstallmentsForReport(USUARIO_A, {
+        categoryIds: [HOGAR],
+      })
+      expect(deHogar.map((p) => p.amountCents)).toEqual([120_00])
+
+      const porTexto = await listPaidInstallmentsForReport(USUARIO_A, {
+        search: "supermercado",
+        minCents: 100_00,
+        maxCents: 250_00,
+        cardId: CARD_FILTER_CASH,
+      })
+      expect(porTexto.map((p) => p.amountCents)).toEqual([45_00])
+    } finally {
+      await withUser(USUARIO_A, async (tx) => {
+        await tx.update(category).set({ parentId: null }).where(eq(category.id, CAT.alquiler))
+        await tx.delete(category).where(eq(category.id, HOGAR))
+      })
+    }
+  })
 })
 
 describe("queryMovementsView", () => {
@@ -1549,6 +1614,16 @@ describe("tarjetas", () => {
       {
         paidDate: "2026-02-03",
         // US$ 10 a $1.500: $15.000, no US$ 10 a los $1.000 de la compra.
+        amountCents: 15_000_00,
+        categoryId: CAT_T,
+        currency: "ARS",
+        kind: "expense",
+        rate: "1",
+      },
+    ])
+    expect(await listPaidInstallmentsForReport(USUARIO, { cardId: CARD })).toEqual([
+      {
+        paidDate: "2026-02-03",
         amountCents: 15_000_00,
         categoryId: CAT_T,
         currency: "ARS",

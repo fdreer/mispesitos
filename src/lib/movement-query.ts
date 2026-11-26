@@ -25,6 +25,8 @@ export const SEARCH_MAX = 200
 /** Valor especial de `cardId` para "Efectivo / débito / transferencia". */
 export const CARD_FILTER_CASH = "cash"
 
+export type DateField = "date" | "paid"
+
 export type MovementQuery = {
   /** Texto libre contra descripción, categoría o importe. "" = sin filtro. */
   search: string
@@ -37,6 +39,12 @@ export type MovementQuery = {
   /** ISO yyyy-mm-dd, o "" si no hay borde. */
   from: string
   to: string
+  /**
+   * Sobre qué fecha aplican `from`/`to`: `"date"` (fecha del movimiento,
+   * default de /ingresos y /egresos) o `"paid"` (fecha de pago de alguna
+   * cuota, usado por los enlaces desde /informes para respetar lo percibido).
+   */
+  dateField: DateField
   /** Importe mínimo y máximo en centavos, o `null` si no hay borde. */
   minCents: number | null
   maxCents: number | null
@@ -62,6 +70,7 @@ export const FILTER_DEFAULTS = {
   status: "all",
   from: "",
   to: "",
+  dateField: "date" as DateField,
   minCents: null as number | null,
   maxCents: null as number | null,
 } as const
@@ -132,9 +141,12 @@ export function parseMovementQuery(
   const status = one(raw.status)
   const from = one(raw.from)
   const to = one(raw.to)
+  const por = one(raw.por)
   const sort = one(raw.sort)
   const cardId = one(raw.cardId).trim()
   const page = Number.parseInt(one(raw.page), 10)
+  const validFrom = isValidIsoDate(from) ? from : FILTER_DEFAULTS.from
+  const validTo = isValidIsoDate(to) ? to : FILTER_DEFAULTS.to
 
   return {
     search: one(raw.search).trim().slice(0, SEARCH_MAX),
@@ -146,8 +158,9 @@ export function parseMovementQuery(
     status: (STATUS_VALUES as readonly string[]).includes(status)
       ? (status as MovementStatus)
       : FILTER_DEFAULTS.status,
-    from: isValidIsoDate(from) ? from : FILTER_DEFAULTS.from,
-    to: isValidIsoDate(to) ? to : FILTER_DEFAULTS.to,
+    from: validFrom,
+    to: validTo,
+    dateField: por === "pago" && (validFrom || validTo) ? "paid" : FILTER_DEFAULTS.dateField,
     minCents: parseAmountParam(one(raw.min)),
     maxCents: parseAmountParam(one(raw.max)),
     sort: (SORT_VALUES as readonly string[]).includes(sort) ? (sort as MovementSort) : defaultSort,
@@ -198,6 +211,7 @@ export function movementFiltersFromQuery(query: MovementQuery): {
   currency?: QueryCurrency
   from?: string
   to?: string
+  dateField?: DateField
   minCents?: number
   maxCents?: number
 } {
@@ -211,6 +225,8 @@ export function movementFiltersFromQuery(query: MovementQuery): {
         : undefined,
     from: query.from || undefined,
     to: query.to || undefined,
+    dateField:
+      query.dateField === "paid" && (query.from || query.to) ? "paid" : undefined,
     minCents: query.minCents ?? undefined,
     maxCents: query.maxCents ?? undefined,
   }
@@ -255,6 +271,7 @@ export function buildMovementHref(
   query: MovementQuery,
   patch: Partial<MovementQuery> = {},
   defaultSort: MovementSort = "date",
+  extraParams?: Record<string, string | undefined>,
 ): string {
   const cambiaFiltroUOrden = Object.keys(patch).some((k) => k !== "page")
   const next: MovementQuery = {
@@ -264,6 +281,11 @@ export function buildMovementHref(
   }
 
   const params = new URLSearchParams()
+  if (extraParams) {
+    for (const [k, v] of Object.entries(extraParams)) {
+      if (v) params.set(k, v)
+    }
+  }
   if (next.search !== FILTER_DEFAULTS.search) params.set("search", next.search)
   if (next.categoryIds.length > 0) params.set("categoryId", next.categoryIds.join(","))
   if (next.cardId !== FILTER_DEFAULTS.cardId) params.set("cardId", next.cardId)
@@ -271,6 +293,7 @@ export function buildMovementHref(
   if (next.status !== FILTER_DEFAULTS.status) params.set("status", next.status)
   if (next.from !== FILTER_DEFAULTS.from) params.set("from", next.from)
   if (next.to !== FILTER_DEFAULTS.to) params.set("to", next.to)
+  if (next.dateField === "paid" && (next.from || next.to)) params.set("por", "pago")
   if (next.minCents !== null) params.set("min", formatAmountParam(next.minCents))
   if (next.maxCents !== null) params.set("max", formatAmountParam(next.maxCents))
   if (next.sort !== defaultSort) params.set("sort", next.sort)

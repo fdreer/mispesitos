@@ -21,6 +21,7 @@ describe("parseMovementQuery", () => {
       status: "all",
       from: "",
       to: "",
+      dateField: "date",
       minCents: null,
       maxCents: null,
       sort: "date",
@@ -56,6 +57,7 @@ describe("parseMovementQuery", () => {
       status: "overdue",
       from: "2026-01-01",
       to: "2026-12-31",
+      dateField: "date",
       minCents: 100_000,
       maxCents: 250_050,
       sort: "amount",
@@ -173,6 +175,7 @@ describe("movementFiltersFromQuery", () => {
       currency: undefined,
       from: undefined,
       to: undefined,
+      dateField: undefined,
       minCents: undefined,
       maxCents: undefined,
     })
@@ -186,6 +189,7 @@ describe("movementFiltersFromQuery", () => {
       currency: "USD",
       from: "2026-01-01",
       to: "2026-12-31",
+      por: "pago",
       min: "100",
       max: "500",
     })
@@ -197,6 +201,7 @@ describe("movementFiltersFromQuery", () => {
       currency: "USD",
       from: "2026-01-01",
       to: "2026-12-31",
+      dateField: "paid",
       minCents: 10_000,
       maxCents: 50_000,
     })
@@ -255,5 +260,25 @@ describe("buildMovementHref", () => {
     expect(buildMovementHref("/ingresos", parseMovementQuery({}), { search: "café & co" })).toBe(
       "/ingresos?search=caf%C3%A9+%26+co",
     )
+  })
+
+  it("serializa por=pago sólo cuando hay fechas y conserva parámetros extra", () => {
+    expect(
+      buildMovementHref("/egresos", vacia, { from: "2026-10-01", to: "2026-10-31", dateField: "paid" }, "due"),
+    ).toBe("/egresos?from=2026-10-01&to=2026-10-31&por=pago")
+
+    // Sin fechas, por=pago se descarta para no dejar un modo huérfano en la URL.
+    expect(buildMovementHref("/egresos", vacia, { dateField: "paid" }, "due")).toBe("/egresos")
+    expect(parseMovementQuery({ por: "pago" }).dateField).toBe("date")
+
+    expect(
+      buildMovementHref(
+        "/informes",
+        parseMovementQuery({}),
+        { from: "2026-11-01", to: "2026-11-30" },
+        "date",
+        { tab: "flujo", moneda: "USD" },
+      ),
+    ).toBe("/informes?tab=flujo&moneda=USD&from=2026-11-01&to=2026-11-30")
   })
 })

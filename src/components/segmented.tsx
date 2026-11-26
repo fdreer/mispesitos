@@ -69,8 +69,8 @@ export function Segmented<T extends string>({
           />
           <span
             className={cn(
-              "flex items-center justify-center rounded-md px-2 text-center text-sm font-medium text-muted-foreground transition-colors",
-              size === "sm" ? "h-8" : "h-10",
+              "flex items-center justify-center rounded-md px-2 text-center font-medium whitespace-nowrap text-muted-foreground transition-colors",
+              size === "sm" ? "h-8 px-1.5 text-xs sm:px-2 sm:text-sm" : "h-10 text-sm",
               "peer-checked:bg-background peer-checked:text-foreground peer-checked:shadow-sm",
               "peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50",
             )}

@@ -249,11 +249,21 @@ type Props = {
   showCurrency?: boolean
   /** Si mostrar el buscador. Por defecto true. */
   showSearch?: boolean
+  /** Si mostrar el filtro de categoría. Por defecto true (false en Flujo de caja). */
+  showCategory?: boolean
+  /** Si mostrar el rango de importe. Por defecto true (false en Flujo de caja). */
+  showAmount?: boolean
+  /** Si mostrar el selector de período. Por defecto true (false en Flujo semanal). */
+  showPeriod?: boolean
+  /** Etiqueta del botón de período cuando no hay rango explícito en la URL. */
+  periodPlaceholder?: string
+  /** Parámetros extra de la URL (p. ej. tab y moneda en /informes) a conservar al filtrar. */
+  extraParams?: Record<string, string | undefined>
 }
 
 /**
  * Barra de filtros unificada (§4 del plan v2): comparte el mismo modelo URL
- * para /ingresos, /egresos y la futura pantalla de /informes.
+ * para /ingresos, /egresos y /informes.
  */
 export function MovementFilters({
   basePath,
@@ -267,6 +277,11 @@ export function MovementFilters({
   showStatus = true,
   showCurrency = true,
   showSearch = true,
+  showCategory = true,
+  showAmount = true,
+  showPeriod = true,
+  periodPlaceholder = "Elegir un período",
+  extraParams,
 }: Props) {
   const { push } = useRouter()
   const [search, setSearch] = useState(query.search)
@@ -316,7 +331,13 @@ export function MovementFilters({
 
   function go(patch: Partial<MovementQuery>) {
     clearTimeout(searchTimeout.current)
-    const href = buildMovementHref(basePath, queryRef.current, patch, defaultSort)
+    const href = buildMovementHref(
+      basePath,
+      queryRef.current,
+      patch,
+      defaultSort,
+      extraParams,
+    )
     pushHref(href)
   }
 
@@ -324,7 +345,13 @@ export function MovementFilters({
     setSearch(value)
     clearTimeout(searchTimeout.current)
     searchTimeout.current = setTimeout(() => {
-      const href = buildMovementHref(basePath, queryRef.current, { search: value }, defaultSort)
+      const href = buildMovementHref(
+        basePath,
+        queryRef.current,
+        { search: value },
+        defaultSort,
+        extraParams,
+      )
       pushHref(href)
     }, DEBOUNCE_MS)
   }
@@ -337,6 +364,7 @@ export function MovementFilters({
       queryRef.current,
       { ...FILTER_DEFAULTS, page: 1 },
       defaultSort,
+      extraParams,
     )
     pushHref(emptyHref)
   }
@@ -413,7 +441,10 @@ export function MovementFilters({
   const prevShift = shiftPeriod(query.from, query.to, -1)
   const nextShift = shiftPeriod(query.from, query.to, 1)
   const activePreset = detectDatePreset(query.from, query.to, today)
-  const periodLabel = formatPeriodLabel(query.from, query.to, today)
+  const periodLabel =
+    !query.from && !query.to
+      ? periodPlaceholder
+      : formatPeriodLabel(query.from, query.to, today)
   const labels = categoryLabels(categories)
   const catSummary = categorySummaryText(query.categoryIds, categories)
   const amountLabel = formatAmountRangeLabel(query.minCents, query.maxCents)
@@ -425,7 +456,7 @@ export function MovementFilters({
     patch: Partial<MovementQuery>
     clearSearch?: boolean
   }[] = []
-  if (query.search) {
+  if (showSearch && query.search) {
     chips.push({
       key: "search",
       label: `Buscar: "${query.search}"`,
@@ -433,16 +464,18 @@ export function MovementFilters({
       clearSearch: true,
     })
   }
-  for (const catId of query.categoryIds) {
-    const cat = labels.get(catId)
-    const name = cat ? (cat.parentName ? `${cat.parentName} › ${cat.name}` : cat.name) : catId
-    chips.push({
-      key: `cat-${catId}`,
-      label: `Categoría: ${name}`,
-      patch: { categoryIds: query.categoryIds.filter((id) => id !== catId) },
-    })
+  if (showCategory) {
+    for (const catId of query.categoryIds) {
+      const cat = labels.get(catId)
+      const name = cat ? (cat.parentName ? `${cat.parentName} › ${cat.name}` : cat.name) : catId
+      chips.push({
+        key: `cat-${catId}`,
+        label: `Categoría: ${name}`,
+        patch: { categoryIds: query.categoryIds.filter((id) => id !== catId) },
+      })
+    }
   }
-  if (query.cardId !== "all") {
+  if (showPaymentMethod && query.cardId !== "all") {
     chips.push({
       key: "card",
       label:
@@ -452,34 +485,46 @@ export function MovementFilters({
       patch: { cardId: "all" },
     })
   }
-  if (query.currency !== "all") {
+  if (showCurrency && query.currency !== "all") {
     chips.push({
       key: "currency",
       label: `Moneda: ${query.currency}`,
       patch: { currency: "all" },
     })
   }
-  if (query.minCents !== null || query.maxCents !== null) {
+  if (showAmount && (query.minCents !== null || query.maxCents !== null)) {
     chips.push({
       key: "amount",
       label: `Importe: ${amountLabel}`,
       patch: { minCents: null, maxCents: null },
     })
   }
-  if (query.from || query.to) {
+  if (showPeriod && (query.from || query.to)) {
     chips.push({
       key: "period",
-      label: `Período: ${periodLabel}`,
-      patch: { from: "", to: "" },
+      label:
+        query.dateField === "paid"
+          ? `Pagado: ${periodLabel}`
+          : `Período: ${periodLabel}`,
+      patch: { from: "", to: "", dateField: "date" },
     })
   }
-  if (query.status !== "all") {
+  if (showStatus && query.status !== "all") {
     chips.push({
       key: "status",
       label: `Estado: ${STATUS_LABELS[query.status]}`,
       patch: { status: "all" },
     })
   }
+
+  const showMobileRow =
+    showPeriod ||
+    showCategory ||
+    showAmount ||
+    (showPaymentMethod && cards.length > 0) ||
+    showCurrency ||
+    showSort ||
+    showStatus
 
   return (
     <div className="space-y-2.5">
@@ -507,8 +552,10 @@ export function MovementFilters({
         )}
 
         {/* Fila móvil: botón de Filtros (n) con hoja inferior y botón Aplicar (§4). */}
+        {showMobileRow && (
         <div className="flex w-full items-center gap-2 md:hidden">
-          <div className="flex items-center gap-1">
+          {showPeriod && (
+          <div className="flex min-w-0 flex-1 items-center gap-1">
             <Button
               type="button"
               variant="outline"
@@ -523,7 +570,7 @@ export function MovementFilters({
             <Button
               type="button"
               variant="outline"
-              className="h-10 max-w-44 justify-start truncate px-2.5 text-xs font-normal"
+              className="h-10 min-w-0 flex-1 justify-start truncate px-2.5 text-xs font-normal"
               onClick={() => handleMobileSheetOpenChange(true)}
             >
               <CalendarIcon className="size-3.5 shrink-0" />
@@ -541,6 +588,7 @@ export function MovementFilters({
               <ChevronRight />
             </Button>
           </div>
+          )}
 
           <Sheet open={mobileFiltersOpen} onOpenChange={handleMobileSheetOpenChange}>
             <Button
@@ -582,6 +630,7 @@ export function MovementFilters({
                   </div>
                 )}
 
+                {showPeriod && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label className={LABEL_CLASS}>Período</Label>
@@ -591,7 +640,7 @@ export function MovementFilters({
                         variant="ghost"
                         size="xs"
                         onClick={() => {
-                          setMobileDraft((d) => ({ ...d, from: "", to: "" }))
+                          setMobileDraft((d) => ({ ...d, from: "", to: "", dateField: "date" }))
                           setMobileShowCalendar(false)
                         }}
                       >
@@ -659,7 +708,9 @@ export function MovementFilters({
                     </div>
                   )}
                 </div>
+                )}
 
+                {showCategory && (
                 <div className="space-y-1.5">
                   <Label className={LABEL_CLASS}>Categoría</Label>
                   <Input
@@ -682,6 +733,7 @@ export function MovementFilters({
                     />
                   </div>
                 </div>
+                )}
 
                 {showPaymentMethod && cards.length > 0 && (
                   <div className="space-y-1.5">
@@ -714,6 +766,7 @@ export function MovementFilters({
                   </div>
                 )}
 
+                {(showCurrency || showSort) && (
                 <div className="grid grid-cols-2 gap-3">
                   {showCurrency && (
                     <div className="space-y-1.5">
@@ -767,7 +820,9 @@ export function MovementFilters({
                     </div>
                   )}
                 </div>
+                )}
 
+                {showAmount && (
                 <div className="space-y-1.5">
                   <Label className={LABEL_CLASS}>Importe</Label>
                   <div className="grid grid-cols-2 gap-2">
@@ -793,6 +848,7 @@ export function MovementFilters({
                     />
                   </div>
                 </div>
+                )}
               </div>
               <SheetFooter className="flex-row justify-end border-t">
                 {(hayFiltrosActivos(query) || hayFiltrosActivos(mobileDraft)) && (
@@ -815,8 +871,10 @@ export function MovementFilters({
             </SheetContent>
           </Sheet>
         </div>
+        )}
 
         {/* Categoría multiselección (escritorio) */}
+        {showCategory && (
         <div className="hidden w-40 space-y-1.5 md:block">
           <Label id="filtro-categoria-label" htmlFor="filtro-categoria" className={LABEL_CLASS}>
             Categoría
@@ -883,6 +941,7 @@ export function MovementFilters({
             </PopoverContent>
           </Popover>
         </div>
+        )}
 
         {/* Medio de pago / tarjeta (escritorio, cuando hay tarjetas) */}
         {showPaymentMethod && cards.length > 0 && (
@@ -947,6 +1006,7 @@ export function MovementFilters({
         )}
 
         {/* Importe mínimo y máximo (escritorio) */}
+        {showAmount && (
         <div className="hidden w-32 space-y-1.5 md:block">
           <Label id="filtro-importe-label" htmlFor="filtro-importe" className={LABEL_CLASS}>
             Importe
@@ -1026,8 +1086,10 @@ export function MovementFilters({
             </PopoverContent>
           </Popover>
         </div>
+        )}
 
         {/* Período con atajos + flechas ‹ › (escritorio) */}
+        {showPeriod && (
         <div className="hidden space-y-1.5 md:block">
           <Label id="filtro-periodo-label" htmlFor="filtro-periodo" className={LABEL_CLASS}>
             Período
@@ -1112,7 +1174,7 @@ export function MovementFilters({
                           size="sm"
                           onClick={() => {
                             setDraft(undefined)
-                            go(rangeToPatch(undefined))
+                            go({ ...rangeToPatch(undefined), dateField: "date" })
                           }}
                         >
                           Borrar rango
@@ -1135,6 +1197,7 @@ export function MovementFilters({
             </Button>
           </div>
         </div>
+        )}
 
         {/* Orden (escritorio) */}
         {showSort && (
@@ -1208,19 +1271,25 @@ export function MovementFiltersSkeleton({
   showSort = true,
   showCurrency = true,
   showSearch = true,
+  showCategory = true,
+  showAmount = true,
+  showPeriod = true,
 }: {
   showPaymentMethod?: boolean
   showSort?: boolean
   showCurrency?: boolean
   showSearch?: boolean
+  showCategory?: boolean
+  showAmount?: boolean
+  showPeriod?: boolean
 }) {
   const fields: { label: string; width: string }[] = []
   if (showSearch) fields.push({ label: "Buscar", width: "w-full sm:w-52" })
-  fields.push({ label: "Categoría", width: "hidden w-40 md:block" })
+  if (showCategory) fields.push({ label: "Categoría", width: "hidden w-40 md:block" })
   if (showPaymentMethod) fields.push({ label: "Medio de pago", width: "hidden w-36 md:block" })
   if (showCurrency) fields.push({ label: "Moneda", width: "hidden w-24 md:block" })
-  fields.push({ label: "Importe", width: "hidden w-32 md:block" })
-  fields.push({ label: "Período", width: "hidden w-[248px] md:block" })
+  if (showAmount) fields.push({ label: "Importe", width: "hidden w-32 md:block" })
+  if (showPeriod) fields.push({ label: "Período", width: "hidden w-[248px] md:block" })
   if (showSort) fields.push({ label: "Orden", width: "hidden w-32 md:block" })
 
   return (

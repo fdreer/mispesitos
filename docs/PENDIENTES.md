@@ -1123,3 +1123,100 @@ de `.env.local`. Se actualizaron igual los tests en `src/server/queries.db.test.
 (múltiples categorías con padre, tarjeta vs efectivo, importe min/max, búsqueda
 por categoría/padre/importe, y `queryMovementsView`). Hay que correrlos contra
 una base descartable antes de mergear.
+
+---
+
+## 16. Fase 5 del plan v2: informes (2026-11-26)
+
+La fase "Informes" de `docs/superpowers/specs/2026-11-26-v2-plan.md` (§3 y §6):
+la ruta `/informes` con las pestañas **Ingresos vs Gastos** (§3.1) y **Flujo de
+caja** (§3.2), selector de moneda **ARS · USD · Todo en pesos** (§3.3) y la
+barra de filtros compartida (§4).
+
+| Qué | Dónde | Sección |
+|---|---|---|
+| Estado URL de informes (`tab`, `moneda`, `granularidad`) y rangos por defecto | `src/lib/report-query.ts` | §3, §4 |
+| Cálculo de Ingresos vs Gastos: tarjetas resumen, barras + neto, estado jerárquico plegable, variación % y armado de enlaces por `paid_date` | `src/lib/reports-pnl.ts` | §3.1, §3.3 |
+| Cálculo de Flujo de caja: pasado real + mes en curso mixto + futuro proyectado (mensual y semanal a 3 meses), `Atrasado:` aparte y alerta de saldo negativo | `src/lib/reports-cashflow.ts` | §3.2, §3.3 |
+| Filtro `?por=pago` (`dateField: "paid"`) en listados y `listPaidInstallmentsForReport` con `perceivedPayment` | `src/lib/movement-query.ts`, `src/server/queries.ts` | §3.1, §0 |
+| Adaptación de la barra unificada (`showCategory`, `showAmount`, `showPeriod`, `periodPlaceholder`, `extraParams`) y entrada **Informes** en la nav | `src/components/movement-filters.tsx`, `src/components/app-sidebar.tsx` | §4, §5.4 |
+| Pantalla `/informes`, controles de pestaña/moneda/granularidad, gráficos Recharts y tablas de Ingresos vs Gastos y Flujo de caja | `src/app/(app)/informes/page.tsx`, `src/components/reports/` | §3 |
+| Enlace desde el mini-gráfico de proyección del dashboard a `/informes?tab=flujo` | `src/app/(app)/dashboard/page.tsx` | §3.2 |
+
+`tsc --noEmit` y `eslint` limpios (queda el aviso previo de `<img>` en
+`app-sidebar.tsx`). `drizzle-kit generate` dice `"No schema changes"` (no hizo
+falta migración nueva). La suite pasó de 588 a 615 tests (614 en verde; falla
+sólo el que ya fallaba antes, el tope de 120 filas en `movement-form.test.tsx`).
+
+### 16.1 Qué se decidió
+
+- **Rangos y moneda por defecto al entrar a `/informes` sin fechas.** Ingresos vs
+  Gastos arranca en **Últimos 12 meses**; Flujo de caja mensual arranca en
+  **últimos 3 meses cerrados + mes en curso + próximos 6 meses** (10 meses en
+  total); la moneda por defecto en ambos es **Todo en pesos**. No se inyectan
+  fechas a la URL hasta que la persona elige un período para no emitir chips ni
+  contar filtros activos al entrar.
+- **En Flujo de caja se ocultan categoría, tarjeta, buscador e importe.** El
+  saldo real de caja incluye todos los movimientos y los cambios de dólares (que
+  no tienen categoría ni tarjeta); mostrar un saldo inicial/final global con esos
+  filtros activos daría números engañosos. Quedan visibles **Período**,
+  **Moneda** y **Granularidad** (y en vista semanal se fijan los próximos 3 meses
+  desde hoy en ventanas móviles de 7 días, igual que "Esta semana" en Fase 4).
+- **Mes en curso mixto y tratamiento de `"Atrasado: "`.** En Flujo de caja, el
+  mes actual combina lo ya pagado/cobrado hasta hoy más las cuotas impagas que
+  vencen entre hoy y fin de mes. Las cuotas vencidas e impagas (`dueDate < today`)
+  no se esconden en el mes actual: se muestran aparte en el bloque `"Atrasado: "`
+  (con enlaces a los listados vencidos), pero su saldo neto sí se descuenta al
+  evaluar en qué mes futuro el saldo proyectado queda negativo (`"En <mes> te
+  faltarían $X"`).
+- **Enlace de celdas al listado con `?por=pago`.** Como Ingresos vs Gastos agrupa
+  por `paid_date` (§0) y los listados filtran `from`/`to` por `movement.date`,
+  las celdas de `/informes` enlazan con `por=pago` (sin `status=paid` para no
+  ocultar compras en cuotas que pagaron una cuota este mes y tienen otras
+  pendientes). `listMovements` y el chip `"Pagado: ..."` reconocen ese modo,
+  conservando el comportamiento normal de `from`/`to` cuando no viene desde
+  Informes.
+- **Flujo de caja en "Todo en pesos" con valuación histórica continua.** La
+  tenencia inicial en dólares se valúa con `initialBalanceUsdRate`, cada cuota
+  con su `rate` (o `usdPaidRate` vía `perceivedPayment`) y las compras/ventas de
+  dólares no aparecen (sólo mueven el flujo de caja de cada moneda, §3.3), de
+  modo que `saldo inicial + neto = saldo final` cierra en toda la serie sin
+  saltos de revaluación entre pasado y futuro ni dependencia de la API externa.
+- **Variación % en celda y tope defensivo de meses.** La variación % contra el
+  mes anterior se calcula en servidor (trayendo un mes previo al rango) y se
+  muestra debajo de cada importe en la misma celda al activar `"Variación %"`,
+  para no duplicar las 12 columnas; el generador de columnas mensual se topa a
+  60 meses hacia atrás desde `to`.
+
+### 16.2 Lo que se verificó y lo que no
+
+Verificado en el navegador, escritorio (`1280×800`) y móvil (`375×812`), contra
+la instalación Docker local (no contra la base de `.env.local`), volviendo el
+viewport a escritorio al finalizar: entrada **Informes** en el riel lateral y el
+menú móvil, enlace **"Ver informe"** desde el dashboard hacia Flujo de caja,
+pestaña **Ingresos vs Gastos** (tarjetas resumen, gráfico de barras + neto,
+despliegue de categoría padre `Supermercado` › `Mayorista`, toggle `Variación %`,
+cambio de moneda `ARS` / `USD` / `Todo en pesos`, enlace de celda a `/egresos`
+con `por=pago` y chip `Pagado: Este mes`), pestaña **Flujo de caja** (filtros
+acotados a período/moneda/granularidad, badges `Sin datos` / `En curso` /
+`Proyectado`, alerta de saldo negativo futuro `"En febrero 2027 te faltarían
+$ 25.666,66"` y vista `Semanal (3 meses)` de 14 semanas).
+
+Tras la primera pasada se corrigió el desborde horizontal en `375px` de la fila
+de período en `Flujo de caja` (`min-w-0 flex-1` en el botón de período) y el
+ajuste en dos líneas de `"Todo en pesos"` en el segmentado de moneda (`size="sm"`
+en `Segmented` y `sm:w-72` en `ReportControls`); ambas correcciones quedaron
+verificadas en la segunda pasada sin scroll horizontal en escritorio ni móvil.
+
+**No se vio en el navegador**: el bloque `"Atrasado: "` en Flujo de caja (la
+cuenta de prueba de Docker no tenía cuotas vencidas impagas) ni movimientos en
+USD o cambios de divisa en los informes (todos los movimientos sembrados en
+Docker eran en ARS). Esa lógica quedó cubierta por los tests unitarios y de
+componente (`reports-cashflow.test.ts`, `reports-pnl.test.ts`,
+`cashflow-report.test.tsx`).
+
+**`pnpm test:db` no se corrió**, por el mismo motivo que §11.3: apunta a la base
+de `.env.local`. Se agregaron igual tests en `src/server/queries.db.test.ts`
+para `dateField: "paid"` en `listMovements` y para `listPaidInstallmentsForReport`
+(incluyendo `perceivedPayment` con `usd_paid_rate`). Hay que correrlos contra
+una base descartable antes de mergear.

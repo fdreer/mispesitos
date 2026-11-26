@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useState } from "react"
 import {
   ArrowLeftRight,
+  BarChart3,
   CreditCard,
   LayoutDashboard,
   LogOut,
@@ -25,6 +26,7 @@ const LINKS = [
   { href: "/ingresos", label: "Ingresos", icon: TrendingUp },
   { href: "/egresos", label: "Egresos", icon: TrendingDown },
   { href: "/tarjetas", label: "Tarjetas", icon: CreditCard },
+  { href: "/informes", label: "Informes", icon: BarChart3 },
   { href: "/cambios", label: "Cambios", icon: ArrowLeftRight },
   { href: "/categorias", label: "Categorías", icon: Tags },
   { href: "/ajustes", label: "Ajustes", icon: Settings },
