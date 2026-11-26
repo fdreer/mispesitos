@@ -2,19 +2,28 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { eq, inArray, sql } from "drizzle-orm"
 
 import { db, sqlClient, withUser, type Tx } from "@/db/client"
-import { category, installment, movement, user, userSettings } from "@/db/schema"
+import {
+  cardStatement,
+  category,
+  creditCard,
+  installment,
+  movement,
+  user,
+  userSettings,
+} from "@/db/schema"
 
 const USER_A = "rls-test-user-a"
 const USER_B = "rls-test-user-b"
 const USUARIOS = [USER_A, USER_B]
 
 /**
- * Las cuatro policies de la app son copias del mismo predicado sobre tablas
+ * Las policies de la app son copias del mismo predicado sobre tablas
  * distintas. Antes la cobertura de comportamiento era sólo sobre `category`: un
- * error en una sola de las otras tres no lo agarraba nada. Cada caso describe
+ * error en una sola de las otras no lo agarraba nada. Cada caso describe
  * cómo sembrar, leer, escribir a nombre ajeno y limpiar una tabla, y los tests
  * de aislamiento —adentro y afuera de withUser()— se corren parametrizados
- * sobre las cuatro.
+ * sobre todas. La Fase 3 del plan v2 (migración 0012) sumó `credit_card` y
+ * `card_statement`: entran al mismo array y heredan los mismos tests.
  *
  * El orden del array es el de siembra (respeta las FK); la limpieza va al revés.
  *
@@ -59,6 +68,46 @@ const tablas: CasoTabla[] = [
         .insert(category)
         .values({ id: "cat-robada", userId: USER_B, name: "Robada", kind: "expense" }),
     borrar: (tx) => tx.delete(category),
+  },
+  {
+    nombre: "credit_card",
+    sembrar: (tx, u) =>
+      tx
+        .insert(creditCard)
+        .values({ id: `card-${u}`, userId: u, name: "Visa", closingDay: 25, dueDay: 5 })
+        .onConflictDoNothing(),
+    leer: (tx) => tx.select({ userId: creditCard.userId }).from(creditCard),
+    insertarAjena: (tx) =>
+      tx
+        .insert(creditCard)
+        .values({ id: "card-robada", userId: USER_B, name: "Robada", closingDay: 25, dueDay: 5 }),
+    borrar: (tx) => tx.delete(creditCard),
+  },
+  {
+    nombre: "card_statement",
+    sembrar: (tx, u) =>
+      tx
+        .insert(cardStatement)
+        .values({
+          id: `res-${u}`,
+          userId: u,
+          cardId: `card-${u}`,
+          period: "2026-01",
+          closingDate: "2026-01-25",
+          dueDate: "2026-02-05",
+        })
+        .onConflictDoNothing(),
+    leer: (tx) => tx.select({ userId: cardStatement.userId }).from(cardStatement),
+    insertarAjena: (tx) =>
+      tx.insert(cardStatement).values({
+        id: "res-robado",
+        userId: USER_B,
+        cardId: `card-${USER_B}`,
+        period: "2026-02",
+        closingDate: "2026-02-25",
+        dueDate: "2026-03-05",
+      }),
+    borrar: (tx) => tx.delete(cardStatement),
   },
   {
     nombre: "movement",
@@ -157,7 +206,7 @@ async function seedUser(id: string) {
     })
     .onConflictDoNothing()
 
-  // Las 4 tablas de la app llevan FORCE: se siembran por withUser(), la misma
+  // Las tablas de la app llevan FORCE: se siembran por withUser(), la misma
   // puerta que usa la app. Un INSERT directo quedaría fuera de toda policy.
   await withUser(id, async (tx) => {
     for (const tabla of tablas) await tabla.sembrar(tx, id)
@@ -182,7 +231,8 @@ async function seedUser(id: string) {
  *
  * El orden es el inverso al de siembra y no es negociable: `movement →
  * category` es ON DELETE RESTRICT, así que la categoría no se puede ir antes
- * que el movimiento que la usa.
+ * que el movimiento que la usa. Lo mismo las tarjetas (0012): las FK de
+ * movimiento y cuota a tarjeta y resumen son NO ACTION.
  */
 async function limpiar() {
   for (const id of USUARIOS) {
@@ -585,17 +635,22 @@ describe("RLS", () => {
   // abajo. FORCE se declara igual porque cubre el día que algo conecte con el
   // rol dueño, y este test verifica que la declaración sigue en pie: si se pone
   // en rojo, el arreglo es volver a ponerla en la migración.
-  it("las cuatro tablas de la app declaran FORCE ROW LEVEL SECURITY", async () => {
+  it("las tablas de la app declaran FORCE ROW LEVEL SECURITY", async () => {
     const rows = await db.execute(sql`
       SELECT relname, relrowsecurity, relforcerowsecurity
       FROM pg_class
       WHERE relnamespace = 'public'::regnamespace
-        AND relname IN ('user_settings', 'category', 'movement', 'installment')
+        AND relname IN (
+          'user_settings', 'category', 'movement', 'installment',
+          'credit_card', 'card_statement'
+        )
       ORDER BY relname
     `)
 
     expect([...rows]).toEqual([
+      { relname: "card_statement", relrowsecurity: true, relforcerowsecurity: true },
       { relname: "category", relrowsecurity: true, relforcerowsecurity: true },
+      { relname: "credit_card", relrowsecurity: true, relforcerowsecurity: true },
       { relname: "installment", relrowsecurity: true, relforcerowsecurity: true },
       { relname: "movement", relrowsecurity: true, relforcerowsecurity: true },
       { relname: "user_settings", relrowsecurity: true, relforcerowsecurity: true },
@@ -617,9 +672,9 @@ describe("RLS", () => {
   // expectativa: en rojo, este test está diciendo que cualquier consulta sin
   // WHERE devuelve datos de todos los usuarios.
   //
-  // Parametrizado sobre las cuatro tablas, igual que los tests de aislamiento
+  // Parametrizado sobre todas las tablas, igual que los tests de aislamiento
   // de adentro de withUser(): antes esto sólo corría sobre `category`, y una
-  // policy permisiva de más en cualquiera de las otras tres tablas sueltas no
+  // policy permisiva de más en cualquiera de las otras tablas sueltas no
   // la agarraba nada.
   it.each(tablas)(
     "fuera de withUser, la conexión de la app no ve filas de $nombre",
@@ -798,6 +853,258 @@ describe("categorías en árbol", () => {
       expect(motivo).toMatch(/category_active_unique/)
     } finally {
       await limpiarArbol()
+    }
+  })
+})
+
+/**
+ * Las reglas de las tarjetas (migración 0012, Fase 3 del plan v2). Igual que
+ * las del árbol de categorías, viven en la base y no sólo en las Server
+ * Actions: si alguna se pone en rojo, el arreglo es devolverle la regla a la
+ * base, nunca bajar la expectativa.
+ *
+ * Las FK compuestas con user_id frenan colgar filas propias de una tarjeta o
+ * un resumen ajeno, con el mismo criterio que la 0006 y la 0008. Los triggers
+ * diferidos de `installment_matches_statement` sostienen que la cuota de una
+ * compra con tarjeta esté en un resumen de ESA tarjeta, venza cuando vence el
+ * resumen y se pague junto con él (§1.4: las cuotas con tarjeta no se pagan
+ * sueltas). Como son DEFERRABLE INITIALLY DEFERRED, el rechazo llega en el
+ * COMMIT de withUser() y no en la sentencia: por eso cada caso escribe todo
+ * adentro de una sola transacción y espera el rechazo de la transacción entera.
+ *
+ * Cada caso siembra sus filas con ids `tarj-*` y las borra en su `finally`.
+ */
+describe("tarjetas", () => {
+  const CARD = "tarj-card"
+  const OTRA = "tarj-otra"
+  const RES = "tarj-res"
+  const RES_OTRA = "tarj-res-otra"
+  const MOV = "tarj-mov"
+  const INS = "tarj-ins"
+
+  const tarjeta = (id: string) => ({ id, userId: USER_A, name: id, closingDay: 25, dueDay: 5 })
+  const resumen = (id: string, cardId: string) => ({
+    id,
+    userId: USER_A,
+    cardId,
+    period: "2026-03",
+    closingDate: "2026-03-25",
+    dueDate: "2026-04-05",
+  })
+  const compra = (creditCardId: string | null) => ({
+    id: MOV,
+    userId: USER_A,
+    kind: "expense",
+    description: "Compra con tarjeta",
+    categoryId: `cat-${USER_A}`,
+    date: "2026-03-10",
+    currency: "ARS",
+    amountCents: 100_00,
+    rate: "1",
+    creditCardId,
+  })
+  const cuota = (statementId: string | null, dueDate = "2026-04-05") => ({
+    id: INS,
+    userId: USER_A,
+    movementId: MOV,
+    number: 1,
+    amountCents: 100_00,
+    dueDate,
+    statementId,
+  })
+
+  /** Un solo withUser con todo: los triggers diferidos corren al COMMIT. */
+  async function sembrar(fn: (tx: Tx) => Promise<unknown>) {
+    return withUser(USER_A, async (tx) => {
+      await tx.insert(creditCard).values([tarjeta(CARD), tarjeta(OTRA)])
+      await tx.insert(cardStatement).values([resumen(RES, CARD), resumen(RES_OTRA, OTRA)])
+      await fn(tx)
+    })
+  }
+
+  async function limpiarTarjetas() {
+    await withUser(USER_A, async (tx) => {
+      await tx.delete(installment).where(eq(installment.id, INS))
+      await tx.delete(movement).where(eq(movement.id, MOV))
+      await tx.delete(cardStatement).where(inArray(cardStatement.id, [RES, RES_OTRA]))
+      await tx.delete(creditCard).where(inArray(creditCard.id, [CARD, OTRA]))
+    })
+  }
+
+  it("un movimiento no puede ir a la tarjeta de otro usuario", async () => {
+    try {
+      const motivo = await motivoDelRechazo(
+        withUser(USER_A, (tx) => tx.insert(movement).values(compra(`card-${USER_B}`))),
+      )
+      expect(motivo).toMatch(
+        /violates foreign key constraint "movement_user_id_credit_card_id_credit_card_user_id_id_fk"/,
+      )
+    } finally {
+      await limpiarTarjetas()
+    }
+  })
+
+  it("una cuota no puede caer en el resumen de otro usuario", async () => {
+    try {
+      const motivo = await motivoDelRechazo(
+        sembrar(async (tx) => {
+          await tx.insert(movement).values(compra(CARD))
+          await tx.insert(installment).values(cuota(`res-${USER_B}`))
+        }),
+      )
+      expect(motivo).toMatch(
+        /violates foreign key constraint "installment_user_id_statement_id_card_statement_user_id_id_fk"/,
+      )
+    } finally {
+      await limpiarTarjetas()
+    }
+  })
+
+  it("un resumen no puede ser de la tarjeta de otro usuario", async () => {
+    try {
+      const motivo = await motivoDelRechazo(
+        withUser(USER_A, (tx) => tx.insert(cardStatement).values(resumen(RES, `card-${USER_B}`))),
+      )
+      expect(motivo).toMatch(/violates foreign key constraint/)
+    } finally {
+      await limpiarTarjetas()
+    }
+  })
+
+  it("sólo los egresos van con tarjeta", async () => {
+    try {
+      const motivo = await motivoDelRechazo(
+        sembrar((tx) =>
+          tx.insert(movement).values({
+            ...compra(CARD),
+            kind: "income",
+            categoryId: null,
+          }),
+        ),
+      )
+      // Puede saltar antes la FK de la categoría por tipo: lo que importa es
+      // que la base no lo acepte. Con category_id nulo, lo frena el CHECK.
+      expect(motivo).toMatch(/movement_credit_card_only_expense|violates/)
+    } finally {
+      await limpiarTarjetas()
+    }
+  })
+
+  it("la cuota de una compra con tarjeta tiene que estar en un resumen", async () => {
+    try {
+      const motivo = await motivoDelRechazo(
+        sembrar(async (tx) => {
+          await tx.insert(movement).values(compra(CARD))
+          await tx.insert(installment).values(cuota(null))
+        }),
+      )
+      expect(motivo).toMatch(/Cada cuota de una compra con tarjeta tiene que estar en un resumen/)
+    } finally {
+      await limpiarTarjetas()
+    }
+  })
+
+  it("la cuota no puede estar en el resumen de otra tarjeta", async () => {
+    try {
+      const motivo = await motivoDelRechazo(
+        sembrar(async (tx) => {
+          await tx.insert(movement).values(compra(CARD))
+          await tx.insert(installment).values(cuota(RES_OTRA))
+        }),
+      )
+      expect(motivo).toMatch(/La cuota está en un resumen de otra tarjeta/)
+    } finally {
+      await limpiarTarjetas()
+    }
+  })
+
+  it("la cuota vence cuando vence su resumen", async () => {
+    try {
+      const motivo = await motivoDelRechazo(
+        sembrar(async (tx) => {
+          await tx.insert(movement).values(compra(CARD))
+          await tx.insert(installment).values(cuota(RES, "2026-04-10"))
+        }),
+      )
+      expect(motivo).toMatch(/Una cuota con tarjeta vence cuando vence su resumen/)
+    } finally {
+      await limpiarTarjetas()
+    }
+  })
+
+  it("una cuota con tarjeta no se paga suelta: se paga con el resumen", async () => {
+    try {
+      await sembrar(async (tx) => {
+        await tx.insert(movement).values(compra(CARD))
+        await tx.insert(installment).values(cuota(RES))
+      })
+      const motivo = await motivoDelRechazo(
+        withUser(USER_A, (tx) =>
+          tx
+            .update(installment)
+            .set({ paid: true, paidDate: "2026-04-01" })
+            .where(eq(installment.id, INS)),
+        ),
+      )
+      expect(motivo).toMatch(/Una cuota con tarjeta se paga junto con su resumen/)
+    } finally {
+      await limpiarTarjetas()
+    }
+  })
+
+  it("pagar el resumen con sus cuotas en la misma transacción entra, y pagado no cambia de fechas", async () => {
+    try {
+      await sembrar(async (tx) => {
+        await tx.insert(movement).values(compra(CARD))
+        await tx.insert(installment).values(cuota(RES))
+      })
+      await withUser(USER_A, async (tx) => {
+        await tx
+          .update(cardStatement)
+          .set({ paidDate: "2026-04-01" })
+          .where(eq(cardStatement.id, RES))
+        await tx
+          .update(installment)
+          .set({ paid: true, paidDate: "2026-04-01" })
+          .where(eq(installment.id, INS))
+      })
+
+      const motivo = await motivoDelRechazo(
+        withUser(USER_A, (tx) =>
+          tx.update(cardStatement).set({ dueDate: "2026-04-08" }).where(eq(cardStatement.id, RES)),
+        ),
+      )
+      expect(motivo).toMatch(/El resumen está pagado: desmarcalo para cambiarle las fechas/)
+    } finally {
+      // Para poder borrar, primero se desmarca: la cuota pagada no puede
+      // quedar sin su resumen pagado ni al revés.
+      await withUser(USER_A, async (tx) => {
+        await tx
+          .update(installment)
+          .set({ paid: false, paidDate: null })
+          .where(eq(installment.id, INS))
+        await tx.update(cardStatement).set({ paidDate: null }).where(eq(cardStatement.id, RES))
+      }).catch(() => {})
+      await limpiarTarjetas()
+    }
+  })
+
+  it("dos tarjetas activas no se llaman igual, pero una archivada libera el nombre", async () => {
+    try {
+      const motivo = await motivoDelRechazo(
+        withUser(USER_A, (tx) =>
+          tx.insert(creditCard).values([tarjeta(CARD), { ...tarjeta(OTRA), name: CARD }]),
+        ),
+      )
+      expect(motivo).toMatch(/credit_card_active_name_unique/)
+
+      await withUser(USER_A, (tx) =>
+        tx
+          .insert(creditCard)
+          .values([{ ...tarjeta(CARD), archived: true }, { ...tarjeta(OTRA), name: CARD }]),
+      )
+    } finally {
+      await limpiarTarjetas()
     }
   })
 })

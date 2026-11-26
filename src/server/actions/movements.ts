@@ -15,6 +15,7 @@ import { assertInstallmentMovementKind } from "@/lib/movement-asserts"
 import { BASE_PATHS } from "@/lib/movement-routes"
 import { exchangeSchema, movementSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
+import { planCardInstallments } from "@/server/card-plan"
 import { requireUser } from "@/server/session"
 
 /**
@@ -40,6 +41,32 @@ async function categoryHasChildren(tx: Tx, categoryId: string): Promise<boolean>
 const categoryNotLeaf = () => failure(CATEGORIA_NO_HOJA, { categoryId: [CATEGORIA_NO_HOJA] })
 
 /**
+ * El medio de pago que manda el formulario: vacío es efectivo/débito, y si
+ * no, el id de una tarjeta (§1.2 del plan v2). `undefined` si llegó algo que
+ * no es ninguna de las dos cosas.
+ */
+function readCardId(formData: FormData): string | null | undefined {
+  const raw = String(formData.get("creditCardId") ?? "")
+  if (raw === "") return null
+  const parsed = z.uuid().safeParse(raw)
+  return parsed.success ? parsed.data : undefined
+}
+
+const TARJETA_INVALIDA = "Esa tarjeta no existe."
+const invalidCard = () => failure(TARJETA_INVALIDA, { creditCardId: [TARJETA_INVALIDA] })
+
+/** Sólo un egreso se paga con tarjeta: la CHECK `movement_credit_card_only_expense` (0012). */
+const SOLO_EGRESOS = "Sólo un egreso se puede pagar con tarjeta."
+
+/**
+ * Lo que la base rechaza con el trigger `installment_matches_statement`
+ * (migración 0012). Desde el formulario no debería pasar —el plan lo arma
+ * `planCardInstallments` con la misma regla—; si pasa es una carrera con otra
+ * pestaña que pagó o corrigió un resumen en el medio.
+ */
+const RESUMEN_CAMBIO = "Un resumen de la tarjeta cambió mientras cargabas. Probá de nuevo."
+
+/**
  * Las cuotas viajan en el FormData como campos repetidos, en el mismo orden:
  * installmentAmount[] e installmentDueDate[]. El emparejamiento es posicional,
  * así que si las dos listas no vienen del mismo largo no hay forma de saber qué
@@ -58,6 +85,8 @@ export async function createMovement(
 ): Promise<ActionResult> {
   const user = await requireUser()
   const settled = formData.get("settled") === "true"
+  const cardId = readCardId(formData)
+  if (cardId === undefined) return invalidCard()
 
   const installments = readInstallments(formData)
   if (installments === null) {
@@ -81,6 +110,14 @@ export async function createMovement(
   }
 
   const input = parsed.data
+  if (cardId !== null && input.kind !== "expense") return failure(SOLO_EGRESOS)
+  // §1.3: una compra con tarjeta nunca es "ya pagada" al cargarla. Se paga
+  // cuando se paga su resumen. El formulario oculta la opción; esto es el
+  // borde de confianza.
+  if (cardId !== null && settled) {
+    return failure("Una compra con tarjeta se paga con el resumen: no se carga como pagada.")
+  }
+
   const movementId = randomUUID()
   const installmentsToSave = settled
     ? [{ amountCents: input.amountCents, dueDate: input.date }]
@@ -89,6 +126,22 @@ export async function createMovement(
   try {
     const resultado = await withUser(user.id, async (tx) => {
       if (await categoryHasChildren(tx, input.categoryId)) return categoryNotLeaf()
+
+      // Con tarjeta, los vencimientos y el resumen de cada cuota salen de la
+      // tarjeta, no del formulario. Se arma antes de insertar el movimiento
+      // para que un plan que no entra no deje nada escrito.
+      const cardPlan =
+        cardId === null
+          ? null
+          : await planCardInstallments(tx, user.id, {
+              cardId,
+              purchaseDate: input.date,
+              amounts: installmentsToSave.map((c) => c.amountCents),
+              previous: [],
+              previousCardId: null,
+              previousPurchaseDate: null,
+            })
+      if (cardPlan && !cardPlan.ok) return cardPlan.result
 
       await tx.insert(movement).values({
         id: movementId,
@@ -101,19 +154,28 @@ export async function createMovement(
         amountCents: input.amountCents,
         rate: String(input.rate),
         direction: null,
+        creditCardId: cardId,
       })
 
       await tx.insert(installment).values(
-        installmentsToSave.map((cuota, index) => ({
-          id: randomUUID(),
-          movementId,
-          userId: user.id,
-          number: index + 1,
-          amountCents: cuota.amountCents,
-          dueDate: cuota.dueDate,
-          paid: settled,
-          paidDate: settled ? cuota.dueDate : null,
-        })),
+        cardPlan
+          ? cardPlan.rows.map((cuota, index) => ({
+              id: randomUUID(),
+              movementId,
+              userId: user.id,
+              number: index + 1,
+              ...cuota,
+            }))
+          : installmentsToSave.map((cuota, index) => ({
+              id: randomUUID(),
+              movementId,
+              userId: user.id,
+              number: index + 1,
+              amountCents: cuota.amountCents,
+              dueDate: cuota.dueDate,
+              paid: settled,
+              paidDate: settled ? cuota.dueDate : null,
+            })),
       )
       return success()
     })
@@ -123,6 +185,7 @@ export async function createMovement(
     // La carrera: otra pestaña le creó una subcategoría a esta categoría
     // entre que se abrió el formulario y se guardó.
     if (isCheckViolation(error, "movement_category_is_leaf")) return categoryNotLeaf()
+    if (isCheckViolation(error, "installment_matches_statement")) return failure(RESUMEN_CAMBIO)
     return failure("No pudimos guardar el movimiento. Probá de nuevo.")
   }
 
@@ -177,6 +240,9 @@ export async function updateMovement(
     return failure("Ese movimiento no existe.")
   }
 
+  const cardId = readCardId(formData)
+  if (cardId === undefined) return invalidCard()
+
   const installments = readInstallments(formData)
   if (installments === null) {
     return failure("El plan de cuotas llegó incompleto. Recargá la página y probá de nuevo.")
@@ -199,6 +265,7 @@ export async function updateMovement(
   }
 
   const input = parsed.data
+  if (cardId !== null && input.kind !== "expense") return failure(SOLO_EGRESOS)
   // Se llena adentro de la transacción y se lee después, para revalidar. Queda
   // en `null` por cualquiera de las dos salidas tempranas, que es justo cuando
   // no hay nada que revalidar.
@@ -209,8 +276,10 @@ export async function updateMovement(
       const previas = await tx
         .select({
           number: installment.number,
+          amountCents: installment.amountCents,
           paid: installment.paid,
           paidDate: installment.paidDate,
+          statementId: installment.statementId,
         })
         .from(installment)
         .where(and(eq(installment.movementId, id.data), eq(installment.userId, user.id)))
@@ -225,6 +294,33 @@ export async function updateMovement(
         )
       }
 
+      const [actual] = await tx
+        .select({ creditCardId: movement.creditCardId, date: movement.date })
+        .from(movement)
+        .where(and(eq(movement.id, id.data), eq(movement.userId, user.id)))
+
+      // Con tarjeta: el plan sale de los resúmenes, y una edición no puede
+      // cambiar lo que tenía un resumen ya pagado (ver `planCardInstallments`).
+      // Sin tarjeta: si la compra ERA con tarjeta y alguna cuota está en un
+      // resumen pagado, pasarla a efectivo le sacaría plata a ese pago.
+      const cardPlan =
+        cardId === null
+          ? null
+          : await planCardInstallments(tx, user.id, {
+              cardId,
+              purchaseDate: input.date,
+              amounts: input.installments.map((c) => c.amountCents),
+              previous: previas,
+              previousCardId: actual?.creditCardId ?? null,
+              previousPurchaseDate: actual?.date ?? null,
+            })
+      if (cardPlan && !cardPlan.ok) return cardPlan.result
+      if (cardId === null && previas.some((p) => p.statementId !== null && p.paid)) {
+        return failure(
+          "Tiene cuotas en un resumen de tarjeta ya pagado: desmarcalo antes de cambiar el medio de pago.",
+        )
+      }
+
       const actualizado = await tx
         .update(movement)
         .set({
@@ -234,6 +330,7 @@ export async function updateMovement(
           currency: input.currency,
           amountCents: input.amountCents,
           rate: String(input.rate),
+          creditCardId: cardId,
           updatedAt: new Date(),
         })
         .where(
@@ -264,6 +361,19 @@ export async function updateMovement(
         .delete(installment)
         .where(and(eq(installment.movementId, id.data), eq(installment.userId, user.id)))
 
+      if (cardPlan) {
+        await tx.insert(installment).values(
+          cardPlan.rows.map((cuota, index) => ({
+            id: randomUUID(),
+            movementId: id.data,
+            userId: user.id,
+            number: index + 1,
+            ...cuota,
+          })),
+        )
+        return success()
+      }
+
       await tx.insert(installment).values(
         input.installments.map((cuota, index) => {
           const number = index + 1
@@ -291,6 +401,8 @@ export async function updateMovement(
   } catch (error) {
     logDbError("updateMovement", error)
     if (isCheckViolation(error, "movement_category_is_leaf")) return categoryNotLeaf()
+    if (isCheckViolation(error, "installment_matches_statement")) return failure(RESUMEN_CAMBIO)
+    if (isCheckViolation(error, "movement_credit_card_only_expense")) return failure(SOLO_EGRESOS)
     return failure("No pudimos guardar los cambios. Probá de nuevo.")
   }
 
@@ -415,15 +527,27 @@ export async function setInstallmentPaid(
   if (!resolved.ok) return failure(resolved.message)
 
   try {
-    const updated = await withUser(user.id, (tx) =>
-      tx
+    const result = await withUser(user.id, async (tx) => {
+      // Una cuota de una compra con tarjeta no se paga sola: se paga cuando
+      // se paga su resumen (§1.3 del plan v2). La base lo rechazaría igual
+      // (trigger `installment_matches_statement`); esto es para decirlo claro.
+      const [cuota] = await tx
+        .select({ statementId: installment.statementId })
+        .from(installment)
+        .where(and(eq(installment.id, parsed.data.id), eq(installment.userId, user.id)))
+      if (!cuota) return failure("No encontramos esa cuota.")
+      if (cuota.statementId !== null) {
+        return failure("Esta cuota es de una compra con tarjeta: se paga con el resumen.")
+      }
+
+      await tx
         .update(installment)
         .set({ paid: parsed.data.paid, paidDate: resolved.paidDate })
         .where(and(eq(installment.id, parsed.data.id), eq(installment.userId, user.id)))
-        .returning({ id: installment.id }),
-    )
+      return success()
+    })
 
-    if (updated.length === 0) return failure("No encontramos esa cuota.")
+    if (!result.ok) return result
   } catch (error) {
     logDbError("setInstallmentPaid", error)
     return failure("No pudimos actualizar la cuota.")

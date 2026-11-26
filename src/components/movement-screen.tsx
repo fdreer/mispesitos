@@ -23,6 +23,12 @@ import {
   listMovementsPage,
   type Category,
 } from "@/server/queries"
+import {
+  listCardOptions,
+  listDescriptionSuggestions,
+  type CardOption,
+  type DescriptionSuggestion,
+} from "@/server/card-queries"
 import { requireSettings } from "@/server/session"
 import { cn } from "@/lib/utils"
 
@@ -48,11 +54,15 @@ type Props = {
 async function MovementFormDialogWithRate({
   kind,
   categories,
+  cards,
+  suggestions,
   today,
   ratePreference,
 }: {
   kind: Kind
   categories: Category[]
+  cards: CardOption[]
+  suggestions: DescriptionSuggestion[]
   today: IsoDate
   ratePreference: RatePreference
 }) {
@@ -61,6 +71,8 @@ async function MovementFormDialogWithRate({
     <MovementFormDialog
       kind={kind}
       categories={categories}
+      cards={cards}
+      suggestions={suggestions}
       suggestedRate={rate?.referenceRate ?? null}
       today={today}
     />
@@ -78,8 +90,14 @@ async function MovementFormDialogWithRate({
  */
 async function BotonNuevo({ kind }: { kind: Kind }) {
   const { user, settings } = await requireSettings()
-  const categories = await listCategories(user.id, kind, true)
   const today = todayInAr()
+  // Las tarjetas sólo le sirven a un egreso (medio de pago, §1.4 del plan
+  // v2); las descripciones previas, a los dos (autocompletar, §5.2).
+  const [categories, cards, suggestions] = await Promise.all([
+    listCategories(user.id, kind, true),
+    kind === "expense" ? listCardOptions(user.id, today) : Promise.resolve([]),
+    listDescriptionSuggestions(user.id, kind),
+  ])
 
   return (
     <Suspense
@@ -87,6 +105,8 @@ async function BotonNuevo({ kind }: { kind: Kind }) {
         <MovementFormDialog
           kind={kind}
           categories={categories}
+          cards={cards}
+          suggestions={suggestions}
           suggestedRate={null}
           today={today}
         />
@@ -95,6 +115,8 @@ async function BotonNuevo({ kind }: { kind: Kind }) {
       <MovementFormDialogWithRate
         kind={kind}
         categories={categories}
+        cards={cards}
+        suggestions={suggestions}
         today={today}
         ratePreference={settings.preferredRate as RatePreference}
       />
@@ -163,8 +185,12 @@ async function ListaConPaginacion({ kind, query }: { kind: Kind; query: Movement
    * de la página y nada más. Era el caso que traía todo el historial para
    * pintar veinte renglones.
    */
-  const [categories, pagina] = await Promise.all([
+  const [categories, cards, pagina] = await Promise.all([
     listCategories(user.id, kind, true),
+    // Para nombrar la tarjeta de cada compra y para el formulario de
+    // edición. `listCardOptions` está memoizada: es la misma consulta que la
+    // del botón "Nuevo".
+    kind === "expense" ? listCardOptions(user.id, today) : Promise.resolve([]),
     query.status === "all"
       ? listMovementsPage(user.id, filters, query.page)
       : listMovements(user.id, filters).then((movements) =>
@@ -182,6 +208,7 @@ async function ListaConPaginacion({ kind, query }: { kind: Kind; query: Movement
       <MovementList
         movements={items}
         categories={categories}
+        cards={cards}
         today={today}
         emptyMessage={
           hayFiltrosActivos(query)

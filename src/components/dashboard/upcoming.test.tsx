@@ -44,4 +44,32 @@ describe("Upcoming", () => {
     expect(receivablesCard?.textContent).toContain("Honorarios")
     expect(receivablesCard?.textContent).not.toContain("Pago de luz")
   })
+
+  it("un resumen de tarjeta es un renglón que lleva a /tarjetas, sin botón de pago", () => {
+    render(
+      <Upcoming
+        payments={[
+          {
+            type: "statement",
+            id: "res-1",
+            cardId: "visa",
+            cardName: "Visa",
+            period: "2026-11",
+            dueDate: "2026-12-05",
+            arsCents: 480_000_00,
+            usdCents: 0,
+            kind: "expense",
+            status: "pending",
+          },
+        ]}
+        receivables={[]}
+        today="2026-11-26"
+      />,
+    )
+
+    expect(screen.getByText(/Visa · resumen nov 2026/)).toBeTruthy()
+    const link = screen.getByRole("link", { name: /Ver resumen/ })
+    expect(link.getAttribute("href")).toBe("/tarjetas/visa?periodo=2026-11")
+    expect(screen.queryByRole("button", { name: /pag/i })).toBeNull()
+  })
 })

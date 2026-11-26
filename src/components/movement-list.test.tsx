@@ -53,6 +53,7 @@ const MOVIMIENTO: MovementWithInstallments = {
   amountCents: 200000,
   rate: "1",
   direction: null,
+  creditCardId: null,
   ...SELLOS,
   installments: [
     {
@@ -64,6 +65,8 @@ const MOVIMIENTO: MovementWithInstallments = {
       amountCents: 100000,
       paid: false,
       paidDate: null,
+      statementId: null,
+      statementPeriod: null,
       ...SELLOS,
     },
     {
@@ -75,6 +78,8 @@ const MOVIMIENTO: MovementWithInstallments = {
       amountCents: 100000,
       paid: true,
       paidDate: "2026-09-11",
+      statementId: null,
+      statementPeriod: null,
     },
   ],
 }
@@ -190,7 +195,7 @@ describe("MovementList", () => {
 
     expect(screen.getByRole("dialog").textContent).toContain("Editar ingreso")
     expect(screen.getByLabelText<HTMLInputElement>("Descripción").value).toBe("Proyecto")
-    expect(screen.getByLabelText<HTMLInputElement>("Importe").value).toBe("2000,00")
+    expect(screen.getByLabelText<HTMLInputElement>("Importe").value).toBe("2.000")
     // Abrir el menú no desplegó la fila.
     expect(tabla.getByText("Proyecto").closest("tr")?.getAttribute("aria-expanded")).toBe("false")
   })

@@ -3,6 +3,7 @@ import {
   roundCents,
   convertToArs,
   formatAxisPesos,
+  formatAmountInput,
   formatMoney,
   parseAmountToCents,
   parseDecimalInput,
@@ -206,5 +207,40 @@ describe("parseDecimalInput", () => {
     expect(parseDecimalInput("Infinity")).toBeNull()
     expect(parseDecimalInput("")).toBeNull()
     expect(parseDecimalInput("   ")).toBeNull()
+  })
+})
+
+describe("formatAmountInput", () => {
+  it("separa los miles mientras se tipea", () => {
+    expect(formatAmountInput("1500000", "150000")).toBe("1.500.000")
+    expect(formatAmountInput("1.5000", "1.500")).toBe("15.000")
+  })
+
+  it("respeta la coma decimal con dos decimales como mucho", () => {
+    expect(formatAmountInput("1.500,", "1.500")).toBe("1.500,")
+    expect(formatAmountInput("1.500,505", "1.500,50")).toBe("1.500,50")
+  })
+
+  it("un punto tipeado al final es la tecla decimal", () => {
+    expect(formatAmountInput("12.", "12")).toBe("12,")
+  })
+
+  it("borrar un dígito vuelve a agrupar, sin leer el punto como decimal", () => {
+    expect(formatAmountInput("12.34", "12.345")).toBe("1.234")
+  })
+
+  it("un texto pegado se lee en cualquier formato", () => {
+    expect(formatAmountInput("1,234.56")).toBe("1.234,56")
+    expect(formatAmountInput("1234.5")).toBe("1.234,50")
+    expect(formatAmountInput("1.500")).toBe("1.500")
+  })
+
+  it("lo que sale lo vuelve a leer parseAmountToCents", () => {
+    expect(parseAmountToCents(formatAmountInput("1234567,8", "1234567,"))).toBe(1_234_567_80)
+  })
+
+  it("descarta lo que no es número", () => {
+    expect(formatAmountInput("$ 12a", "$ 1")).toBe("12")
+    expect(formatAmountInput("", "1")).toBe("")
   })
 })

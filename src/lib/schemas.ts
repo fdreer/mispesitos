@@ -179,3 +179,44 @@ export const exchangeSchema = z.object({
   usdCents: amountCents.refine((c) => c > 0, "Poné una cantidad mayor a cero."),
   rate: positiveRate,
 })
+
+/** Un día del mes, tal como lo tipea la persona: "25". */
+const dayOfMonth = z.coerce
+  .number("Elegí un día entre 1 y 31.")
+  .int("Elegí un día entre 1 y 31.")
+  .min(1, "Elegí un día entre 1 y 31.")
+  .max(31, "Elegí un día entre 1 y 31.")
+
+/** Un campo opcional de formulario: vacío o ausente es "sin valor". */
+const optionalField = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((v) => (v === "" || v === null ? undefined : v), schema.optional())
+
+/**
+ * Alta y edición de una tarjeta (§1.2 del plan v2). El color es una clave de
+ * la misma paleta que las categorías; lo valida la acción, que es la que
+ * importa la lista.
+ */
+export const cardSchema = z.object({
+  name: z.string().trim().min(1, "Poné un nombre.").max(60, "Usá hasta 60 caracteres."),
+  closingDay: dayOfMonth,
+  dueDay: dayOfMonth,
+  creditLimitCents: optionalField(
+    amountCents.refine((c) => c > 0, "El límite tiene que ser mayor a cero."),
+  ),
+})
+
+/**
+ * Las fechas de un resumen, corregidas a mano cuando llega el resumen real.
+ * El vencimiento no puede ser antes del cierre: lo exige también la CHECK
+ * `card_statement_due_after_closing` (migración 0012); acá es para que el
+ * error salga junto al campo.
+ */
+export const statementDatesSchema = z
+  .object({
+    closingDate: isoDate,
+    dueDate: isoDate,
+  })
+  .refine((d) => d.dueDate >= d.closingDate, {
+    message: "El vencimiento no puede ser antes del cierre.",
+    path: ["dueDate"],
+  })

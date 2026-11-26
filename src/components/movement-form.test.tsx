@@ -71,15 +71,15 @@ describe("MovementForm", () => {
   })
 
   it.each([
-    { kind: "income" as const, label: "Cobrado" },
-    { kind: "expense" as const, label: "Pagado" },
+    { kind: "income" as const, label: "Ya lo cobré" },
+    { kind: "expense" as const, label: "Ya lo pagué" },
   ])("permite marcar un $kind inmediato y oculta las cuotas", ({ kind, label }) => {
     const { container } = render(
       <MovementForm kind={kind} categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
-    const estado = screen.getByRole("checkbox", { name: label })
+    const estado = screen.getByRole("radio", { name: label })
 
     fireEvent.click(estado)
 
@@ -108,8 +108,9 @@ describe("MovementForm", () => {
 
     const visible1 = screen.getByLabelText<HTMLInputElement>("Importe de la cuota 1")
     const visible2 = screen.getByLabelText<HTMLInputElement>("Importe de la cuota 2")
-    expect(visible1.value).toBe("500,00")
-    expect(visible2.value).toBe("500,00")
+    // Con el separador de miles de §5.2 y sin ",00" de relleno.
+    expect(visible1.value).toBe("500")
+    expect(visible2.value).toBe("500")
 
     const enviados = [
       ...container.querySelectorAll<HTMLInputElement>('input[type="hidden"][name="installmentAmount"]'),
@@ -170,6 +171,7 @@ const MOVIMIENTO = {
   amountCents: 120_000,
   rate: "1.0000",
   direction: null,
+  creditCardId: null,
   createdAt: new Date("2026-05-03T12:00:00Z"),
   updatedAt: new Date("2026-05-03T12:00:00Z"),
   installments: [
@@ -182,6 +184,8 @@ const MOVIMIENTO = {
       dueDate: "2026-05-03",
       paid: true,
       paidDate: "2026-05-04",
+      statementId: null,
+      statementPeriod: null,
     },
     {
       id: "i2",
@@ -192,6 +196,8 @@ const MOVIMIENTO = {
       dueDate: "2026-06-15",
       paid: false,
       paidDate: null,
+      statementId: null,
+      statementPeriod: null,
     },
     {
       id: "i3",
@@ -202,6 +208,8 @@ const MOVIMIENTO = {
       dueDate: "2026-07-20",
       paid: false,
       paidDate: null,
+      statementId: null,
+      statementPeriod: null,
     },
   ],
 }
@@ -223,7 +231,7 @@ describe("MovementForm editando", () => {
     editar()
 
     expect(screen.getByLabelText<HTMLInputElement>("Descripción").value).toBe("Heladera")
-    expect(screen.getByLabelText<HTMLInputElement>("Importe").value).toBe("1200,00")
+    expect(screen.getByLabelText<HTMLInputElement>("Importe").value).toBe("1.200")
     expect(screen.getByLabelText<HTMLInputElement>("Cuotas").value).toBe("3")
     expect(screen.getByRole("button", { name: /^Fecha:/ }).textContent).toContain("03/05/2026")
   })
@@ -319,5 +327,232 @@ describe("MovementForm editando", () => {
         screen.getByRole("button", { name: /Alquiler/ }).getAttribute("data-invalid"),
       ).toBe("true")
     })
+  })
+})
+
+/**
+ * El rediseño de §5.2 del plan v2 y el medio de pago de §1.4 (Fase 3).
+ */
+const VISA = {
+  id: "22222222-2222-4222-8222-222222222222",
+  name: "Visa",
+  closingDay: 25,
+  dueDay: 5,
+  color: null,
+  archived: false,
+  statements: [],
+}
+
+function alta(props: Partial<React.ComponentProps<typeof MovementForm>> = {}) {
+  return render(
+    <MovementForm
+      kind="expense"
+      categories={CATEGORIAS}
+      suggestedRate={null}
+      today="2026-08-10"
+      {...props}
+    />,
+  )
+}
+
+const valores = (container: HTMLElement, name: string) =>
+  [...container.querySelectorAll<HTMLInputElement>(`input[type="hidden"][name="${name}"]`)].map(
+    (i) => i.value,
+  )
+
+describe("MovementForm, el formulario de carga", () => {
+  it("separa los miles del importe mientras se escribe", () => {
+    alta()
+    const importe = screen.getByLabelText<HTMLInputElement>("Importe")
+    fireEvent.change(importe, { target: { value: "1500000" } })
+    expect(importe.value).toBe("1.500.000")
+  })
+
+  it("la moneda es un segmentado y cambia el prefijo", () => {
+    alta()
+    expect(screen.getByRole("radiogroup", { name: "Moneda" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("radio", { name: "USD" }))
+    expect(screen.getByText("US$")).toBeTruthy()
+    expect(screen.getByLabelText("Tipo de cambio")).toBeTruthy()
+  })
+
+  it("los atajos y el stepper cambian la cantidad de cuotas", () => {
+    alta()
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1200" } })
+
+    fireEvent.click(screen.getByRole("button", { name: "12 cuotas" }))
+    expect(screen.getByLabelText<HTMLInputElement>("Cuotas").value).toBe("12")
+
+    fireEvent.click(screen.getByRole("button", { name: "Una cuota más" }))
+    expect(screen.getByLabelText<HTMLInputElement>("Cuotas").value).toBe("13")
+
+    fireEvent.click(screen.getByRole("button", { name: "Una cuota menos" }))
+    fireEvent.click(screen.getByRole("button", { name: "Una cuota menos" }))
+    expect(screen.getByLabelText<HTMLInputElement>("Cuotas").value).toBe("11")
+  })
+
+  it("el plan arranca colapsado, con un resumen, y se despliega con Editar cuotas", () => {
+    alta()
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1200" } })
+    fireEvent.click(screen.getByRole("button", { name: "12 cuotas" }))
+
+    expect(screen.getByText(/^12 cuotas de .*100,00 desde 10\/08$/)).toBeTruthy()
+    const editar = screen.getByRole("button", { name: "Editar cuotas" })
+    expect(editar.getAttribute("aria-expanded")).toBe("false")
+    fireEvent.click(editar)
+    expect(
+      screen.getByRole("button", { name: "Ocultar cuotas" }).getAttribute("aria-expanded"),
+    ).toBe("true")
+  })
+
+  it("sin tarjetas no pregunta el medio de pago", () => {
+    alta()
+    expect(screen.queryByRole("radiogroup", { name: "Medio de pago" })).toBeNull()
+  })
+
+  it("con tarjeta, oculta Ya lo pagué y los vencimientos salen de los resúmenes", () => {
+    const { container } = alta({ cards: [VISA] })
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "300" } })
+    fireEvent.click(screen.getByRole("radio", { name: "Visa" }))
+    fireEvent.click(screen.getByRole("button", { name: "3 cuotas" }))
+
+    expect(screen.queryByRole("radio", { name: "Ya lo pagué" })).toBeNull()
+    expect(valores(container, "creditCardId")).toEqual([VISA.id])
+    // Compra del 10/08 con cierre el 25: resúmenes de agosto, septiembre y
+    // octubre, que vencen el 5 del mes siguiente.
+    expect(valores(container, "installmentDueDate")).toEqual([
+      "2026-09-05",
+      "2026-10-05",
+      "2026-11-05",
+    ])
+    expect(screen.getByText(/primer resumen ago 2026/)).toBeTruthy()
+  })
+
+  it("editando con la misma tarjeta y fecha, la compra se queda en su resumen", () => {
+    // El resumen de agosto se corrigió a un cierre del 05/08, antes de la
+    // compra del 10/08 que ya estaba adentro: recalcular la mandaría a
+    // septiembre. Corregir fechas no mueve compras.
+    const corregida = {
+      ...VISA,
+      statements: [
+        { id: "s1", period: "2026-08", closingDate: "2026-08-05", dueDate: "2026-08-15", paid: false },
+      ],
+    }
+    const conTarjeta = {
+      ...MOVIMIENTO,
+      date: "2026-08-10",
+      amountCents: 300_00,
+      creditCardId: VISA.id,
+      installments: [
+        {
+          ...MOVIMIENTO.installments[1],
+          number: 1,
+          amountCents: 300_00,
+          dueDate: "2026-08-15",
+          statementId: "s1",
+          statementPeriod: "2026-08",
+        },
+      ],
+    }
+    const { container } = alta({ cards: [corregida], movement: conTarjeta })
+    expect(valores(container, "installmentDueDate")).toEqual(["2026-08-15"])
+    expect(screen.getByText(/^Visa · resumen ago 2026/)).toBeTruthy()
+  })
+
+  it("con tarjeta, usa las fechas corregidas de un resumen que ya existe", () => {
+    const corregida = {
+      ...VISA,
+      statements: [
+        { id: "s1", period: "2026-08", closingDate: "2026-08-27", dueDate: "2026-09-08", paid: false },
+      ],
+    }
+    const { container } = alta({ cards: [corregida] })
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "300" } })
+    fireEvent.click(screen.getByRole("radio", { name: "Visa" }))
+    expect(valores(container, "installmentDueDate")).toEqual(["2026-09-08"])
+  })
+
+  it("avisa si la compra cae en un resumen ya pagado", () => {
+    const pagada = {
+      ...VISA,
+      statements: [
+        { id: "s1", period: "2026-08", closingDate: "2026-08-25", dueDate: "2026-09-05", paid: true },
+      ],
+    }
+    alta({ cards: [pagada] })
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "300" } })
+    fireEvent.click(screen.getByRole("radio", { name: "Visa" }))
+    expect(
+      screen.getByText(/La cuota 1 cae en el resumen de ago 2026, que ya está pagado/),
+    ).toBeTruthy()
+  })
+
+  it("una tarjeta archivada no se ofrece al dar de alta", () => {
+    alta({
+      cards: [VISA, { ...VISA, id: "33333333-3333-4333-8333-333333333333", name: "Vieja", archived: true }],
+    })
+    expect(screen.getByRole("radio", { name: "Visa" })).toBeTruthy()
+    expect(screen.queryByRole("radio", { name: "Vieja" })).toBeNull()
+  })
+
+  it("autocompleta la descripción y sugiere la categoría de la última vez", () => {
+    const categorias = [
+      ...CATEGORIAS,
+      { id: "cat-2", userId: "u", name: "Delivery", kind: "expense", archived: false, parentId: null, color: null, icon: null },
+    ]
+    const { container } = alta({
+      categories: categorias,
+      suggestions: [{ description: "Pedidos Ya", categoryId: "cat-2" }],
+    })
+    expect(container.querySelector('datalist option[value="Pedidos Ya"]')).toBeTruthy()
+
+    fireEvent.change(screen.getByLabelText("Descripción"), { target: { value: "pedidos ya" } })
+    expect(container.querySelector<HTMLInputElement>('input[name="categoryId"]')?.value).toBe(
+      "cat-2",
+    )
+  })
+
+  it("los errores de la acción van junto a cada campo, y arriba un aviso general", async () => {
+    createMovement.mockResolvedValueOnce({
+      ok: false,
+      message: "Poné una descripción.",
+      fieldErrors: { description: ["Poné una descripción."] },
+    })
+    const { container } = alta()
+    await act(async () => {
+      fireEvent.submit(container.querySelector("form")!)
+    })
+    expect(screen.getByText("Poné una descripción.")).toBeTruthy()
+    expect(screen.getByRole("alert").textContent).toBe("Revisá los campos marcados.")
+    expect(screen.getByLabelText("Descripción").getAttribute("aria-invalid")).toBe("true")
+  })
+
+  it("Guardar y cargar otro guarda, limpia el formulario y no lo cierra", async () => {
+    const onSaved = vi.fn()
+    alta({ onSaved })
+    fireEvent.change(screen.getByLabelText("Descripción"), { target: { value: "Café" } })
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1500" } })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Guardar y cargar otro" }))
+    })
+
+    expect(createMovement).toHaveBeenCalled()
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(screen.getByLabelText<HTMLInputElement>("Descripción").value).toBe("")
+    expect(screen.getByLabelText<HTMLInputElement>("Importe").value).toBe("")
+  })
+
+  it("Guardar cierra el diálogo", async () => {
+    const onSaved = vi.fn()
+    alta({ onSaved })
+    fireEvent.change(screen.getByLabelText("Descripción"), { target: { value: "Café" } })
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1500" } })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Guardar" }))
+    })
+
+    expect(onSaved).toHaveBeenCalledTimes(1)
   })
 })

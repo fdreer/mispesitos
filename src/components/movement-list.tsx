@@ -1,7 +1,7 @@
 "use client"
 
 import { Fragment, useState } from "react"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { ChevronDown, ChevronRight, CreditCard } from "lucide-react"
 
 import { CategoryBadge } from "@/components/category-badge"
 import { categoryLabels, type CategoryLabel } from "@/lib/category-tree"
@@ -24,11 +24,17 @@ import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
 import { assertCurrency, assertInstallmentMovementKind } from "@/lib/movement-asserts"
 import { summarizeMovementStatus } from "@/lib/movement-status"
+import type { CardOption } from "@/server/card-queries"
 import type { Category, MovementWithInstallments } from "@/server/queries"
 
 type Props = {
   movements: MovementWithInstallments[]
   categories: Category[]
+  /**
+   * Las tarjetas, para nombrar el medio de pago de cada compra y para el
+   * formulario de edición. Vacío en ingresos.
+   */
+  cards?: CardOption[]
   today: IsoDate
   /**
    * Sin esto, filtrar hasta cero resultados decía "todavía no cargaste nada":
@@ -72,9 +78,20 @@ function MovementStatusBadge({
   return <StatusBadge status="paid">Pagado</StatusBadge>
 }
 
+/** "Visa Galicia", con el icono de tarjeta: el medio de pago de una compra. */
+function CardName({ name }: { name: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+      <CreditCard className="size-3.5" aria-hidden />
+      {name}
+    </span>
+  )
+}
+
 function MovementCards({
   movements,
   categories,
+  cards,
   categoryLabel,
   today,
   expanded,
@@ -82,6 +99,7 @@ function MovementCards({
 }: {
   movements: MovementWithInstallments[]
   categories: Category[]
+  cards: CardOption[]
   categoryLabel: Map<string, CategoryLabel>
   today: IsoDate
   expanded: Set<string>
@@ -97,6 +115,7 @@ function MovementCards({
         const categoria = m.categoryId ? categoryLabel.get(m.categoryId) : undefined
         const detailsId = `cuotas-${m.id}`
         const nextText = nextInstallmentText(m, today)
+        const cardName = m.creditCardId ? cards.find((c) => c.id === m.creditCardId)?.name : undefined
 
         return (
           <article key={m.id} aria-label={m.description} className="rounded-lg border border-border bg-background p-3">
@@ -114,6 +133,7 @@ function MovementCards({
                   {formatIsoForDisplay(m.date)}
                   {m.installments.length > 1 && <span>· {m.installments.length} cuotas</span>}
                 </span>
+                {cardName && <CardName name={cardName} />}
               </span>
               <span className="shrink-0 text-right tabular-nums font-medium text-foreground">
                 {formatMoney(m.amountCents, currency)}
@@ -135,6 +155,7 @@ function MovementCards({
                   movement={m}
                   kind={kind}
                   categories={categories}
+                  cards={cards}
                   today={today}
                 />
               </span>
@@ -148,6 +169,7 @@ function MovementCards({
                   today={today}
                   description={m.description}
                   kind={kind}
+                  cardId={m.creditCardId}
                 />
               </div>
             )}
@@ -158,7 +180,7 @@ function MovementCards({
   )
 }
 
-export function MovementList({ movements, categories, today, emptyMessage }: Props) {
+export function MovementList({ movements, categories, cards = [], today, emptyMessage }: Props) {
   // Nombre, padre y color de cada categoría, con la herencia ya resuelta.
   const categoryLabel = categoryLabels(categories)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -191,6 +213,9 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
               const isOpen = expanded.has(m.id)
               const categoria = m.categoryId ? categoryLabel.get(m.categoryId) : undefined
               const nextText = nextInstallmentText(m, today)
+              const cardName = m.creditCardId
+                ? cards.find((c) => c.id === m.creditCardId)?.name
+                : undefined
 
               return (
                 <Fragment key={m.id}>
@@ -234,6 +259,11 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
                       {nextText && (
                         <span className="block text-xs text-muted-foreground">{nextText}</span>
                       )}
+                      {cardName && (
+                        <span className="block">
+                          <CardName name={cardName} />
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       {/* `categoryLabel.get` puede no encontrar nada aunque el
@@ -263,6 +293,7 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
                           movement={m}
                           kind={kind}
                           categories={categories}
+                          cards={cards}
                           today={today}
                         />
                       </div>
@@ -275,6 +306,7 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
                       today={today}
                       description={m.description}
                       kind={kind}
+                      cardId={m.creditCardId}
                     />
                   )}
                 </Fragment>
@@ -286,6 +318,7 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
       <MovementCards
         movements={movements}
         categories={categories}
+        cards={cards}
         categoryLabel={categoryLabel}
         today={today}
         expanded={expanded}

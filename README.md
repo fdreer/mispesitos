@@ -47,7 +47,9 @@ falta para señalar estado.
 | `/invitacion/<token>` | El link que comparte el admin: guarda la invitación y manda a `/registro` |
 | `/onboarding` | Saldo inicial en pesos y en dólares, el TC al que se compraron esos dólares, la fecha desde la que se cuenta, y qué dólar usar de referencia. Precarga las categorías por default, ya agrupadas (Hogar › Alquiler, Comida › Supermercado…) y con color e icono |
 | `/dashboard` | Saldos por moneda, total consolidado, vencimientos del próximo mes, proyección a 6 meses, gastos del mes por categoría padre (con el desglose por subcategoría a un clic) y lo cobrado y pagado en los últimos 12 meses. Todo lo que habla de "el mes" cuenta lo percibido: cuotas pagadas, por su fecha de pago |
-| `/ingresos`, `/egresos` | Alta con plan de cuotas editable y un selector de categoría con búsqueda, agrupado por padre, que recuerda la última usada; lista con filtros (filtrar por un padre trae lo de sus subcategorías). Cada fila muestra la próxima cuota ("Cuota 3/12 · vence 15/12") y la paga en un toque, con "Deshacer"; cada cuota se puede marcar con otra fecha de pago (nunca futura). Editar y Borrar en el menú ⋯ de la fila |
+| `/ingresos`, `/egresos` | Alta con el importe primero (con separador de miles), moneda y medio de pago segmentados, descripción con autocompletado que sugiere la categoría de la última vez, un selector de categoría con búsqueda, agrupado por padre, y cuotas con stepper y atajos (1·3·6·12); el plan queda colapsado en una línea y se edita a pedido. "Guardar y cargar otro" deja el formulario abierto. Una compra con tarjeta reparte sus cuotas en los resúmenes y vence con ellos; lista con filtros (filtrar por un padre trae lo de sus subcategorías). Cada fila muestra la próxima cuota ("Cuota 3/12 · vence 15/12") y la paga en un toque, con "Deshacer"; cada cuota se puede marcar con otra fecha de pago (nunca futura). Editar y Borrar en el menú ⋯ de la fila |
+| `/tarjetas` | Las tarjetas de crédito, cada una con su resumen actual, el próximo y el disponible (si tiene límite). Alta, edición y archivo |
+| `/tarjetas/<id>` | Los resúmenes de una tarjeta, período por período: cierre, vencimiento, total en pesos y en dólares y sus cuotas. Pagar el resumen (los dólares, con dólares o con pesos a un TC), desmarcarlo y corregir sus fechas con las que mandó el banco |
 | `/cambios` | Compra y venta de dólares, tenencia, TC promedio ponderado y diferencia de cambio realizada |
 | `/categorias` | Árbol de dos niveles: cada categoría con sus subcategorías, plegables, con color (de una paleta fija) e icono. Desde el menú ⋯ de cada fila: agregar subcategoría, editar, "Mover a…" (para agrupar las que ya existían) y archivar. Archivar un padre archiva sus hijas; las archivadas dejan de ofrecerse en la carga pero siguen mostrándose en los movimientos viejos |
 | `/ajustes` | Editar el saldo inicial y la preferencia de dólar |
@@ -256,6 +258,14 @@ corras contra producción, ni dos veces en paralelo.**
   movimientos del padre entre en una sola transacción). La lógica del árbol —armado,
   opciones del selector, colores heredados, la torta por padre— vive en
   `src/lib/category-tree.ts`.
+- **Las tarjetas pagan por resumen** (migración 0012). Cada cuota de una compra con
+  tarjeta cae en un resumen (`card_statement`, uno por tarjeta y mes) y vence cuando
+  vence él; pagar el resumen paga todas sus cuotas con la misma fecha, y una cuota con
+  tarjeta no se paga suelta. La base lo hace cumplir con triggers diferidos, y congela un
+  resumen pagado. Las fechas de cada resumen se proponen con los días de la tarjeta y se
+  corrigen con las reales; corregirlas no muda compras. Los dólares de un resumen pagados
+  con pesos se leen como pesos al TC del pago y no tocan la posición en dólares. La
+  cuenta vive en `src/lib/cards.ts`; el plan de una compra, en `src/server/card-plan.ts`.
 - **El color de una categoría** es una clave de una paleta fija (`CATEGORY_PALETTE` en
   `src/lib/category-color.ts`), no un color libre: así ninguno se confunde con los de
   estado. Sin color elegido, la subcategoría hereda el del padre, y el padre sale del

@@ -912,3 +912,113 @@ de `.env.local`. Se actualizaron igual: `rls.db.test.ts` (5 casos del árbol),
 `actions.db.test.ts` (la precarga jerárquica y 11 casos del árbol) y
 `queries.db.test.ts` (filtro por padre y `countMovementsByCategory`). Hay que
 correrlos contra una base descartable antes de mergear.
+
+## 14. Fase 3 del plan v2: tarjetas (2026-11-26)
+
+La fase "Tarjetas" de `docs/superpowers/specs/2026-11-26-v2-plan.md` (§6): el
+modelo de §1.2, el comportamiento de §1.3 y §1.4, las decisiones de §7.2 y el
+rediseño del formulario de carga de §5.2.
+
+| Qué | Dónde | Sección |
+|---|---|---|
+| Tablas `credit_card` y `card_statement`, `movement.credit_card_id` e `installment.statement_id`, FK compuestas con `user_id`, RLS con FORCE y triggers que cuidan cuota ↔ resumen | `drizzle/0012_tarjetas_de_credito.sql`, `src/db/schema.ts` | §1.2 |
+| Lógica pura: fechas propuestas, resumen de una compra, asignación de cuotas, totales, pago (fecha y TC), lectura de un pago en pesos, disponible, resumen actual y próximo | `src/lib/cards.ts` | §1.3, §7.2 |
+| El plan de una compra con tarjeta en el servidor (crea los resúmenes que falten, rechaza caer en uno pagado) | `src/server/card-plan.ts` | §1.3 |
+| Acciones: alta, edición y archivo de tarjetas; corregir fechas, pagar y desmarcar un resumen | `src/server/actions/cards.ts` | §1.3 |
+| Compra con tarjeta en alta y edición; una cuota con tarjeta no se paga suelta | `src/server/actions/movements.ts` | §1.4 |
+| Lecturas: tarjetas, resúmenes con totales, cuotas de un resumen, opciones del formulario, sugerencias de descripción; el pago en pesos de dólares en lo percibido y en la posición | `src/server/card-queries.ts`, `src/server/queries.ts` | §1.3 |
+| `/tarjetas` (una tarjeta por tile: resumen actual, próximo, disponible) y `/tarjetas/<id>` (resúmenes por período, pagar, desmarcar, corregir fechas) | `src/app/(app)/tarjetas/`, `src/components/cards/` | §1.4 |
+| Vencimientos del dashboard: un renglón por resumen | `dashboard-view.ts`, `dashboard/upcoming.tsx` | §1.4 |
+| Formulario de carga: importe primero con miles, moneda y medio de pago segmentados, autocompletado de descripción con la categoría de la última vez, stepper y atajos de cuotas, plan colapsado, errores por campo, "Guardar y cargar otro" | `movement-form.tsx`, `segmented.tsx`, `date-field.tsx` | §5.2 |
+
+`tsc --noEmit` y `eslint` limpios (queda el aviso previo de `<img>` en
+`app-sidebar.tsx`). `drizzle-kit generate` dice "No schema changes". La suite
+pasó a 568 tests; falla sólo el que ya fallaba antes (el tope de 120 filas en
+`movement-form.test.tsx`): el rediseño del stepper no lo toca, sigue fallando
+por lo mismo (5000 no es una cantidad válida y el plan cae a 1 fila).
+
+### 14.1 Qué se decidió
+
+- **Una cuota con tarjeta está pagada si y sólo si su resumen lo está**, y
+  vence cuando vence su resumen. Lo cuidan triggers diferidos
+  (`installment_matches_statement`) sobre las tres tablas, y otro `BEFORE`
+  congela un resumen pagado: no cambia de tarjeta ni de período, y sus fechas
+  sólo se corrigen desmarcándolo. Son diferidos porque pagar un resumen toca el
+  resumen y sus cuotas en la misma transacción.
+- **No se paga un resumen antes de su cierre, ni con fecha futura, ni vacío.**
+  Con el cierre en el futuro el botón "Pagar resumen" queda deshabilitado (no
+  hay ninguna fecha válida). Si el banco cerró antes, se corrige el cierre y
+  ahí se habilita.
+- **Una cuota con tarjeta no se marca pagada suelta** (ni desde la lista ni
+  desde el dashboard): en su lugar aparece "Resumen nov 2026", que lleva al
+  resumen.
+- **Una compra no puede caer en un resumen pagado, y una edición no puede
+  cambiar lo que tiene uno pagado** (agregar, sacar o cambiar el importe de
+  sus cuotas). Hay que desmarcarlo primero. El formulario avisa antes de
+  guardar en el alta; el servidor rechaza siempre.
+- **Corregir las fechas de un resumen no muda compras**: mueve el vencimiento
+  de sus cuotas, pero las compras que ya tenía se quedan. Editar después una
+  de esas compras sin cambiarle tarjeta ni fecha la deja en su resumen (el
+  "ancla" de `assignStatements`); sin eso, editar la descripción recalculaba el
+  resumen con el cierre nuevo y podía sacarla de uno ya pagado.
+- **El resumen de una compra es el primero, desde el mes anterior, cuyo
+  cierre es el día de la compra o después.** Mirar el anterior cubre un cierre
+  corrido al mes siguiente; no dar por bueno "el siguiente" cubre un cierre
+  corregido hacia atrás.
+- **Los resúmenes se crean a demanda**: al cargar una compra que cae en uno
+  que no existe, o al corregir las fechas de uno que todavía no tiene compras.
+  La pantalla de la tarjeta muestra los existentes más el actual.
+- **Dólares pagados con pesos**: el resumen guarda `usd_paid_rate`. Las cuotas
+  en dólares de ese resumen se leen como pesos a ese TC en lo percibido
+  (`perceivedPayment`) y no entran en la posición en dólares: salieron de los
+  pesos. Las cuotas siguen guardadas en dólares, así que desmarcar el resumen
+  vuelve todo atrás.
+- **El disponible** es el límite menos lo impago, con los dólares al TC de
+  cada compra: es una referencia, no lo que diría el banco.
+- **En el dashboard un resumen cuenta como un concepto** en "Impagos este mes"
+  y "A pagar el mes próximo", y es un renglón en vencimientos con "Ver
+  resumen".
+- **Una tarjeta archivada** deja de ofrecerse en el alta, pero sus resúmenes se
+  siguen pagando y una compra vieja la conserva al editarse. El nombre es único
+  entre las activas.
+- **El color de una tarjeta** reutiliza la paleta de categorías; sin color
+  elegido, sale del hash del nombre.
+- **"Medio de pago" sólo aparece en egresos y si hay alguna tarjeta**; con
+  tarjeta desaparecen "Ya lo pagué / Lo voy a pagar" y la fecha pasa a decir
+  "Fecha de la compra".
+- **El autocompletado de la descripción es un `<datalist>`** nativo con las
+  descripciones usadas (hasta 300); al elegir una exacta, en el alta, sugiere
+  la categoría de la última vez si sigue activa y es hoja.
+- **`DateField` y `Segmented` salieron a componentes propios**: los usan el
+  formulario de carga y los diálogos de tarjetas.
+
+### 14.2 Lo que se verificó y lo que no
+
+Verificado en el navegador, escritorio y móvil (375px), contra la instalación
+Docker local (no contra la base de `.env.local`): alta de una tarjeta con
+límite y color; compra en pesos en 3 cuotas con tarjeta (plan con resumen y
+vencimiento por cuota, link de cada cuota a su resumen); intentar pagar un
+resumen abierto (rechazado junto al campo; después de eso el botón quedó
+deshabilitado); corregir cierre y vencimiento; pagar y desmarcar; el renglón
+del resumen en el dashboard (un concepto); una compra en dólares con tarjeta
+pagada con pesos (el saldo en pesos bajó a TC del pago y el de dólares no se
+movió); el tile de `/tarjetas` con el disponible; editar una compra después de
+corregir el cierre de su resumen (se queda en su resumen).
+
+En la verificación aparecieron y se arreglaron: `cardColor()` exportado desde
+un módulo cliente y llamado desde las páginas de servidor (rompía el render),
+el plural de "las 1 cuotas", el texto del vencimiento por cuota partido en
+cuatro renglones en móvil, y los dos casos de asignación de arriba.
+
+La migración se probó con `psql` dentro del contenedor de la base, en un
+`BEGIN … ROLLBACK`: rechaza cuota sin resumen, en resumen de otra tarjeta, con
+otro vencimiento, pagada suelta, y cambiar las fechas de un resumen pagado;
+acepta pagar resumen y cuotas juntos, desmarcar y corregir, y el borrado en
+cascada desde `user`.
+
+**`pnpm test:db` no se corrió**, por el mismo motivo que §11.3: apunta a la base
+de `.env.local`. Se actualizaron igual: `rls.db.test.ts` (las dos tablas nuevas
+en los tests parametrizados y en el de FORCE, y 10 casos de FK y triggers),
+`actions.db.test.ts` (9 casos de tarjetas y resúmenes) y `queries.db.test.ts`
+(los campos nuevos de pendientes y el pago en pesos de una cuota en dólares).
+Hay que correrlos contra una base descartable antes de mergear.

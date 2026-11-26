@@ -2,7 +2,15 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { and, eq, inArray } from "drizzle-orm"
 
 import { db, sqlClient, withUser } from "@/db/client"
-import { category, installment, movement, user, userSettings } from "@/db/schema"
+import {
+  cardStatement,
+  category,
+  creditCard,
+  installment,
+  movement,
+  user,
+  userSettings,
+} from "@/db/schema"
 import { computeBalances } from "@/lib/balance"
 import {
   assertCurrency,
@@ -862,6 +870,11 @@ describe("listPendingInstallments", () => {
       currency: "USD",
       rate: "1300.0000",
       kind: "expense",
+      // Sin tarjeta (Fase 3): no está en ningún resumen.
+      statementId: null,
+      statementPeriod: null,
+      cardId: null,
+      cardName: null,
     })
   })
 
@@ -1278,5 +1291,150 @@ describe("countMovementsByCategory", () => {
     expect(conteo.get(CAT.alquiler)).toBe(1)
     // Los cambios de divisa no tienen categoría: no hay clave nula.
     expect([...conteo.keys()].every((id) => id !== null && id.startsWith("q-cat-a-"))).toBe(true)
+  })
+})
+
+/**
+ * Las lecturas que cambió la Fase 3 del plan v2 (tarjetas, migración 0012).
+ *
+ * Un usuario aparte, sembrado y borrado acá adentro, para no mover los
+ * conteos exactos de A de los demás casos. Tiene UNA compra en dólares con
+ * tarjeta en dos cuotas: el resumen de enero pagado CON PESOS a $1.500 y el
+ * de febrero impago. Es el caso que obliga a las tres consultas a mirar el
+ * resumen: la cuota pagada tiene que leerse como pesos al TC del pago (y no
+ * como dólares al TC de la compra), no tiene que mover la posición en
+ * dólares, y la impaga tiene que traer su resumen y su tarjeta para que el
+ * dashboard la agrupe.
+ *
+ * Todo se siembra en UNA transacción: los triggers de la 0012 son diferidos y
+ * piden que la cuota pagada de una compra con tarjeta esté en un resumen
+ * pagado el mismo día.
+ */
+describe("tarjetas", () => {
+  const USUARIO = "queries-test-tarjeta"
+  const CAT_T = "q-cat-t-compras"
+  const CARD = "q-card-t"
+  const RES_ENE = "q-res-t-ene"
+  const RES_FEB = "q-res-t-feb"
+  const MOV_T = "q-mov-t"
+
+  async function limpiarTarjeta() {
+    await withUser(USUARIO, async (tx) => {
+      await tx.delete(installment)
+      await tx.delete(movement)
+      await tx.delete(cardStatement)
+      await tx.delete(creditCard)
+      await tx.delete(category)
+      await tx.delete(userSettings)
+    })
+    await db.delete(user).where(eq(user.id, USUARIO))
+  }
+
+  beforeAll(async () => {
+    await limpiarTarjeta()
+    await db.insert(user).values({
+      id: USUARIO,
+      name: USUARIO,
+      email: `${USUARIO}@test.local`,
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    await withUser(USUARIO, async (tx) => {
+      await tx.insert(userSettings).values({ userId: USUARIO, initialBalanceDate: "2026-01-01" })
+      await tx.insert(category).values({ id: CAT_T, userId: USUARIO, name: "Compras", kind: "expense" })
+      await tx
+        .insert(creditCard)
+        .values({ id: CARD, userId: USUARIO, name: "Visa", closingDay: 25, dueDay: 5 })
+      await tx.insert(cardStatement).values([
+        {
+          id: RES_ENE,
+          userId: USUARIO,
+          cardId: CARD,
+          period: "2026-01",
+          closingDate: "2026-01-25",
+          dueDate: "2026-02-05",
+          paidDate: "2026-02-03",
+          usdPaidRate: "1500",
+        },
+        {
+          id: RES_FEB,
+          userId: USUARIO,
+          cardId: CARD,
+          period: "2026-02",
+          closingDate: "2026-02-25",
+          dueDate: "2026-03-05",
+        },
+      ])
+      await tx.insert(movement).values({
+        id: MOV_T,
+        userId: USUARIO,
+        kind: "expense",
+        description: "Netflix anual",
+        categoryId: CAT_T,
+        date: "2026-01-10",
+        currency: "USD",
+        amountCents: 20_00,
+        rate: "1000",
+        creditCardId: CARD,
+      })
+      await tx.insert(installment).values([
+        {
+          id: "q-ins-t-1",
+          userId: USUARIO,
+          movementId: MOV_T,
+          number: 1,
+          amountCents: 10_00,
+          dueDate: "2026-02-05",
+          statementId: RES_ENE,
+          paid: true,
+          paidDate: "2026-02-03",
+        },
+        {
+          id: "q-ins-t-2",
+          userId: USUARIO,
+          movementId: MOV_T,
+          number: 2,
+          amountCents: 10_00,
+          dueDate: "2026-03-05",
+          statementId: RES_FEB,
+        },
+      ])
+    })
+  })
+
+  afterAll(limpiarTarjeta)
+
+  it("una cuota en dólares pagada con pesos se lee como pesos al TC del pago", async () => {
+    expect(await listPaidInstallments(USUARIO)).toEqual([
+      {
+        paidDate: "2026-02-03",
+        // US$ 10 a $1.500: $15.000, no US$ 10 a los $1.000 de la compra.
+        amountCents: 15_000_00,
+        categoryId: CAT_T,
+        currency: "ARS",
+        kind: "expense",
+        rate: "1",
+      },
+    ])
+  })
+
+  it("esa cuota no mueve la posición en dólares: salió de los pesos", async () => {
+    const eventos = await listUsdPositionEvents(USUARIO)
+    expect(eventos.filter((e) => e.direction === "out")).toEqual([])
+  })
+
+  it("la cuota impaga trae su resumen y su tarjeta", async () => {
+    const pendientes = await listPendingInstallments(USUARIO)
+    expect(pendientes).toEqual([
+      expect.objectContaining({
+        id: "q-ins-t-2",
+        dueDate: "2026-03-05",
+        statementId: RES_FEB,
+        statementPeriod: "2026-02",
+        cardId: CARD,
+        cardName: "Visa",
+      }),
+    ])
   })
 })

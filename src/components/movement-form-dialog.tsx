@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog"
 import { MovementForm } from "@/components/movement-form"
 import type { IsoDate } from "@/lib/dates"
+import type { CardOption, DescriptionSuggestion } from "@/server/card-queries"
 import type { Category, MovementWithInstallments } from "@/server/queries"
 
 const TITLES: Record<"income" | "expense", string> = {
@@ -36,6 +37,9 @@ type Props = {
    * cambia el título.
    */
   movement?: MovementWithInstallments
+  /** Para el medio de pago y el autocompletado (ver `MovementForm`). */
+  cards?: CardOption[]
+  suggestions?: DescriptionSuggestion[]
   /**
    * Abierto desde afuera, sin disparador propio: es como lo usa el menú ⋯ de
    * cada fila (`MovementRowActions`), donde "Editar" es un ítem del menú y no
@@ -51,6 +55,8 @@ export function MovementFormDialog({
   suggestedRate,
   today,
   movement,
+  cards,
+  suggestions,
   open: controlledOpen,
   onOpenChange,
 }: Props) {
@@ -82,6 +88,8 @@ export function MovementFormDialog({
           suggestedRate={suggestedRate}
           today={today}
           movement={movement}
+          cards={cards}
+          suggestions={suggestions}
           onSaved={() => setOpen(false)}
         />
       </DialogContent>

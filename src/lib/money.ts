@@ -152,3 +152,54 @@ export function parseAmountToCents(input: string): number | null {
 
   return cents
 }
+
+/** "1234567" -> "1.234.567". Sólo dígitos. */
+function groupThousands(digits: string): string {
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+}
+
+/**
+ * Lo que se ve en el campo de importe mientras se escribe (§5.2 del plan v2):
+ * los miles separados con punto y la coma decimal, con dos decimales como
+ * mucho. "1500000" se ve "1.500.000" a medida que se tipea.
+ *
+ * Los puntos que hay en el texto son los que puso esta misma función, así que
+ * al tipear se descartan y se vuelven a poner. Dos excepciones:
+ *
+ * - Un punto recién tipeado al final, sin coma en el texto, es la tecla
+ *   decimal de un teclado en inglés (o del teclado numérico): se toma como
+ *   coma. Sin esto, "12." seguido de "5" daba 125.
+ * - Un texto PEGADO (entra más de un carácter de golpe respecto de
+ *   `previous`) no lo formateó nadie: puede ser "1,234.56" copiado de una
+ *   página en inglés. Se lee con `parseDecimalInput`, que entiende todos los
+ *   formatos que acepta la app, y se reescribe. Leído como tipeo, ese punto
+ *   decimal se borraba y el importe quedaba cien veces más grande.
+ *
+ * Lo que sale lo vuelve a leer `parseAmountToCents` sin ambigüedad: miles con
+ * punto y decimales con coma.
+ */
+export function formatAmountInput(raw: string, previous = ""): string {
+  if (raw.length > previous.length + 1) {
+    const value = parseDecimalInput(raw)
+    if (value !== null && value >= 0) {
+      const cents = roundCents(value * 100)
+      const integer = groupThousands(String(Math.floor(cents / 100)))
+      const decimals = cents % 100
+      return decimals === 0 ? integer : `${integer},${String(decimals).padStart(2, "0")}`
+    }
+  }
+
+  let text = raw.replace(/[^\d.,]/g, "")
+  if (!text.includes(",") && text.endsWith(".")) {
+    text = `${text.slice(0, -1)},`
+  }
+
+  const commaAt = text.indexOf(",")
+  const integerDigits = (commaAt === -1 ? text : text.slice(0, commaAt))
+    .replace(/\D/g, "")
+    .replace(/^0+(?=\d)/, "")
+  if (commaAt === -1) return groupThousands(integerDigits)
+
+  const decimals = text.slice(commaAt + 1).replace(/\D/g, "").slice(0, 2)
+  return `${groupThousands(integerDigits) || "0"},${decimals}`
+}

@@ -62,6 +62,15 @@ type PendingRow = {
   currency: string
   rate: string
   kind: string
+  /**
+   * El resumen de tarjeta en el que cae la cuota, si la compra es con
+   * tarjeta (§1.4 del plan v2). Opcionales para que las filas sin tarjeta
+   * —y los tests anteriores a la Fase 3— no tengan que traerlos.
+   */
+  statementId?: string | null
+  statementPeriod?: string | null
+  cardId?: string | null
+  cardName?: string | null
 }
 
 export type DashboardInput = {
@@ -99,6 +108,34 @@ export type UpcomingItem = {
   status: MovementStatus
 }
 
+/**
+ * Un resumen de tarjeta como UN renglón de vencimientos (§1.4 del plan v2):
+ * "Visa Galicia · vence 10/12 · $480.000", no cada cuota suelta. Se paga
+ * desde /tarjetas, así que el renglón enlaza ahí en lugar de tener botón.
+ *
+ * Comparte `id`, `dueDate`, `kind` y `status` con `UpcomingItem` para que la
+ * lista se pueda ordenar y filtrar sin preguntar qué es cada cosa.
+ */
+export type UpcomingStatement = {
+  type: "statement"
+  /** El id del resumen. */
+  id: string
+  cardId: string
+  cardName: string
+  period: string
+  dueDate: IsoDate
+  arsCents: number
+  usdCents: number
+  kind: "expense"
+  status: MovementStatus
+}
+
+export type UpcomingPayment = UpcomingItem | UpcomingStatement
+
+export function isUpcomingStatement(item: UpcomingPayment): item is UpcomingStatement {
+  return "type" in item && item.type === "statement"
+}
+
 type DashboardView = {
   arsCents: number
   usdCents: number
@@ -108,7 +145,7 @@ type DashboardView = {
   paymentsThisMonth: { arsCents: number; count: number; overdueCount: number }
   paymentsNextMonth: { arsCents: number; count: number }
   projection: { month: string; arsCents: number }[] | null
-  upcomingPayments: UpcomingItem[]
+  upcomingPayments: UpcomingPayment[]
   upcomingReceivables: UpcomingItem[]
   /** Por categoría padre, con el desglose por subcategoría (§2.3 del plan v2). */
   pie: SpendGroup[]
@@ -171,6 +208,15 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
    */
   const paidSinceStart = input.paid.filter((p) => p.paidDate >= settings.initialBalanceDate)
   const monthPaid = paidSinceStart.filter((p) => monthKey(p.paidDate) === thisMonth)
+  /*
+   * Lo que hay que pagar, contado por CONCEPTO: una cuota suelta es uno, y un
+   * resumen de tarjeta también es uno aunque tenga veinte cuotas adentro
+   * (§1.4 del plan v2). Todas las cuotas de un resumen vencen el mismo día,
+   * así que cae entero en un mes o en el otro. El importe se suma igual,
+   * cuota por cuota.
+   */
+  const conceptos = (rows: PendingRow[]) =>
+    new Set(rows.map((p) => p.statementId ?? `cuota:${p.id}`))
   const paymentsThisMonth = input.pending.filter(
     (p) => p.kind === "expense" && p.dueDate < firstDayNextMonth,
   )
@@ -212,8 +258,33 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
   )
 
   // Vencimientos: lo atrasado más los meses actual y siguiente completos.
-  const upcoming: UpcomingItem[] = input.pending
-    .filter((p) => p.dueDate < firstDayAfterNextMonth)
+  const inWindow = input.pending.filter((p) => p.dueDate < firstDayAfterNextMonth)
+
+  // Las cuotas con tarjeta se juntan en su resumen: un renglón por resumen,
+  // con el total por moneda. El estado es el del resumen: vencido si su
+  // vencimiento ya pasó.
+  const statements = new Map<string, UpcomingStatement>()
+  for (const p of inWindow) {
+    if (!p.statementId || !p.cardId) continue
+    const item = statements.get(p.statementId) ?? {
+      type: "statement" as const,
+      id: p.statementId,
+      cardId: p.cardId,
+      cardName: p.cardName ?? "Tarjeta",
+      period: p.statementPeriod ?? monthKey(p.dueDate),
+      dueDate: p.dueDate,
+      arsCents: 0,
+      usdCents: 0,
+      kind: "expense" as const,
+      status: isOverdue(p.dueDate, today) ? ("overdue" as const) : ("pending" as const),
+    }
+    if (assertCurrency(p.currency) === "USD") item.usdCents += p.amountCents
+    else item.arsCents += p.amountCents
+    statements.set(p.statementId, item)
+  }
+
+  const upcoming: UpcomingItem[] = inWindow
+    .filter((p) => !p.statementId)
     .map((p) => ({
       id: p.id,
       number: p.number,
@@ -260,18 +331,27 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
         (total, payment) => total + toArs(payment.amountCents, payment.currency, payment.rate),
         0,
       ),
-      count: paymentsThisMonth.length,
-      overdueCount: paymentsThisMonth.filter((payment) => isOverdue(payment.dueDate, today)).length,
+      count: conceptos(paymentsThisMonth).size,
+      overdueCount: conceptos(paymentsThisMonth.filter((payment) => isOverdue(payment.dueDate, today)))
+        .size,
     },
     paymentsNextMonth: {
       arsCents: paymentsNextMonth.reduce(
         (total, payment) => total + toArs(payment.amountCents, payment.currency, payment.rate),
         0,
       ),
-      count: paymentsNextMonth.length,
+      count: conceptos(paymentsNextMonth).size,
     },
     projection,
-    upcomingPayments: upcoming.filter((item) => item.kind === "expense").slice(0, MAX_UPCOMING),
+    // `pending` llega ordenado por vencimiento; al sumar los resúmenes hay
+    // que volver a ordenar. `sort` es estable: entre iguales queda el orden
+    // de la consulta.
+    upcomingPayments: [
+      ...upcoming.filter((item) => item.kind === "expense"),
+      ...statements.values(),
+    ]
+      .sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0))
+      .slice(0, MAX_UPCOMING),
     upcomingReceivables: upcoming.filter((item) => item.kind === "income").slice(0, MAX_UPCOMING),
     pie,
     bars,

@@ -2,10 +2,32 @@ import "server-only"
 
 import { cache } from "react"
 
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm"
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm"
 
 import { withUser, type Tx } from "@/db/client"
-import { category, installment, movement, userSettings } from "@/db/schema"
+import {
+  cardStatement,
+  category,
+  creditCard,
+  installment,
+  movement,
+  userSettings,
+} from "@/db/schema"
+import { perceivedPayment } from "@/lib/cards"
 import {
   assertExchangeDirection,
   assertInstallmentMovementKind,
@@ -35,7 +57,14 @@ export const getSettings = cache(async (userId: string): Promise<Settings | null
 export type Category = typeof category.$inferSelect
 export type Movement = typeof movement.$inferSelect
 export type Installment = typeof installment.$inferSelect
-export type MovementWithInstallments = Movement & { installments: Installment[] }
+/**
+ * La cuota tal como la ven las listas: con el período de su resumen cuando la
+ * compra es con tarjeta, para que la fila diga "se paga con el resumen de
+ * nov" y enlace a él.
+ */
+export type InstallmentRow = Installment & { statementPeriod: string | null }
+export type MovementWithInstallments = Movement & { installments: InstallmentRow[] }
+
 
 /**
  * Sólo las categorías activas por default: la Task 16 permite archivar una
@@ -151,9 +180,10 @@ async function conCuotas(
 ): Promise<MovementWithInstallments[]> {
   if (movements.length === 0) return []
 
-  const installments = await tx
-    .select()
+  const rows = await tx
+    .select({ installment, statementPeriod: cardStatement.period })
     .from(installment)
+    .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
     .where(
       inArray(
         installment.movementId,
@@ -162,10 +192,10 @@ async function conCuotas(
     )
     .orderBy(asc(installment.number))
 
-  const byMovement = new Map<string, Installment[]>()
-  for (const row of installments) {
+  const byMovement = new Map<string, InstallmentRow[]>()
+  for (const { installment: row, statementPeriod } of rows) {
     const list = byMovement.get(row.movementId) ?? []
-    list.push(row)
+    list.push({ ...row, statementPeriod })
     byMovement.set(row.movementId, list)
   }
 
@@ -253,14 +283,22 @@ export async function listPaidInstallments(userId: string) {
         categoryId: movement.categoryId,
         // Necesario para consolidar a pesos con el TC del propio movimiento.
         rate: movement.rate,
+        // El TC al que se pagó en pesos la parte en dólares del resumen, si
+        // fue así (decisión 7.1 del plan v2). Null sin tarjeta.
+        usdPaidRate: cardStatement.usdPaidRate,
       })
       .from(installment)
       .innerJoin(movement, eq(installment.movementId, movement.id))
+      .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
       .where(and(eq(installment.userId, userId), eq(installment.paid, true)))
 
     // El filtro `paid = true` ya está arriba: acá es donde vive el saber que
     // convierte `paidDate` de `string | null` a `IsoDate`.
-    return rows.map((r) => ({ ...r, paidDate: assertPaidDate(r.paidDate) }))
+    //
+    // Y acá, en un solo lugar, una cuota en dólares cuyo resumen se pagó con
+    // pesos pasa a contar como pesos (`perceivedPayment`): el saldo, la torta
+    // y las barras salen de esta lista y ninguno tiene que saber de tarjetas.
+    return rows.map((r) => perceivedPayment({ ...r, paidDate: assertPaidDate(r.paidDate) }))
   })
 }
 
@@ -278,9 +316,17 @@ export async function listPendingInstallments(userId: string) {
         currency: movement.currency,
         rate: movement.rate,
         kind: movement.kind,
+        // Para que el dashboard muestre un resumen de tarjeta como un solo
+        // renglón y no cada cuota suelta (§1.4 del plan v2).
+        statementId: installment.statementId,
+        statementPeriod: cardStatement.period,
+        cardId: creditCard.id,
+        cardName: creditCard.name,
       })
       .from(installment)
       .innerJoin(movement, eq(installment.movementId, movement.id))
+      .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
+      .leftJoin(creditCard, eq(cardStatement.cardId, creditCard.id))
       .where(and(eq(installment.userId, userId), eq(installment.paid, false)))
       .orderBy(asc(installment.dueDate)),
   )
@@ -364,12 +410,17 @@ export async function listUsdPositionEvents(userId: string): Promise<PositionEve
       })
       .from(installment)
       .innerJoin(movement, eq(installment.movementId, movement.id))
+      .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
       .where(
         and(
           eq(installment.userId, userId),
           eq(installment.paid, true),
           eq(movement.currency, "USD"),
           gte(installment.paidDate, settings.date),
+          // Una compra en dólares con tarjeta cuyo resumen se pagó con pesos
+          // no tocó la tenencia de dólares (decisión 7.1 del plan v2): para
+          // la posición, esa cuota no existe.
+          isNull(cardStatement.usdPaidRate),
         ),
       )
 

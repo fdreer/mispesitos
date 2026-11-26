@@ -5,8 +5,22 @@ import { and, asc, eq, inArray } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
 
 import { db, sqlClient, withUser } from "@/db/client"
-import { category, installment, movement, user, userSettings } from "@/db/schema"
+import {
+  cardStatement,
+  category,
+  creditCard,
+  installment,
+  movement,
+  user,
+  userSettings,
+} from "@/db/schema"
 import { DEFAULT_CATEGORIES } from "@/lib/default-categories"
+import {
+  createCard,
+  payStatement,
+  unpayStatement,
+  updateStatementDates,
+} from "@/server/actions/cards"
 import {
   archiveCategory,
   createCategory,
@@ -332,6 +346,10 @@ async function limpiar() {
     await withUser(id, async (tx) => {
       await tx.delete(installment)
       await tx.delete(movement)
+      // Las tarjetas (0012) después de los movimientos y las cuotas que las
+      // usan: sus FK son NO ACTION.
+      await tx.delete(cardStatement)
+      await tx.delete(creditCard)
       await tx.delete(category)
       await tx.delete(userSettings)
     })
@@ -2164,5 +2182,248 @@ describe("categorías en árbol", () => {
       formulario({ name: "Árbol colgada de B", kind: "expense", parentId: CAT_B }),
     )
     expect(rechazo(resultado).message).toBe("No encontramos esa categoría padre.")
+  })
+})
+
+// --------------------------------------------------------------------------
+// Tarjetas (Fase 3 del plan v2)
+// --------------------------------------------------------------------------
+
+/**
+ * Las acciones de tarjetas y la compra con tarjeta, contra la base real. Las
+ * reglas de fechas (cierre, asignación a resúmenes, cuándo se puede pagar)
+ * están probadas sin base en `src/lib/cards.test.ts`; acá se prueba que las
+ * acciones las aplican de punta a punta y que la base —RLS, FK compuestas y
+ * los triggers de la 0012— acepta lo que la acción escribe.
+ *
+ * Las tarjetas se llaman "Tarj …" para buscarlas por nombre: `createCard`
+ * devuelve sólo `{ ok: true }`, igual que `createCategory`.
+ */
+describe("tarjetas", () => {
+  const tarjetaLlamada = (userId: string, nombre: string) =>
+    withUser(userId, (tx) =>
+      tx
+        .select()
+        .from(creditCard)
+        .where(and(eq(creditCard.userId, userId), eq(creditCard.name, nombre))),
+    )
+
+  const resumenesDe = (userId: string, cardId: string) =>
+    withUser(userId, (tx) =>
+      tx
+        .select()
+        .from(cardStatement)
+        .where(eq(cardStatement.cardId, cardId))
+        .orderBy(asc(cardStatement.period)),
+    )
+
+  async function crearTarjeta(nombre: string) {
+    comoUsuario(USUARIO_A)
+    expect(
+      await createCard(
+        null,
+        formulario({ name: nombre, closingDay: "25", dueDay: "5", creditLimit: "", color: "" }),
+      ),
+    ).toEqual({ ok: true })
+    const [fila] = await tarjetaLlamada(USUARIO_A, nombre)
+    return fila
+  }
+
+  /** Una compra de $300 en 2 cuotas del 10/01/2026: resúmenes de enero y febrero. */
+  async function comprarCon(cardId: string, descripcion: string) {
+    comoUsuario(USUARIO_A)
+    const resultado = await createMovement(
+      null,
+      formulario({
+        ...ALTA_VALIDA,
+        description: descripcion,
+        currency: "ARS",
+        rate: "1",
+        date: "2026-01-10",
+        amountCents: "300",
+        creditCardId: cardId,
+        // Lo que mande el formulario como vencimiento se ignora: con tarjeta,
+        // la cuota vence cuando vence su resumen.
+        installmentAmount: ["15000", "15000"],
+        installmentDueDate: ["2026-01-10", "2026-01-10"],
+      }),
+    )
+    expect(resultado).toEqual({ ok: true })
+    const [mov] = await movimientosPorDescripcion(USUARIO_A, descripcion)
+    return mov
+  }
+
+  it("una compra con tarjeta crea sus resúmenes y cada cuota vence con el suyo", async () => {
+    const card = await crearTarjeta("Tarj compra")
+    const mov = await comprarCon(card.id, "Tarj heladera")
+
+    expect(mov.creditCardId).toBe(card.id)
+    const resumenes = await resumenesDe(USUARIO_A, card.id)
+    expect(resumenes.map((r) => [r.period, r.closingDate, r.dueDate])).toEqual([
+      ["2026-01", "2026-01-25", "2026-02-05"],
+      ["2026-02", "2026-02-25", "2026-03-05"],
+    ])
+    const cuotas = await cuotasDe(USUARIO_A, mov.id)
+    expect(cuotas.map((c) => [c.statementId, c.dueDate, c.paid])).toEqual([
+      [resumenes[0].id, "2026-02-05", false],
+      [resumenes[1].id, "2026-03-05", false],
+    ])
+  })
+
+  it("una cuota con tarjeta no se marca pagada suelta", async () => {
+    const card = await crearTarjeta("Tarj suelta")
+    const mov = await comprarCon(card.id, "Tarj cuota suelta")
+    const [cuota] = await cuotasDe(USUARIO_A, mov.id)
+
+    const resultado = await setInstallmentPaid(cuota.id, true)
+
+    expect(rechazo(resultado).message).toBe(
+      "Esta cuota es de una compra con tarjeta: se paga con el resumen.",
+    )
+  })
+
+  it("pagar el resumen paga sus cuotas, y desmarcarlo las vuelve a dejar impagas", async () => {
+    const card = await crearTarjeta("Tarj pago")
+    const mov = await comprarCon(card.id, "Tarj pagada")
+    const [enero] = await resumenesDe(USUARIO_A, card.id)
+
+    expect(
+      await payStatement(
+        null,
+        formulario({ statementId: enero.id, paidDate: "2026-02-03", mode: "usd" }),
+      ),
+    ).toEqual({ ok: true })
+    let cuotas = await cuotasDe(USUARIO_A, mov.id)
+    expect(cuotas.map((c) => [c.paid, c.paidDate])).toEqual([
+      [true, "2026-02-03"],
+      [false, null],
+    ])
+
+    expect(await unpayStatement(enero.id)).toEqual({ ok: true })
+    cuotas = await cuotasDe(USUARIO_A, mov.id)
+    expect(cuotas.every((c) => !c.paid && c.paidDate === null)).toBe(true)
+  })
+
+  it("no se paga un resumen antes de su cierre", async () => {
+    const card = await crearTarjeta("Tarj cierre")
+    await comprarCon(card.id, "Tarj antes del cierre")
+    const [enero] = await resumenesDe(USUARIO_A, card.id)
+
+    const resultado = await payStatement(
+      null,
+      formulario({ statementId: enero.id, paidDate: "2026-01-20", mode: "usd" }),
+    )
+
+    expect(rechazo(resultado).fieldErrors?.paidDate).toBeTruthy()
+  })
+
+  it("una compra no puede caer en un resumen ya pagado", async () => {
+    const card = await crearTarjeta("Tarj cerrada")
+    await comprarCon(card.id, "Tarj primera")
+    const [enero] = await resumenesDe(USUARIO_A, card.id)
+    await payStatement(
+      null,
+      formulario({ statementId: enero.id, paidDate: "2026-02-03", mode: "usd" }),
+    )
+
+    comoUsuario(USUARIO_A)
+    const resultado = await createMovement(
+      null,
+      formulario({
+        ...ALTA_VALIDA,
+        description: "Tarj tardía",
+        currency: "ARS",
+        rate: "1",
+        date: "2026-01-12",
+        amountCents: "100",
+        creditCardId: card.id,
+        installmentAmount: ["10000"],
+        installmentDueDate: ["2026-01-12"],
+      }),
+    )
+
+    expect(resultado.ok).toBe(false)
+    expect(await movimientosPorDescripcion(USUARIO_A, "Tarj tardía")).toEqual([])
+  })
+
+  it("corregir el cierre de un resumen no muda sus compras, ni al editarlas", async () => {
+    const card = await crearTarjeta("Tarj ancla")
+    const mov = await comprarCon(card.id, "Tarj anclada")
+    const [enero] = await resumenesDe(USUARIO_A, card.id)
+
+    // El banco cerró enero el 05/01, antes de la compra del 10/01 que ya
+    // estaba adentro. La compra se queda; sólo cambian las fechas.
+    expect(
+      await updateStatementDates(
+        null,
+        formulario({
+          cardId: card.id,
+          period: "2026-01",
+          closingDate: "2026-01-05",
+          dueDate: "2026-01-15",
+        }),
+      ),
+    ).toEqual({ ok: true })
+
+    // Editar sólo la descripción no recalcula el resumen con el cierre nuevo.
+    expect(
+      await updateMovement(
+        null,
+        edicion(mov.id, {
+          description: "Tarj anclada editada",
+          date: "2026-01-10",
+          amountCents: "300",
+          creditCardId: card.id,
+          installmentAmount: ["15000", "15000"],
+          installmentDueDate: ["2026-01-15", "2026-03-05"],
+        }),
+      ),
+    ).toEqual({ ok: true })
+    const cuotas = await cuotasDe(USUARIO_A, mov.id)
+    expect(cuotas.map((c) => [c.statementId, c.dueDate])).toEqual([
+      [enero.id, "2026-01-15"],
+      [expect.any(String), "2026-03-05"],
+    ])
+  })
+
+  it("un ingreso no va con tarjeta", async () => {
+    const card = await crearTarjeta("Tarj ingreso")
+    comoUsuario(USUARIO_A)
+    const resultado = await createMovement(
+      null,
+      formulario({
+        ...ALTA_VALIDA,
+        kind: "income",
+        categoryId: CAT_A_SUELDO,
+        description: "Tarj sueldo",
+        creditCardId: card.id,
+      }),
+    )
+    expect(rechazo(resultado).message).toBe("Sólo un egreso se puede pagar con tarjeta.")
+  })
+
+  it("no se puede comprar con la tarjeta de otro usuario", async () => {
+    const card = await crearTarjeta("Tarj de A")
+    comoUsuario(USUARIO_B)
+    const resultado = await createMovement(
+      null,
+      formulario({
+        ...ALTA_VALIDA,
+        categoryId: CAT_B,
+        description: "Tarj ajena",
+        creditCardId: card.id,
+      }),
+    )
+    expect(rechazo(resultado).message).toBe("Esa tarjeta no existe.")
+    expect(await movimientosPorDescripcion(USUARIO_B, "Tarj ajena")).toEqual([])
+  })
+
+  it("dos tarjetas activas no se llaman igual", async () => {
+    await crearTarjeta("Tarj repetida")
+    const resultado = await createCard(
+      null,
+      formulario({ name: "Tarj repetida", closingDay: "20", dueDay: "1" }),
+    )
+    expect(resultado.ok).toBe(false)
   })
 })

@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { IsoDate } from "@/lib/dates"
 import { describeNextInstallment, nextUnpaidInstallment } from "@/lib/installments"
+import type { CardOption } from "@/server/card-queries"
 import type { Category, MovementWithInstallments } from "@/server/queries"
 
 type Kind = "income" | "expense"
@@ -31,11 +32,13 @@ export function MovementRowActions({
   movement,
   kind,
   categories,
+  cards,
   today,
 }: {
   movement: MovementWithInstallments
   kind: Kind
   categories: Category[]
+  cards?: CardOption[]
   today: IsoDate
 }) {
   const [editOpen, setEditOpen] = useState(false)
@@ -79,6 +82,7 @@ export function MovementRowActions({
         suggestedRate={null}
         today={today}
         movement={movement}
+        cards={cards}
         open={editOpen}
         onOpenChange={setEditOpen}
       />
@@ -98,7 +102,9 @@ export function MovementRowActions({
  * impaga con la fecha de hoy y avisa con "Pagada · Deshacer". Para otra fecha
  * está el calendario de cada cuota, con la fila desplegada.
  *
- * No se dibuja si ya está todo pago: no hay nada que hacer en un toque.
+ * No se dibuja si ya está todo pago: no hay nada que hacer en un toque. Ni
+ * en una compra con tarjeta: sus cuotas se pagan con el resumen (§1.3 del
+ * plan v2), desde /tarjetas.
  */
 export function PayNextButton({
   movement,
@@ -110,7 +116,7 @@ export function PayNextButton({
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const next = nextUnpaidInstallment(movement.installments)
-  if (!next) return null
+  if (!next || movement.creditCardId) return null
 
   const total = movement.installments.length
   const verb = kind === "income" ? "Cobrar" : "Pagar"

@@ -458,4 +458,69 @@ describe("buildDashboardView", () => {
     ])
     expect(view.pie[1].children).toEqual([])
   })
+
+  /**
+   * §1.4 del plan v2: las cuotas de una compra con tarjeta no se pagan una por
+   * una, se paga el resumen. En vencimientos son UN renglón por resumen y en
+   * "pagos del mes" cuentan como un solo concepto.
+   */
+  it("agrupa las cuotas con tarjeta en un renglón por resumen", () => {
+    const conTarjeta = (id: string, movementId: string, amountCents: number, currency = "ARS") => ({
+      id,
+      number: 1,
+      dueDate: "2026-08-20",
+      amountCents,
+      movementId,
+      description: movementId,
+      currency,
+      rate: currency === "USD" ? "1000" : "1",
+      kind: "expense",
+      statementId: "res-1",
+      statementPeriod: "2026-07",
+      cardId: "visa",
+      cardName: "Visa",
+    })
+    const view = buildDashboardView({
+      ...BASE,
+      pending: [
+        conTarjeta("i1", "Heladera", 30_000),
+        conTarjeta("i2", "Zapatillas", 20_000),
+        conTarjeta("i3", "Netflix", 1_000, "USD"),
+        {
+          id: "i4",
+          number: 1,
+          dueDate: "2026-08-15",
+          amountCents: 5_000,
+          movementId: "Luz",
+          description: "Luz",
+          currency: "ARS",
+          rate: "1",
+          kind: "expense",
+        },
+      ],
+    })
+
+    expect(view.upcomingPayments).toEqual([
+      expect.objectContaining({ id: "i4", description: "Luz" }),
+      {
+        type: "statement",
+        id: "res-1",
+        cardId: "visa",
+        cardName: "Visa",
+        period: "2026-07",
+        dueDate: "2026-08-20",
+        arsCents: 50_000,
+        usdCents: 1_000,
+        kind: "expense",
+        status: "pending",
+      },
+    ])
+    // La luz y el resumen: dos conceptos, aunque el resumen tenga tres cuotas.
+    // El importe sí suma todo, con los dólares al TC de cada compra.
+    expect(view.paymentsThisMonth).toEqual({
+      arsCents: 5_000 + 50_000 + 1_000_000,
+      count: 2,
+      overdueCount: 0,
+    })
+  })
 })
