@@ -1,9 +1,11 @@
 # Mis Pesitos self-hosted: Postgres + preparación de la base + app.
 #
-#   cp .env.selfhost.example .env     # y completalo
-#   docker compose up -d --build
+# Instalación rápida (sin crear .env):
+#   docker compose up -d
+#   Abrí http://localhost:3000 y creá la cuenta de administrador.
 #
-# Ver la sección "Instalación propia" del README.
+# Si lo publicás con un dominio propio, creá un `.env` (ver .env.selfhost.example)
+# al menos con BETTER_AUTH_URL=https://pesitos.tudominio.com
 
 services:
   db:
@@ -12,7 +14,7 @@ services:
     environment:
       POSTGRES_DB: mispesitos
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mispesitos_postgres_local_only}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -24,27 +26,26 @@ services:
   # Corre en cada `up`, es idempotente y termina: crea los roles que faltan,
   # aplica migraciones nuevas y fija la contraseña de app_user.
   migrate:
-    build:
-      context: .
-      target: migrator
+    image: ghcr.io/fdreer/mispesitos-migrator:latest
     restart: "no"
     environment:
-      MIGRATION_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/mispesitos
-      APP_USER_PASSWORD: ${APP_USER_PASSWORD:?Falta APP_USER_PASSWORD en .env}
+      MIGRATION_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-mispesitos_postgres_local_only}@db:5432/mispesitos
+      APP_USER_PASSWORD: ${APP_USER_PASSWORD:-mispesitos_app_user_local_only}
     depends_on:
       db:
         condition: service_healthy
 
   app:
-    build:
-      context: .
-      target: runner
+    image: ghcr.io/fdreer/mispesitos:latest
     restart: unless-stopped
     environment:
       # La app conecta como app_user (sin BYPASSRLS), nunca como postgres.
-      DATABASE_URL: postgresql://app_user:${APP_USER_PASSWORD}@db:5432/mispesitos
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Falta BETTER_AUTH_SECRET en .env}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?Falta BETTER_AUTH_URL en .env}
+      DATABASE_URL: postgresql://app_user:${APP_USER_PASSWORD:-mispesitos_app_user_local_only}@db:5432/mispesitos
+      # Si BETTER_AUTH_SECRET queda vacía, se genera automáticamente en /app/data/auth-secret.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+    volumes:
+      - appdata:/app/data
     ports:
       - "${APP_PORT:-3000}:3000"
     depends_on:
@@ -53,3 +54,4 @@ services:
 
 volumes:
   pgdata:
+  appdata:

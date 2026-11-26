@@ -140,14 +140,26 @@ git) y en las variables de entorno del hosting. En ningún archivo versionado.
 
 ## Instalación propia (Docker)
 
-Necesitás Docker con Compose. Levanta Postgres, prepara la base y arranca la app:
+Necesitás Docker con Compose (Windows, macOS o Linux). Levanta Postgres, prepara
+la base y arranca la app **sin crear ningún `.env`**:
 
-1. Copiá `.env.selfhost.example` a `.env` y completalo. Las contraseñas, en hex
-   (`openssl rand -hex 24`). `BETTER_AUTH_URL` es la URL pública exacta con la
-   que vas a entrar (ej. `https://pesitos.midominio.com`): con ella se arman los
-   links de invitación.
-2. `docker compose up -d --build`
-3. Abrí la URL y creá la cuenta de administrador.
+1. Descargá `docker-compose.yml` y corré:
+   ```bash
+   docker compose up -d
+   ```
+2. Abrí `http://localhost:3000` y creá la cuenta de administrador.
+
+Si lo publicás con un dominio propio (detrás de Caddy, Nginx o Traefik), creá un
+`.env` a partir de `.env.selfhost.example` al menos con `BETTER_AUTH_URL` (ej.
+`https://pesitos.midominio.com`): con ella se arman los links de invitación y se
+valida el origen. Si no definís `BETTER_AUTH_SECRET`, se genera automáticamente
+en el volumen `appdata` en el primer arranque.
+
+Para actualizar a la última versión:
+
+```bash
+docker compose pull && docker compose up -d
+```
 
 Qué corre:
 
