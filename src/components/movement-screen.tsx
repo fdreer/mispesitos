@@ -5,32 +5,31 @@ import { MovementFilters, MovementFiltersSkeleton } from "@/components/movement-
 import { MovementFormDialog } from "@/components/movement-form-dialog"
 import { MovementList, MovementListSkeleton } from "@/components/movement-list"
 import { MovementPagination } from "@/components/movement-pagination"
+import { MovementStatusPills, MovementTotalsBar } from "@/components/movement-status-pills"
 import { buttonVariants } from "@/components/ui/button"
 import { todayInAr, type IsoDate } from "@/lib/dates"
+import { groupModeFor } from "@/lib/movement-list-view"
 import {
+  defaultSortForKind,
   hayFiltrosActivos,
-  movementFiltersFromQuery,
-  paginate,
   parseMovementQuery,
   type MovementQuery,
 } from "@/lib/movement-query"
 import { BASE_PATHS } from "@/lib/movement-routes"
-import { getMovementStatus } from "@/lib/movement-status"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
-import {
-  listCategories,
-  listMovements,
-  listMovementsPage,
-  type Category,
-} from "@/server/queries"
+import { cn } from "@/lib/utils"
 import {
   listCardOptions,
   listDescriptionSuggestions,
   type CardOption,
   type DescriptionSuggestion,
 } from "@/server/card-queries"
+import {
+  listCategories,
+  queryMovementsView,
+  type Category,
+} from "@/server/queries"
 import { requireSettings } from "@/server/session"
-import { cn } from "@/lib/utils"
 
 const TITLES: Record<"income" | "expense", string> = {
   income: "Ingresos",
@@ -45,12 +44,6 @@ type Props = {
   searchParams: Record<string, string | string[] | undefined>
 }
 
-/**
- * La cotización sugerida sale de dolarapi, que en el peor caso tarda hasta
- * 3s (ver TIMEOUT_MS en @/lib/rate) antes de resolver a null. Separada en su
- * propio componente async y detrás de un Suspense: así esa espera no bloquea
- * el resto de la pantalla, que no depende de ella para pintar.
- */
 async function MovementFormDialogWithRate({
   kind,
   categories,
@@ -79,20 +72,9 @@ async function MovementFormDialogWithRate({
   )
 }
 
-/**
- * El botón "Nuevo" con su diálogo. Con la lista COMPLETA, archivadas
- * incluidas, aunque el selector no las ofrezca: desde la Fase 2 el selector
- * tiene que saber si un padre tiene hijas —aunque estén todas archivadas—
- * para no ofrecerlo como opción, que es la misma pregunta que hace el trigger
- * de la base (ver `isLeafCategory`). Quien saca las archivadas es el propio
- * selector (`selectorGroups`). Y es la misma consulta que la tabla y el
- * filtro: `listCategories` está memoizada por request.
- */
 async function BotonNuevo({ kind }: { kind: Kind }) {
   const { user, settings } = await requireSettings()
   const today = todayInAr()
-  // Las tarjetas sólo le sirven a un egreso (medio de pago, §1.4 del plan
-  // v2); las descripciones previas, a los dos (autocompletar, §5.2).
   const [categories, cards, suggestions] = await Promise.all([
     listCategories(user.id, kind, true),
     kind === "expense" ? listCardOptions(user.id, today) : Promise.resolve([]),
@@ -124,12 +106,6 @@ async function BotonNuevo({ kind }: { kind: Kind }) {
   )
 }
 
-/**
- * El lugar del botón mientras viajan las categorías. Un `div` con las clases
- * del botón y no un `<Button disabled>`: no tiene que ser enfocable ni que un
- * lector de pantalla lo anuncie como una acción que existe pero no anda —
- * todavía no es un botón, es el hueco donde va a haber uno.
- */
 function BotonNuevoSkeleton() {
   return (
     <div aria-hidden className={cn(buttonVariants(), "pointer-events-none opacity-50")}>
@@ -139,121 +115,104 @@ function BotonNuevoSkeleton() {
   )
 }
 
-/**
- * La barra de filtros. Necesita la lista COMPLETA de categorías (archivadas
- * incluidas): un movimiento viejo puede apuntar a una categoría ya archivada y
- * tiene que poder filtrarse por ella igual.
- */
-async function BarraDeFiltros({ kind, query }: { kind: Kind; query: MovementQuery }) {
+async function BarraDeFiltros({
+  kind,
+  query,
+  today,
+}: {
+  kind: Kind
+  query: MovementQuery
+  today: IsoDate
+}) {
   const { user } = await requireSettings()
-  const categories = await listCategories(user.id, kind, true)
-
-  return <MovementFilters basePath={BASE_PATHS[kind]} query={query} categories={categories} />
-}
-
-/**
- * La parte cara de la pantalla: es la única consulta de acá que crece con el
- * historial, y por eso es la que va detrás de su propio Suspense.
- *
- * La misma lista completa de categorías que pide `BarraDeFiltros`: la tabla
- * arma el nombre de la categoría de CADA movimiento —viejo incluido—, así que
- * una archivada tiene que seguir resolviendo su nombre acá. Si las dos
- * pantallas compartieran una lista "sólo activas", archivar una categoría
- * haría que los movimientos que la usaban pasen a mostrar "—". Las dos ramas
- * llaman con los mismos argumentos y `listCategories` está memoizada por
- * request, así que es una sola consulta y no dos.
- */
-async function ListaConPaginacion({ kind, query }: { kind: Kind; query: MovementQuery }) {
-  const { user } = await requireSettings()
-  const today = todayInAr()
-
-  // Qué cuenta como "sin filtro" lo decide `FILTER_DEFAULTS`
-  // (@/lib/movement-query), no esta pantalla: es la misma tabla de la que
-  // salen la URL y el mensaje de lista vacía.
-  const filters = { kind, ...movementFiltersFromQuery(query) }
-
-  /**
-   * Dos caminos, y la diferencia es de dónde sale el recorte.
-   *
-   * El estado no es columna de la base: se deriva de las cuotas. Un LIMIT en
-   * SQL no sabría cuántas filas van a sobrevivir a ese filtro, así que con un
-   * estado elegido hay que traer todo lo que matchea el WHERE y cortar en
-   * memoria.
-   *
-   * Sin estado —la vista con la que se entra a estas dos pantallas— no hay
-   * nada que filtrar después, y ahí sí la base puede devolver las veinte filas
-   * de la página y nada más. Era el caso que traía todo el historial para
-   * pintar veinte renglones.
-   */
-  const [categories, cards, pagina] = await Promise.all([
+  const [categories, cards] = await Promise.all([
     listCategories(user.id, kind, true),
-    // Para nombrar la tarjeta de cada compra y para el formulario de
-    // edición. `listCardOptions` está memoizada: es la misma consulta que la
-    // del botón "Nuevo".
     kind === "expense" ? listCardOptions(user.id, today) : Promise.resolve([]),
-    query.status === "all"
-      ? listMovementsPage(user.id, filters, query.page)
-      : listMovements(user.id, filters).then((movements) =>
-          paginate(
-            movements.filter((m) => getMovementStatus(m.installments, today) === query.status),
-            query.page,
-          ),
-        ),
   ])
 
-  const { items, page, totalPages } = pagina
+  return (
+    <MovementFilters
+      basePath={BASE_PATHS[kind]}
+      query={query}
+      defaultSort={defaultSortForKind(kind)}
+      today={today}
+      categories={categories}
+      cards={cards}
+      showPaymentMethod={kind === "expense"}
+    />
+  )
+}
+
+async function ListaConPaginacion({
+  kind,
+  query,
+  today,
+}: {
+  kind: Kind
+  query: MovementQuery
+  today: IsoDate
+}) {
+  const { user } = await requireSettings()
+  const defaultSort = defaultSortForKind(kind)
+
+  const [categories, cards, vista] = await Promise.all([
+    listCategories(user.id, kind, true),
+    kind === "expense" ? listCardOptions(user.id, today) : Promise.resolve([]),
+    queryMovementsView(user.id, kind, query, today),
+  ])
+
+  const { items, page, totalPages, totalCount, statusCounts, totals } = vista
+  const filtered = hayFiltrosActivos(query)
+  const emptyMessage = filtered
+    ? "Ningún movimiento entra en el filtro."
+    : kind === "income"
+      ? "Todavía no cargaste ningún ingreso."
+      : "Todavía no cargaste ningún egreso."
 
   return (
-    <>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <MovementStatusPills
+          basePath={BASE_PATHS[kind]}
+          query={query}
+          defaultSort={defaultSort}
+          counts={statusCounts}
+        />
+        <MovementTotalsBar totals={totals} />
+      </div>
+
       <MovementList
         movements={items}
         categories={categories}
         cards={cards}
         today={today}
-        emptyMessage={
-          hayFiltrosActivos(query)
-            ? "Ningún movimiento entra en el filtro."
-            : "Todavía no cargaste nada acá."
-        }
+        emptyMessage={emptyMessage}
+        hasActiveFilters={filtered}
+        basePath={BASE_PATHS[kind]}
+        kind={kind}
+        groupBy={groupModeFor(kind, query.sort)}
+        query={query}
+        page={page}
+        totalPages={totalPages}
+        totalCount={totalCount}
       />
 
       <MovementPagination
         basePath={BASE_PATHS[kind]}
         query={query}
+        defaultSort={defaultSort}
         page={page}
         totalPages={totalPages}
+        totalCount={totalCount}
       />
-    </>
+    </div>
   )
 }
 
-/**
- * Cuerpo compartido de /ingresos y /egresos: sólo cambia `kind`. Ver
- * TITLES/BASE_PATHS de acá arriba para el resto de la diferencia.
- *
- * NO es `async`, y eso es lo que hace que la pantalla llegue por partes: si
- * esperara acá arriba a la sesión y a las tres consultas —como hacía antes—,
- * el servidor no puede mandar UN SOLO byte del HTML hasta que la más lenta
- * termine, y hasta entonces lo único que se ve es el esqueleto genérico de
- * `(app)/loading.tsx`, que no se parece a esta pantalla. Devolviendo sin
- * esperar nada, el título y la estructura salen en el primer flush y cada
- * `Suspense` de acá abajo se completa cuando su propia consulta llega:
- *
- *   1. el título, ya (no depende de nada);
- *   2. el botón "Nuevo" y los filtros, apenas vuelven las categorías;
- *   3. la tabla, cuando vuelven los movimientos con sus cuotas.
- *
- * `query` se parsea acá y se pasa a las tres ramas en vez de que cada una lo
- * haga por su cuenta: sale de la URL, no de la base, así que no hay nada que
- * esperar y las tres tienen que estar mirando exactamente el mismo filtro.
- *
- * Ojo al verificar esto con un navegador automatizado: React revela los
- * Suspense desde `requestAnimationFrame`, que no dispara en una pestaña de
- * fondo. Con la pestaña oculta los esqueletos se quedan puestos para siempre
- * y parece un bug de la app. Está documentado en docs/PENDIENTES.md §3.4.
- */
 export function MovementScreen({ kind, searchParams }: Props) {
-  const query = parseMovementQuery(searchParams)
+  const defaultSort = defaultSortForKind(kind)
+  const query = parseMovementQuery(searchParams, defaultSort)
+  const today = todayInAr()
 
   return (
     <div className="space-y-6">
@@ -264,12 +223,12 @@ export function MovementScreen({ kind, searchParams }: Props) {
         </Suspense>
       </div>
 
-      <Suspense fallback={<MovementFiltersSkeleton />}>
-        <BarraDeFiltros kind={kind} query={query} />
+      <Suspense fallback={<MovementFiltersSkeleton showPaymentMethod={kind === "expense"} />}>
+        <BarraDeFiltros kind={kind} query={query} today={today} />
       </Suspense>
 
       <Suspense fallback={<MovementListSkeleton />}>
-        <ListaConPaginacion kind={kind} query={query} />
+        <ListaConPaginacion kind={kind} query={query} today={today} />
       </Suspense>
     </div>
   )

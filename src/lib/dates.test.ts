@@ -2,6 +2,11 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
 import {
   todayInAr,
   addMonthsClamped,
+  addDaysIso,
+  diffDaysIso,
+  monthRange,
+  formatMonthLabel,
+  formatRelativeDue,
   isValidIsoDate,
   monthKey,
   isOverdue,
@@ -181,5 +186,45 @@ describe("isOverdue", () => {
 
   it("no es vencido si vence en el futuro", () => {
     expect(isOverdue("2026-09-01", "2026-08-09")).toBe(false)
+  })
+})
+
+describe("addDaysIso / diffDaysIso", () => {
+  it("suma y resta días cruzando meses y años bisiestos", () => {
+    expect(addDaysIso("2026-01-30", 3)).toBe("2026-02-02")
+    expect(addDaysIso("2028-02-28", 1)).toBe("2028-02-29")
+    expect(addDaysIso("2026-01-02", -3)).toBe("2025-12-30")
+    expect(diffDaysIso("2026-02-02", "2026-01-30")).toBe(3)
+    expect(diffDaysIso("2026-01-28", "2026-01-30")).toBe(-2)
+  })
+})
+
+describe("monthRange / formatMonthLabel", () => {
+  it("devuelve el primer y último día de cada mes incluyendo febrero bisiesto", () => {
+    expect(monthRange("2026-02")).toEqual({ from: "2026-02-01", to: "2026-02-28" })
+    expect(monthRange("2028-02")).toEqual({ from: "2028-02-01", to: "2028-02-29" })
+    expect(monthRange("2026-11")).toEqual({ from: "2026-11-01", to: "2026-11-30" })
+  })
+
+  it("formatea el mes en español", () => {
+    expect(formatMonthLabel("2026-11")).toBe("Noviembre 2026")
+    expect(formatMonthLabel("2027-01")).toBe("Enero 2027")
+  })
+})
+
+describe("formatRelativeDue", () => {
+  const HOY = "2026-11-26"
+
+  it("usa texto relativo dentro de los 14 días", () => {
+    expect(formatRelativeDue("2026-11-26", HOY, "26/11")).toBe("vence hoy")
+    expect(formatRelativeDue("2026-11-27", HOY, "27/11")).toBe("vence mañana")
+    expect(formatRelativeDue("2026-11-29", HOY, "29/11")).toBe("vence en 3 días")
+    expect(formatRelativeDue("2026-11-25", HOY, "25/11")).toBe("venció ayer")
+    expect(formatRelativeDue("2026-11-24", HOY, "24/11")).toBe("venció hace 2 días")
+  })
+
+  it("más allá de 14 días muestra la fecha corta", () => {
+    expect(formatRelativeDue("2026-12-15", HOY, "15/12")).toBe("vence 15/12")
+    expect(formatRelativeDue("2026-11-01", HOY, "01/11")).toBe("venció 01/11")
   })
 })

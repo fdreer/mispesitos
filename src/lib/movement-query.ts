@@ -1,73 +1,70 @@
 import { isValidIsoDate } from "@/lib/dates"
+import { parseAmountToCents, roundCents } from "@/lib/money"
+import type { MovementSort } from "@/lib/movement-list-view"
 import type { MovementStatus } from "@/lib/movement-status"
 
 /** Filas por página en las listas de ingresos y egresos. */
 export const PAGE_SIZE = 20
 
 /**
- * Exportada porque el desplegable de estado (`movement-filters.tsx`) arma sus
- * opciones a partir de esta misma lista: si sólo viviera acá adentro, agregar
- * un estado nuevo sin tocar el dropdown lo dejaría aparecer, elegible, y
- * parseando de vuelta a "all" — la lista de abajo y el desplegable son la
- * misma fuente.
+ * Exportada porque las pastillas de estado arman sus opciones a partir de esta
+ * misma lista: el filtro y la lista nunca pueden discrepar sobre qué estados
+ * existen.
  */
 export const STATUS_VALUES: readonly MovementStatus[] = ["pending", "paid", "overdue"]
 
-/**
- * Las dos monedas que la app maneja, con el mismo criterio que `STATUS_VALUES`:
- * el desplegable de moneda (`movement-filters.tsx`) arma sus opciones de acá,
- * así que no puede ofrecer una moneda que el parser no entienda.
- *
- * Es la misma lista que el enum `currency` de @/lib/schemas, pero no se importa
- * de ahí: ese esquema valida lo que ENTRA a la base y arrastra todo Zod; esto
- * es lo que se lee de una URL. Si algún día hay una tercera moneda hay que
- * tocar los dos, y el typecheck lo va a decir — `MovementFilters["currency"]`
- * (@/server/queries) es el tipo que las une.
- */
 export const CURRENCY_VALUES = ["ARS", "USD"] as const
 
 export type QueryCurrency = (typeof CURRENCY_VALUES)[number]
 
+export const SORT_VALUES: readonly MovementSort[] = ["due", "date", "amount"]
+
 /** El mismo tope que `movementSchema` le pone a la descripción. */
 export const SEARCH_MAX = 200
 
+/** Valor especial de `cardId` para "Efectivo / débito / transferencia". */
+export const CARD_FILTER_CASH = "cash"
+
 export type MovementQuery = {
-  /** Texto libre contra la descripción. "" = sin filtro. */
+  /** Texto libre contra descripción, categoría o importe. "" = sin filtro. */
   search: string
-  /** Id de categoría, o "all". */
-  categoryId: string
+  /** Ids de categorías seleccionadas (puede incluir padres). `[]` = todas. */
+  categoryIds: string[]
+  /** Id de tarjeta, `"cash"` (sin tarjeta), o `"all"`. */
+  cardId: string
   currency: QueryCurrency | "all"
   status: MovementStatus | "all"
   /** ISO yyyy-mm-dd, o "" si no hay borde. */
   from: string
   to: string
+  /** Importe mínimo y máximo en centavos, o `null` si no hay borde. */
+  minCents: number | null
+  maxCents: number | null
+  /** Orden elegido (`"due"` por defecto en egresos, `"date"` en ingresos). */
+  sort: MovementSort
   /** 1-based. */
   page: number
 }
 
 /**
  * Cada filtro con el valor que significa "sin filtro". Es LA lista: de acá
- * salen las tres decisiones que antes vivían cada una por su cuenta —qué se
- * escribe en la URL (`buildMovementHref`), qué cuenta como pantalla filtrada
- * (`hayFiltrosActivos`) y qué viaja a la consulta (`movementFiltersFromQuery`)—
- * y que ya no pueden discrepar entre sí. Agregar un filtro nuevo sigue pidiendo
- * tocar `MovementQuery`, el parser y la barra, pero olvidarse de uno de estos
- * tres lugares —que era lo que fallaba en silencio— ya no es posible.
+ * salen qué se escribe en la URL (`buildMovementHref`), qué cuenta como
+ * pantalla filtrada (`hayFiltrosActivos`), el contador de la hoja móvil
+ * (`activeFilterCount`) y qué viaja a la consulta (`movementFiltersFromQuery`).
  *
- * `page` no está: no es un filtro, es dónde estás parado dentro del resultado.
+ * `page` y `sort` no están: no filtran filas, sólo el recorte y el orden.
  */
 export const FILTER_DEFAULTS = {
   search: "",
-  categoryId: "all",
+  categoryIds: [] as string[],
+  cardId: "all",
   currency: "all",
   status: "all",
   from: "",
   to: "",
+  minCents: null as number | null,
+  maxCents: null as number | null,
 } as const
-
-type FilterKey = keyof typeof FILTER_DEFAULTS
-
-const FILTER_KEYS = Object.keys(FILTER_DEFAULTS) as FilterKey[]
 
 type RawParams = Record<string, string | string[] | undefined>
 
@@ -77,20 +74,72 @@ function one(raw: string | string[] | undefined): string {
 }
 
 /**
- * Normaliza el query string de /ingresos y /egresos. Todo lo que no entiende
- * cae en el default en vez de propagarse: la URL la escribe cualquiera, y un
- * `?status=borracho` no puede dejar la lista vacía ni tumbar la pantalla.
+ * Lee `categoryId` tolerando tanto parámetros repetidos (`?categoryId=a&categoryId=b`)
+ * como separados por coma (`?categoryId=a,b`) y la forma vieja (`?categoryId=all`).
  */
-export function parseMovementQuery(raw: RawParams): MovementQuery {
+function parseCategoryIds(raw: string | string[] | undefined): string[] {
+  const parts = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+    .flatMap((v) => v.split(","))
+    .map((v) => v.trim())
+    .filter((v) => v !== "" && v !== "all")
+  return [...new Set(parts)]
+}
+
+/**
+ * Lee un importe de query string en pesos (p. ej. `min=1500` o `min=1500.5`)
+ * y lo pasa a centavos no negativos, o `null` si viene vacío o inválido.
+ */
+function parseAmountParam(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const cents = parseAmountToCents(trimmed)
+  if (cents === null || cents < 0) return null
+  return cents
+}
+
+/** Serializa centavos a un número corto en pesos para la URL (`150000` -> `"1500"`). */
+export function formatAmountParam(cents: number): string {
+  const pesos = cents / 100
+  return Number.isInteger(pesos) ? String(pesos) : String(roundCents(pesos * 100) / 100)
+}
+
+export function defaultSortForKind(kind?: "income" | "expense"): MovementSort {
+  return kind === "expense" ? "due" : "date"
+}
+
+/**
+ * Convierte un `URLSearchParams` en `RawParams` conservando parámetros repetidos
+ * como arrays (a diferencia de `Object.fromEntries`, que pisa duplicados).
+ */
+export function rawParamsFromSearchParams(params: URLSearchParams): RawParams {
+  const out: RawParams = {}
+  for (const key of new Set(params.keys())) {
+    const values = params.getAll(key)
+    out[key] = values.length > 1 ? values : values[0]
+  }
+  return out
+}
+
+/**
+ * Normaliza el query string de /ingresos y /egresos (y en el futuro /informes).
+ * Todo lo que no entiende cae en el default en vez de propagarse.
+ */
+export function parseMovementQuery(
+  raw: RawParams,
+  defaultSort: MovementSort = "date",
+): MovementQuery {
   const currency = one(raw.currency)
   const status = one(raw.status)
   const from = one(raw.from)
   const to = one(raw.to)
+  const sort = one(raw.sort)
+  const cardId = one(raw.cardId).trim()
   const page = Number.parseInt(one(raw.page), 10)
 
   return {
     search: one(raw.search).trim().slice(0, SEARCH_MAX),
-    categoryId: one(raw.categoryId) || FILTER_DEFAULTS.categoryId,
+    categoryIds: parseCategoryIds(raw.categoryId),
+    cardId: cardId && cardId !== "all" ? cardId : FILTER_DEFAULTS.cardId,
     currency: (CURRENCY_VALUES as readonly string[]).includes(currency)
       ? (currency as QueryCurrency)
       : FILTER_DEFAULTS.currency,
@@ -99,46 +148,71 @@ export function parseMovementQuery(raw: RawParams): MovementQuery {
       : FILTER_DEFAULTS.status,
     from: isValidIsoDate(from) ? from : FILTER_DEFAULTS.from,
     to: isValidIsoDate(to) ? to : FILTER_DEFAULTS.to,
+    minCents: parseAmountParam(one(raw.min)),
+    maxCents: parseAmountParam(one(raw.max)),
+    sort: (SORT_VALUES as readonly string[]).includes(sort) ? (sort as MovementSort) : defaultSort,
     page: Number.isInteger(page) && page > 0 ? page : 1,
   }
 }
 
-/**
- * Si hay algún filtro puesto (la página no cuenta). `movement-screen.tsx`
- * la usa para elegir el mensaje de lista vacía y `movement-filters.tsx` para
- * decidir si ofrece "Limpiar".
- */
+/** Si hay algún filtro puesto (la página y el orden no cuentan). */
 export function hayFiltrosActivos(query: MovementQuery): boolean {
-  return FILTER_KEYS.some((k) => query[k] !== FILTER_DEFAULTS[k])
+  return (
+    query.search !== FILTER_DEFAULTS.search ||
+    query.categoryIds.length > 0 ||
+    query.cardId !== FILTER_DEFAULTS.cardId ||
+    query.currency !== FILTER_DEFAULTS.currency ||
+    query.status !== FILTER_DEFAULTS.status ||
+    query.from !== FILTER_DEFAULTS.from ||
+    query.to !== FILTER_DEFAULTS.to ||
+    query.minCents !== null ||
+    query.maxCents !== null
+  )
+}
+
+/**
+ * Cuántos grupos de filtros están activos (para el badge móvil `Filtros (n)`).
+ * Incluye el estado (§4: "el contador incluye el estado").
+ */
+export function activeFilterCount(query: MovementQuery): number {
+  return [
+    Boolean(query.search),
+    query.categoryIds.length > 0,
+    query.cardId !== FILTER_DEFAULTS.cardId,
+    query.currency !== FILTER_DEFAULTS.currency,
+    query.status !== FILTER_DEFAULTS.status,
+    Boolean(query.from || query.to),
+    query.minCents !== null || query.maxCents !== null,
+  ].filter(Boolean).length
 }
 
 /**
  * Los filtros que entiende la consulta (`listMovements`, `listMovementsPage`),
  * con `undefined` donde no hay filtro. `kind` no sale de acá: lo pone la
  * pantalla, no la URL.
- *
- * El estado tampoco viaja, y no es un olvido: no es una columna de la base,
- * se deriva de las cuotas. Quien filtra por estado corta en memoria después
- * (ver `ListaConPaginacion` en `movement-screen.tsx`).
  */
 export function movementFiltersFromQuery(query: MovementQuery): {
   search?: string
-  categoryId?: string
+  categoryIds?: string[]
+  cardId?: string
   currency?: QueryCurrency
   from?: string
   to?: string
+  minCents?: number
+  maxCents?: number
 } {
-  const puesto = <K extends FilterKey>(k: K) =>
-    query[k] === FILTER_DEFAULTS[k] ? undefined : query[k]
-
   return {
-    search: puesto("search"),
-    categoryId: puesto("categoryId"),
-    // El cast lo permite el propio `puesto`: devuelve `undefined` justo cuando
-    // el valor es "all", así que lo que sobrevive sólo puede ser una moneda.
-    currency: puesto("currency") as QueryCurrency | undefined,
-    from: puesto("from"),
-    to: puesto("to"),
+    search: query.search || undefined,
+    categoryIds: query.categoryIds.length > 0 ? query.categoryIds : undefined,
+    cardId: query.cardId !== FILTER_DEFAULTS.cardId ? query.cardId : undefined,
+    currency:
+      query.currency !== FILTER_DEFAULTS.currency
+        ? (query.currency as QueryCurrency)
+        : undefined,
+    from: query.from || undefined,
+    to: query.to || undefined,
+    minCents: query.minCents ?? undefined,
+    maxCents: query.maxCents ?? undefined,
   }
 }
 
@@ -147,47 +221,59 @@ export type Page<T> = {
   /** La página que realmente se muestra: puede no ser la pedida. */
   page: number
   totalPages: number
+  /** Total de ítems antes de paginar ("21–40 de 134"). */
+  totalCount: number
 }
 
 /**
  * Corta la página pedida. Si se pide una que ya no existe —pasa siempre que un
  * filtro achica la lista con el `?page=` viejo todavía en la URL— devuelve la
- * última en vez de una lista vacía: una tabla en blanco con datos cargados se
- * lee como un bug.
+ * última en vez de una lista vacía.
  */
 export function paginate<T>(items: T[], page: number): Page<T> {
-  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
+  const totalCount = items.length
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
   const current = Math.min(Math.max(1, page), totalPages)
   const start = (current - 1) * PAGE_SIZE
 
-  return { items: items.slice(start, start + PAGE_SIZE), page: current, totalPages }
+  return {
+    items: items.slice(start, start + PAGE_SIZE),
+    page: current,
+    totalPages,
+    totalCount,
+  }
 }
 
 /**
  * URL de la lista con `patch` aplicado sobre `query`. Lo que está en su default
- * no se escribe: así /ingresos sin filtros sigue siendo /ingresos y no
- * /ingresos?search=&categoryId=all&status=all&page=1.
+ * no se escribe en la URL.
  *
- * Tocar cualquier filtro resetea la página. Va acá y no en cada llamador
- * porque olvidárselo no rompe nada visible hasta que alguien filtra parado en
- * la página 7 y se encuentra con la tabla vacía.
+ * Tocar cualquier filtro u orden resetea la página a 1.
  */
 export function buildMovementHref(
   basePath: string,
   query: MovementQuery,
   patch: Partial<MovementQuery> = {},
+  defaultSort: MovementSort = "date",
 ): string {
-  const cambiaFiltro = Object.keys(patch).some((k) => k !== "page")
+  const cambiaFiltroUOrden = Object.keys(patch).some((k) => k !== "page")
   const next: MovementQuery = {
     ...query,
     ...patch,
-    page: cambiaFiltro ? 1 : (patch.page ?? query.page),
+    page: cambiaFiltroUOrden ? 1 : (patch.page ?? query.page),
   }
 
   const params = new URLSearchParams()
-  for (const k of FILTER_KEYS) {
-    if (next[k] !== FILTER_DEFAULTS[k]) params.set(k, next[k])
-  }
+  if (next.search !== FILTER_DEFAULTS.search) params.set("search", next.search)
+  if (next.categoryIds.length > 0) params.set("categoryId", next.categoryIds.join(","))
+  if (next.cardId !== FILTER_DEFAULTS.cardId) params.set("cardId", next.cardId)
+  if (next.currency !== FILTER_DEFAULTS.currency) params.set("currency", next.currency)
+  if (next.status !== FILTER_DEFAULTS.status) params.set("status", next.status)
+  if (next.from !== FILTER_DEFAULTS.from) params.set("from", next.from)
+  if (next.to !== FILTER_DEFAULTS.to) params.set("to", next.to)
+  if (next.minCents !== null) params.set("min", formatAmountParam(next.minCents))
+  if (next.maxCents !== null) params.set("max", formatAmountParam(next.maxCents))
+  if (next.sort !== defaultSort) params.set("sort", next.sort)
   if (next.page > 1) params.set("page", String(next.page))
 
   const qs = params.toString()

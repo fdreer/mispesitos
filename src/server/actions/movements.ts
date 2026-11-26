@@ -16,7 +16,9 @@ import { BASE_PATHS } from "@/lib/movement-routes"
 import { exchangeSchema, movementSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { planCardInstallments } from "@/server/card-plan"
+import { queryMovementsView, type MovementWithInstallments } from "@/server/queries"
 import { requireUser } from "@/server/session"
+import type { MovementQuery } from "@/lib/movement-query"
 
 /**
  * Un movimiento sólo puede ir a una categoría HOJA (decisión 7.4 del plan v2):
@@ -555,4 +557,24 @@ export async function setInstallmentPaid(
 
   revalidatePath("/", "layout")
   return success()
+}
+
+/**
+ * Trae la página siguiente para el botón "Cargar más" en móvil (§5.3),
+ * manteniendo los mismos filtros, estado y orden de la URL.
+ */
+export async function fetchMovementListPage(
+  kind: "income" | "expense",
+  query: MovementQuery,
+  page: number,
+): Promise<{ items: MovementWithInstallments[]; page: number; totalPages: number; totalCount: number }> {
+  const user = await requireUser()
+  const today = todayInAr()
+  const view = await queryMovementsView(user.id, kind, { ...query, page }, today)
+  return {
+    items: view.items,
+    page: view.page,
+    totalPages: view.totalPages,
+    totalCount: view.totalCount,
+  }
 }

@@ -92,6 +92,13 @@
       "when": 1795715799155,
       "tag": "0012_tarjetas_de_credito",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795718479736,
+      "tag": "0013_indices_listados_y_filtros",
+      "breakpoints": true
     }
   ]
 }

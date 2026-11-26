@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import { categoryHue, paletteHue } from "@/lib/category-color"
 import {
   buildCategoryTree,
+  categoryCheckState,
   categoryLabels,
   flattenSelectorGroups,
   isLeafCategory,
@@ -10,6 +11,7 @@ import {
   normalizeSearch,
   selectorGroups,
   spendByParent,
+  toggleCategorySelection,
   type TreeCategory,
 } from "@/lib/category-tree"
 
@@ -199,5 +201,30 @@ describe("spendByParent", () => {
     expect(result.map(({ name, arsCents }) => ({ name, arsCents }))).toEqual([
       { name: "Comida", arsCents: 3_000 },
     ])
+  })
+})
+
+describe("toggleCategorySelection / categoryCheckState", () => {
+  it("elegir un padre marca al padre y todas sus hijas; volver a tocarlo limpia todo", () => {
+    const selected = toggleCategorySelection([], "hogar", TODAS)
+    expect(selected).toEqual(["hogar"])
+    expect(categoryCheckState(selected, "hogar", TODAS)).toBe(true)
+    expect(categoryCheckState(selected, "alquiler", TODAS)).toBe(true)
+    expect(categoryCheckState(selected, "expensas", TODAS)).toBe(true)
+    expect(categoryCheckState(selected, "ocio", TODAS)).toBe(false)
+
+    expect(toggleCategorySelection(selected, "hogar", TODAS)).toEqual([])
+  })
+
+  it("desmarcar una hija cuando el padre estaba elegido deja sólo las otras hijas", () => {
+    const after = toggleCategorySelection(["hogar"], "alquiler", TODAS)
+    expect(after).toEqual(["expensas"])
+    expect(categoryCheckState(after, "hogar", TODAS)).toBe("indeterminate")
+    expect(categoryCheckState(after, "alquiler", TODAS)).toBe(false)
+    expect(categoryCheckState(after, "expensas", TODAS)).toBe(true)
+  })
+
+  it("marcar la última hija faltante compacta de vuelta en el id del padre", () => {
+    expect(toggleCategorySelection(["expensas"], "alquiler", TODAS)).toEqual(["hogar"])
   })
 })

@@ -1,19 +1,27 @@
 "use client"
 
-import { useEffect, useRef, useState, useTransition, type ReactNode } from "react"
+import { useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { CalendarIcon, SearchIcon, SlidersHorizontal, XIcon } from "lucide-react"
+import {
+  CalendarIcon,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CreditCard,
+  SearchIcon,
+  SlidersHorizontal,
+  XIcon,
+} from "lucide-react"
 import { es } from "date-fns/locale"
 import type { DateRange } from "react-day-picker"
 
 import { CategoryBadge } from "@/components/category-badge"
-import { buildCategoryTree, categoryLabels } from "@/lib/category-tree"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Sheet, SheetClose, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
   Select,
   SelectContent,
@@ -21,209 +29,92 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { dateToIso, formatIsoForDisplay, isoToDate } from "@/lib/dates"
-import { cn } from "@/lib/utils"
 import {
-  CURRENCY_VALUES,
-  SEARCH_MAX,
-  STATUS_VALUES,
+  Sheet,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import {
+  buildCategoryTree,
+  categoryCheckState,
+  categoryLabels,
+  normalizeSearch,
+  toggleCategorySelection,
+} from "@/lib/category-tree"
+import {
+  DATE_PRESETS,
+  detectDatePreset,
+  formatPeriodLabel,
+  presetRange,
+  shiftPeriod,
+} from "@/lib/date-presets"
+import { dateToIso, isoToDate, type IsoDate } from "@/lib/dates"
+import { formatAmountInput, formatMoney, parseAmountToCents } from "@/lib/money"
+import type { MovementSort } from "@/lib/movement-list-view"
+import {
+  activeFilterCount,
   buildMovementHref,
+  CARD_FILTER_CASH,
+  CURRENCY_VALUES,
+  FILTER_DEFAULTS,
   hayFiltrosActivos,
   parseMovementQuery,
+  rawParamsFromSearchParams,
+  SEARCH_MAX,
   type MovementQuery,
   type QueryCurrency,
 } from "@/lib/movement-query"
 import type { MovementStatus } from "@/lib/movement-status"
+import { cn } from "@/lib/utils"
+import type { CardOption } from "@/server/card-queries"
 import type { Category } from "@/server/queries"
 
-/** Las etiquetas quedan acá; el conjunto de valores viene de STATUS_VALUES
- * (movement-query.ts) para que el desplegable no pueda ofrecer un estado que
- * el parser no entiende — ver finding 4 de la auditoría. */
 const STATUS_LABELS: Record<MovementStatus, string> = {
-  pending: "Pendiente",
-  paid: "Pagado",
-  overdue: "Vencido",
+  pending: "Pendientes",
+  paid: "Pagados",
+  overdue: "Vencidos",
 }
 
-const STATUS_OPTIONS: (MovementStatus | "all")[] = ["all", ...STATUS_VALUES]
+const SORT_LABELS: Record<MovementSort, string> = {
+  due: "Vencimiento",
+  date: "Fecha",
+  amount: "Importe",
+}
 
-/**
- * "ARS" y "USD" ya son las etiquetas: son los códigos que la app muestra en
- * todas partes (el desplegable de carga de `movement-form.tsx` usa los mismos)
- * así que no hay nada que traducir. La lista sale de `CURRENCY_VALUES`, mismo
- * criterio que el estado: el desplegable no puede ofrecer una moneda que el
- * parser no entienda.
- */
 const CURRENCY_OPTIONS: (QueryCurrency | "all")[] = ["all", ...CURRENCY_VALUES]
 
-/**
- * El texto que va adentro del `SelectValue` de cada desplegable, calculado
- * acá en vez de dejárselo a Radix.
- *
- * Radix no lo escribe él: cada `SelectItem` seleccionado se portea a sí mismo
- * dentro del trigger, y un portal existe recién después de montar en el
- * navegador. En el HTML que manda el servidor los dos triggers salen VACÍOS,
- * y como esta pantalla ahora manda la barra de filtros mucho antes que la
- * tabla (ver `movement-screen.tsx`), esa ventana pasó de invisible a bien
- * visible: se veían dos cajas sin texto donde tenía que decir con qué está
- * filtrada la lista. Pasándole `children` al `SelectValue`, Radix desactiva
- * ese portal (`valueNodeHasChildren`) y usa este texto, que sí viaja en el
- * HTML.
- *
- * `undefined` —no una cadena vacía— cuando el id no corresponde a ninguna
- * categoría conocida: eso es alcanzable escribiendo la URL a mano, y en ese
- * caso conviene volver al comportamiento de Radix (trigger vacío) antes que
- * mentir con "Todas" mientras la consulta filtra por un id que no existe.
- */
-function categoriaValue(categoryId: string, categories: Category[]): ReactNode | undefined {
-  if (categoryId === "all") return TODAS
-  const label = categoryLabels(categories).get(categoryId)
-  return label === undefined ? undefined : <CategoryBadge {...label} />
-}
-
-/**
- * Las opciones de categoría en orden de árbol: cada padre y, debajo y con
- * sangría, sus subcategorías (Fase 2 del plan v2). A diferencia del selector
- * del formulario, acá un padre SÍ es una opción: filtrar por "Hogar" trae lo
- * de todas sus subcategorías (ver `movementConditions` en @/server/queries).
- *
- * El multiselect y el resto de la barra nueva son de la Fase 4; esto es lo
- * mínimo para que el filtro de hoy no muestre una lista plana donde "General"
- * aparece dos veces sin decir de qué.
- */
-function categoriaItems(categories: Category[]): ReactNode {
-  const labels = categoryLabels(categories)
-  return buildCategoryTree(categories).flatMap((node) => [
-    <SelectItem key={node.id} value={node.id}>
-      <CategoryBadge name={node.name} hue={labels.get(node.id)?.hue} />
-    </SelectItem>,
-    ...node.children.map((child) => (
-      <SelectItem key={child.id} value={child.id} className="pl-6">
-        <CategoryBadge name={child.name} hue={labels.get(child.id)?.hue} />
-      </SelectItem>
-    )),
-  ])
-}
-
-/**
- * "Todas"/"Todos" van en texto atenuado y no en badge: no son una categoría
- * ni un estado, son la AUSENCIA de filtro, y darles un color propio las
- * pondría al mismo nivel visual que las opciones que sí filtran algo.
- */
-const TODAS = <span className="text-muted-foreground">Todas</span>
-
-/**
- * El punto de color de cada estado en el segmentado. Reusa el mismo `Badge`
- * que pinta la tabla (vía `StatusBadge`) pero sin texto: acá el texto va
- * afuera, en el propio segmento, así que el badge queda reducido a su color.
- * Es lo que convierte la fila de segmentos en la referencia de color de la
- * tabla — se ve qué color es cada estado sin tener que abrir nada.
- */
-const DOT_CLASS = "size-1.5 rounded-full"
-
-const DOT_COLOR: Record<MovementStatus, string> = {
-  pending: "bg-ember-orange",
-  paid: "bg-pulse-green",
-  overdue: "bg-coral-red",
-}
-
-/** Cuánto se espera a que la persona deje de tipear antes de navegar. */
-const DEBOUNCE_MS = 400
-
-/**
- * Ancho de cada campo, en un solo lugar. Tres motivos para que sean anchos
- * FIJOS y no `flex-1`:
- *
- * 1. El buscador tenía `min-w-56 flex-1` y se comía todo el sobrante de la
- *    fila (unos 690px en un monitor normal) por ser el único que crecía. Un
- *    campo de texto de 700px para escribir "kiosco" no ayuda a nadie y hacía
- *    que la barra se leyera como un formulario en vez de un filtro.
- * 2. El período no tenía ancho propio: se lo daba su contenido, que cambia
- *    de "Elegir un período" a "01/03/2026 – 20/03/2026". Elegir un rango
- *    ensanchaba el botón y corría todo lo que tenía al lado.
- * 3. Con anchos fijos los cuatro campos ocupan lo mismo carga tras carga, así
- *    que el esqueleto de más abajo puede reservar exactamente el mismo lugar
- *    y la barra no salta cuando llegan las categorías.
- *
- * El período entra "01/03/2026 – 20/03/2026" (el texto más largo que
- * `rangoLabel` puede devolver) más el ícono, sin recortar.
- */
-const FIELD_WIDTH = {
-  search: "w-full sm:w-64",
-  category: "w-40",
-  /* Más angosto que Categoría: su contenido más largo son tres caracteres
-     ("ARS"/"USD"/"Todas"), no un nombre de categoría. */
-  currency: "w-28",
-  /* El segmentado se mide por su contenido —cuatro etiquetas fijas— así que
-   * no lleva ancho propio: dárselo lo recortaría o lo dejaría con aire. */
-  status: "w-auto",
-  period: "w-56",
-} as const
-
-/**
- * Las etiquetas de esta barra no son las de un formulario: acá no se carga
- * nada, se acota una tabla. En el tamaño de `Label` por default competían con
- * el h1 y con los encabezados de la tabla por la misma atención. Chicas y
- * atenuadas siguen estando (que es lo que pide la accesibilidad) sin pelearse
- * con el contenido.
- */
 const LABEL_CLASS = "text-xs font-normal text-muted-foreground"
-
-/** La fila entera. Compartida con el esqueleto para que no puedan separarse. */
 const BAR_CLASS = "flex flex-wrap items-end gap-x-2 gap-y-3"
 
-/**
- * Bordes de navegación del calendario, en años redondos para que el
- * desplegable de año quede prolijo. SIN esto, `captionLayout="dropdown"`
- * hace que react-day-picker 10 (`getNavMonth`) calcule sus propios bordes
- * y el techo queda en el 31 de diciembre de ESTE año: la flecha "mes
- * siguiente" se deshabilita ahí, el desplegable de año no ofrece ningún año
- * futuro, y `defaultMonth` se clampea de vuelta a ese techo aunque pida un
- * mes más adelante — un `?from=` de marzo del año que viene abriría en
- * diciembre de este año con la selección fuera de pantalla. Esta app SÍ
- * necesita ese margen hacia adelante: `addMonthsClamped` en
- * `installments.ts` agenda cuotas hasta `MAX_INSTALLMENTS = 120` meses
- * (diez años) desde la primera fecha de vencimiento, así que sin este borde
- * hay movimientos reales que ningún filtro de fecha puede alcanzar. No
- * simplificar sacando estos bordes: sin ellos el tope silencioso vuelve.
- */
+const DEBOUNCE_MS = 400
+
 const CALENDAR_YEARS_MARGIN = 10
 const CALENDAR_START_MONTH = new Date(new Date().getFullYear() - CALENDAR_YEARS_MARGIN, 0, 1)
 const CALENDAR_END_MONTH = new Date(new Date().getFullYear() + CALENDAR_YEARS_MARGIN, 11, 1)
 
-function activeFilterCount(query: MovementQuery): number {
-  return [
-    Boolean(query.search),
-    query.categoryId !== "all",
-    query.currency !== "all",
-    query.status !== "all",
-    Boolean(query.from || query.to),
-  ].filter(Boolean).length
+const TODAS = <span className="text-muted-foreground">Todas</span>
+const TODOS = <span className="text-muted-foreground">Todos</span>
+
+function centsToInputValue(cents: number | null): string {
+  if (cents === null) return ""
+  return formatAmountInput((cents / 100).toFixed(2).replace(".", ","))
 }
 
-/**
- * Texto del botón que dispara el calendario. Cubre los cuatro casos que
- * `MovementQuery` permite: sin rango, sólo piso, sólo techo, o los dos. Del
- * calendario en sí sólo salen tres (sin rango, sólo piso — un solo click,
- * ver `handleCalendarSelect` — y los dos lados); "sólo techo" es alcanzable
- * nada más escribiendo la URL a mano o desde un link externo (el `?status=`
- * del dashboard sigue el mismo patrón), así que el botón tiene que poder
- * mostrarlo igual.
- */
-function rangoLabel(from: string, to: string): string {
-  if (from && to) return `${formatIsoForDisplay(from)} – ${formatIsoForDisplay(to)}`
-  if (from) return `Desde ${formatIsoForDisplay(from)}`
-  if (to) return `Hasta ${formatIsoForDisplay(to)}`
-  return "Elegir un período"
+function formatAmountRangeLabel(minCents: number | null, maxCents: number | null): string {
+  if (minCents !== null && maxCents !== null) {
+    return `${formatMoney(minCents, "ARS", minCents % 100 === 0 ? 0 : 2)} – ${formatMoney(maxCents, "ARS", maxCents % 100 === 0 ? 0 : 2)}`
+  }
+  if (minCents !== null) {
+    return `Desde ${formatMoney(minCents, "ARS", minCents % 100 === 0 ? 0 : 2)}`
+  }
+  if (maxCents !== null) {
+    return `Hasta ${formatMoney(maxCents, "ARS", maxCents % 100 === 0 ? 0 : 2)}`
+  }
+  return "Importe"
 }
 
-/**
- * `query.from`/`query.to` (los dos ISO) al `DateRange` que espera
- * `react-day-picker`. Se usa SÓLO para sembrar el borrador al abrir el
- * popover (ver `draft` más abajo) — el calendario en sí ya no lee `query`
- * directo mientras está abierto.
- */
 function rangeFromQuery(query: Pick<MovementQuery, "from" | "to">): DateRange | undefined {
   return query.from || query.to
     ? {
@@ -233,7 +124,6 @@ function rangeFromQuery(query: Pick<MovementQuery, "from" | "to">): DateRange | 
     : undefined
 }
 
-/** El camino inverso: de un `DateRange` (o nada) al patch que espera `go()`. */
 function rangeToPatch(range: DateRange | undefined): Pick<MovementQuery, "from" | "to"> {
   return {
     from: range?.from ? dateToIso(range.from) : "",
@@ -241,108 +131,170 @@ function rangeToPatch(range: DateRange | undefined): Pick<MovementQuery, "from" 
   }
 }
 
-/**
- * Reconstruye la query que representa un href ya armado por
- * `buildMovementHref`. Se usa para actualizar `queryRef` después de cada
- * `push`: en vez de reimplementar acá dónde vive cada default o cuándo se
- * resetea la página (reglas que ya son de `buildMovementHref`), se las pide
- * de vuelta a `parseMovementQuery` sobre el mismo string que se está por
- * empujar — así el href que se navega y la query que queda guardada nunca
- * pueden desalinearse entre sí.
- */
-function hrefToQuery(href: string): MovementQuery {
+function hrefToQuery(href: string, defaultSort: MovementSort): MovementQuery {
   const qs = href.split("?")[1] ?? ""
-  return parseMovementQuery(Object.fromEntries(new URLSearchParams(qs)))
+  return parseMovementQuery(rawParamsFromSearchParams(new URLSearchParams(qs)), defaultSort)
+}
+
+function cardLabel(cardId: string, cards: CardOption[]): string {
+  if (cardId === CARD_FILTER_CASH) return "Efectivo / débito"
+  const found = cards.find((c) => c.id === cardId)
+  if (!found) return cardId
+  return found.archived ? `${found.name} (archivada)` : found.name
+}
+
+function categorySummaryText(categoryIds: string[], categories: Category[]): string {
+  if (categoryIds.length === 0) return "Todas"
+  if (categoryIds.length === 1) {
+    const label = categoryLabels(categories).get(categoryIds[0])
+    if (!label) return "1 categoría"
+    return label.parentName ? `${label.parentName} › ${label.name}` : label.name
+  }
+  return `${categoryIds.length} categorías`
+}
+
+/** Árbol de categorías con checkboxes para multiselección (§4). */
+function CategoryChecklist({
+  categories,
+  selectedIds,
+  onToggle,
+  searchTerm,
+}: {
+  categories: Category[]
+  selectedIds: string[]
+  onToggle: (id: string) => void
+  searchTerm: string
+}) {
+  const labels = categoryLabels(categories)
+  const tree = buildCategoryTree(categories)
+  const q = normalizeSearch(searchTerm)
+
+  const filteredTree = tree
+    .map((node) => {
+      if (!q) return node
+      const parentMatches = normalizeSearch(node.name).includes(q)
+      if (parentMatches) return node
+      const matchingChildren = node.children.filter((c) => normalizeSearch(c.name).includes(q))
+      if (matchingChildren.length === 0) return null
+      return { ...node, children: matchingChildren }
+    })
+    .filter((n): n is NonNullable<typeof n> => n !== null)
+
+  if (filteredTree.length === 0) {
+    return <p className="text-muted-foreground py-4 text-center text-xs">Sin categorías.</p>
+  }
+
+  return (
+    <div className="space-y-1">
+      {filteredTree.map((node) => {
+        const nodeState = categoryCheckState(selectedIds, node.id, categories)
+        const nodeLabel = labels.get(node.id)
+        return (
+          <div key={node.id} className="space-y-0.5">
+            <label className="hover:bg-accent/50 flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-sm">
+              <Checkbox
+                checked={nodeState}
+                onCheckedChange={() => onToggle(node.id)}
+                aria-label={node.name}
+              />
+              <CategoryBadge name={node.name} hue={nodeLabel?.hue} />
+              {node.archived && (
+                <span className="text-muted-foreground text-xs">(archivada)</span>
+              )}
+            </label>
+            {node.children.map((child) => {
+              const childChecked = categoryCheckState(selectedIds, child.id, categories) === true
+              const childLabel = labels.get(child.id)
+              return (
+                <label
+                  key={child.id}
+                  className="hover:bg-accent/50 flex cursor-pointer items-center gap-2 rounded-md py-1.5 pr-1.5 pl-7 text-sm"
+                >
+                  <Checkbox
+                    checked={childChecked}
+                    onCheckedChange={() => onToggle(child.id)}
+                    aria-label={`${node.name} › ${child.name}`}
+                  />
+                  <CategoryBadge name={child.name} hue={childLabel?.hue} />
+                  {child.archived && (
+                    <span className="text-muted-foreground text-xs">(archivada)</span>
+                  )}
+                </label>
+              )
+            })}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 type Props = {
-  /** Ruta de la pantalla actual ("/ingresos" o "/egresos"), sin query. */
+  /** Ruta de la pantalla actual ("/ingresos", "/egresos" o "/informes"), sin query. */
   basePath: string
   query: MovementQuery
-  /**
-   * Incluye las archivadas a propósito: un movimiento viejo puede apuntar a
-   * una categoría ya archivada y tiene que poder filtrarse por ella igual.
-   */
+  /** Orden por defecto de esta pantalla ("due" en egresos, "date" en ingresos). */
+  defaultSort?: MovementSort
+  /** Hoy según el reloj de Buenos Aires, calculado en el servidor. */
+  today: IsoDate
   categories: Category[]
+  cards?: CardOption[]
+  /** Si mostrar el filtro de medio de pago / tarjeta. Por defecto true si hay tarjetas. */
+  showPaymentMethod?: boolean
+  /** Si mostrar el selector de orden. Por defecto true (false en Informes). */
+  showSort?: boolean
+  /** Si mostrar el estado en la hoja móvil. Por defecto true (false en Informes). */
+  showStatus?: boolean
+  /** Si mostrar el selector de moneda. Por defecto true (Informes tiene el propio). */
+  showCurrency?: boolean
+  /** Si mostrar el buscador. Por defecto true. */
+  showSearch?: boolean
 }
 
 /**
- * Los filtros viven en la URL, no en estado local: sobreviven a una recarga,
- * se pueden compartir, y el dashboard puede enlazar directo a la lista ya
- * filtrada (`?status=`, ver dashboard/upcoming.tsx).
+ * Barra de filtros unificada (§4 del plan v2): comparte el mismo modelo URL
+ * para /ingresos, /egresos y la futura pantalla de /informes.
  */
-export function MovementFilters({ basePath, query, categories }: Props) {
-  // Se saca `push` del objeto en vez de usar `router` entero: el objeto que
-  // devuelve `useRouter()` se re-memoiza en cada navegación, pero `push` en sí
-  // es un singleton estable en Next 16 — por eso desestructurarlo alcanza para
-  // tener siempre la función vigente sin acarrear el objeto que la contiene.
+export function MovementFilters({
+  basePath,
+  query,
+  defaultSort = "date",
+  today,
+  categories,
+  cards = [],
+  showPaymentMethod = cards.length > 0,
+  showSort = true,
+  showStatus = true,
+  showCurrency = true,
+  showSearch = true,
+}: Props) {
   const { push } = useRouter()
   const [search, setSearch] = useState(query.search)
+  const [lastQuerySearch, setLastQuerySearch] = useState(query.search)
+  if (query.search !== lastQuerySearch) {
+    setLastQuerySearch(query.search)
+    setSearch(query.search)
+  }
+
   const [pending, startTransition] = useTransition()
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
-  // Rango en BORRADOR mientras el popover del período está abierto. Esto NO
-  // es un espejo del filtro comprometido (lo que la arquitectura prohíbe):
-  // `query.from`/`query.to` siguen siendo la única fuente para el texto del
-  // botón disparador y para todo lo demás de la barra. `draft` vive y muere
-  // con una sola apertura del popover — se siembra desde `query` al abrir
-  // (`handlePeriodoOpenChange`) y se descarta al cerrar, aplicado o no. Sin
-  // esto, cada click en un día navegaba solo: `selected` salía de `query`,
-  // que queda vieja durante toda la transición, así que un segundo click
-  // antes de que el primero commitee no veía el primer día puesto y perdía
-  // el rango a medias (hallazgo A de la auditoría).
+  const [mobileDraft, setMobileDraft] = useState<MovementQuery>(query)
+  const [mobileMinInput, setMobileMinInput] = useState("")
+  const [mobileMaxInput, setMobileMaxInput] = useState("")
+  const [mobileShowCalendar, setMobileShowCalendar] = useState(false)
+  const [mobileCatSearch, setMobileCatSearch] = useState("")
+
+  const [categorySearch, setCategorySearch] = useState("")
+  const [amountOpen, setAmountOpen] = useState(false)
+  const [minInput, setMinInput] = useState("")
+  const [maxInput, setMaxInput] = useState("")
+
   const [draft, setDraft] = useState<DateRange | undefined>(undefined)
-  // Sólo existe para que el efecto de acá abajo sepa si tiene que resembrar
-  // `draft` cuando cambia `query` (ver ese comentario): Radix es dueño de su
-  // propio estado de apertura y sólo nos avisa por `onOpenChange`, así que
-  // sin esto el componente no tiene forma de saber "¿el popover sigue
-  // abierto ahora?" fuera de ese callback.
   const [periodoAbierto, setPeriodoAbierto] = useState(false)
-  // Vive en un ref: `go()`, `limpiar()` y el propio debounce necesitan poder
-  // cancelarlo o reprogramarlo entre renders sin disparar uno nuevo (un
-  // estado sí lo haría).
+
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  // Guarda la ÚLTIMA query que efectivamente se empujó con `push`, no la que
-  // llegó por props: la prop se queda mostrando el valor viejo hasta que el
-  // viaje al servidor commitea, así que si `go()` o el debounce armaran el
-  // próximo href desde la prop, un segundo cambio de filtro disparado antes
-  // de ese commit pisaría al primero en vez de sumarse (finding 1 de la
-  // auditoría). `go()`, `handleSearchChange()` y `limpiar()` la actualizan
-  // cada vez que empujan.
-  //
-  // El efecto de acá abajo la vuelve a poner en sync con la prop, pero sólo
-  // cuando la prop CAMBIA (dependencia `[query]`, no "después de cada
-  // render"): así vuelve a reflejar la realidad en cuanto el server manda
-  // props frescas, sea por el commit de una navegación propia, el botón
-  // Atrás o un link externo (el `?status=` del dashboard). Si en cambio
-  // corriera en cada render, el propio cambio de `pending` que dispara
-  // `useTransition` —que pasa ANTES de que la navegación commitee y con la
-  // prop todavía vieja— pisaría el valor recién empujado con esa prop vieja,
-  // reabriendo el mismo bug.
   const queryRef = useRef(query)
-  // Además de la sync de arriba, este efecto resiembra `draft` cuando `query`
-  // cambia CON EL POPOVER TODAVÍA ABIERTO. Sin esto, Atrás/Adelante del
-  // navegador puede deshacerse solo: Radix no cierra el popover por una
-  // navegación de historial (no es él quien la escucha), así que `draft` se
-  // queda con la selección de ANTES de volver; al cerrar, la comparación de
-  // `handlePeriodoOpenChange` la ve distinta de la `query` ya vuelta atrás y
-  // la reaplica con `go()`, pisando el Atrás que la persona acaba de pedir.
-  //
-  // La comparación es por VALOR de `from`/`to` contra `queryRef.current`, NO
-  // por referencia del objeto `query` entero: eso es lo que distingue un
-  // cambio externo (Atrás, Adelante, un link) de uno que este mismo
-  // componente originó (`go()`, `limpiar()`, el debounce del buscador). Esos
-  // tres actualizan `queryRef.current` SINCRÓNICAMENTE al valor que están por
-  // confirmar, antes de que el `push` real commitee — así que para cuando la
-  // prop `query` efectivamente llega, ya coincide EN VALOR con
-  // `queryRef.current` (aunque sea un objeto `MovementQuery` nuevo, con otra
-  // referencia: `hrefToQuery` arma uno de cero en cada llamada). Eso es clave
-  // para no pisar una selección en curso: después de clickear "Borrar rango"
-  // (que navega con el popover todavía abierto, ver más abajo), la persona
-  // puede arrancar un rango nuevo mientras ese primer push todavía viaja: la
-  // llegada tardía de la `query` ya vacía coincide EN VALOR con lo que
-  // `queryRef.current` ya tenía anotado desde el click, así que no se
-  // considera "externa" y el rango nuevo que se está armando no se resiembra
-  // por encima.
+
   useEffect(() => {
     if (
       periodoAbierto &&
@@ -352,90 +304,43 @@ export function MovementFilters({ basePath, query, categories }: Props) {
     }
     queryRef.current = query
   }, [query, periodoAbierto])
-  // El timeout del debounce es un setTimeout de JS puro: React no sabe que
-  // existe, así que si el componente se desmonta antes de que dispare, nadie
-  // lo cancela y termina navegando desde una pantalla que ya no está.
+
   useEffect(() => () => clearTimeout(searchTimeout.current), [])
 
-  // El buscador navega solo, con espera: una navegación por tecla tipeada es
-  // una consulta a la base por tecla. Los otros filtros cambian de a un click
-  // y navegan directo. El timeout se arma acá, en el propio `onChange`, y no
-  // en un efecto: así sólo lo arma una tecla real, nunca un cambio de estado
-  // que el componente se provocó a sí mismo (que era la causa de fondo de la
-  // carrera anterior).
-  //
-  // ponytail: `search` sólo se inicializa desde `query.search` al montar y no
-  // se resincroniza después. Si la URL cambia desde afuera sin desmontar el
-  // componente (típicamente el botón Atrás), el input se queda mostrando el
-  // texto tipeado aunque `query.search` ya sea otro. Es sólo visual: el
-  // timeout de acá abajo lee `queryRef.current` al disparar, así que ninguna
-  // navegación sale con datos viejos por esto.
-  function handleSearchChange(value: string) {
-    setSearch(value)
-    // Cancela el debounce anterior: si no, dos teclas seguidas arman dos
-    // timeouts y navegan dos veces.
-    clearTimeout(searchTimeout.current)
-    searchTimeout.current = setTimeout(() => {
-      const href = buildMovementHref(basePath, queryRef.current, { search: value })
-      // Se guarda ANTES del push (no importa el orden real, pero así queda
-      // junto a la construcción del mismo href): ver el comentario de
-      // `queryRef` más arriba.
-      queryRef.current = hrefToQuery(href)
-      startTransition(() => {
-        push(href)
-      })
-    }, DEBOUNCE_MS)
-  }
-
-  function go(patch: Partial<MovementQuery>) {
-    // Cancela el debounce del buscador si todavía estaba armado. Ya no puede
-    // pisar este filtro —parte de `queryRef.current`, que este push acaba de
-    // actualizar—, pero sí navegaría una segunda vez 400ms después de que la
-    // persona soltó el buscador y agarró otro control. Ese viaje no lo pidió
-    // nadie.
-    clearTimeout(searchTimeout.current)
-    // Parte de `queryRef.current`, no de la prop `query`: ver el comentario
-    // de `queryRef` más arriba (finding 1 de la auditoría).
-    const href = buildMovementHref(basePath, queryRef.current, patch)
-    queryRef.current = hrefToQuery(href)
+  function pushHref(href: string) {
+    queryRef.current = hrefToQuery(href, defaultSort)
     startTransition(() => {
       push(href)
     })
   }
 
-  // Cada click en un día actualiza SÓLO el borrador, nunca navega (hallazgo
-  // A). `react-day-picker` en modo rango, sin restricciones extra (`min`,
-  // etc.), da un rango completo desde el primer click: `{from: día, to:
-  // día}`, no el `{from, to: undefined}` progresivo que uno esperaría de un
-  // picker de dos pasos (se verificó con un test descartable montando el
-  // propio `Calendar` — no es un supuesto). Eso deja ambiguo qué quiso decir
-  // un solo click: ¿"quiero sólo este día" o "quiero arrancar un rango
-  // abierto"? Se resuelve a favor de lo segundo — un click sólo dejó
-  // `from` puesto, sin `to` — porque es lo que hace falta para no perder la
-  // capacidad de "desde tal fecha, sin techo" que los dos `<input
-  // type="date">` anteriores tenían gratis (si el primer click completara
-  // el rango solo, esa capacidad quedaría inalcanzable desde el mouse).
-  //
-  // Repetir el click sobre el MISMO día confirma ese día como rango
-  // COMPLETO de un solo día (`from` y `to` iguales): es la propia rama
-  // `from && !to` + `isSameDay` de `addToRange` (la función interna de
-  // react-day-picker) la que arma ese resultado en cuanto `draft` ya trae
-  // `from` puesto, así que no hace falta reimplementar nada para ese paso —
-  // sólo evitar que el PRIMER click ya lo complete solo. Un tercer click
-  // sobre el mismo día limpia el borrador entero (misma rama de la
-  // librería, con el rango ya completo). Se documenta la secuencia acá
-  // porque no es obvia leyendo sólo el código de abajo.
-  //
-  // `draft` con sólo `to` puesto (alcanzable escribiendo la URL a mano, no
-  // desde el calendario) es la otra mitad del mismo problema: `addToRange`
-  // no tiene ninguna rama para esa forma y devuelve `undefined` sin tocar
-  // el día clickeado, borrando el filtro en el próximo click sin que la
-  // persona lo haya pedido (tercer bug de este hallazgo). Por eso acá abajo
-  // no se confía en el `range` que computó la librería para decidir si hay
-  // que "arrancar de cero": se usa `triggerDate` (el día clickeado, que
-  // react-day-picker manda siempre aparte de `range`) tanto para el primer
-  // click de un borrador vacío como para cualquier click sobre un borrador
-  // roto de sólo `to`. Ninguno de los dos casos pierde el click.
+  function go(patch: Partial<MovementQuery>) {
+    clearTimeout(searchTimeout.current)
+    const href = buildMovementHref(basePath, queryRef.current, patch, defaultSort)
+    pushHref(href)
+  }
+
+  function handleSearchChange(value: string) {
+    setSearch(value)
+    clearTimeout(searchTimeout.current)
+    searchTimeout.current = setTimeout(() => {
+      const href = buildMovementHref(basePath, queryRef.current, { search: value }, defaultSort)
+      pushHref(href)
+    }, DEBOUNCE_MS)
+  }
+
+  function limpiar() {
+    clearTimeout(searchTimeout.current)
+    setSearch("")
+    const emptyHref = buildMovementHref(
+      basePath,
+      queryRef.current,
+      { ...FILTER_DEFAULTS, page: 1 },
+      defaultSort,
+    )
+    pushHref(emptyHref)
+  }
+
   function handleCalendarSelect(range: DateRange | undefined, triggerDate: Date) {
     if (!draft?.from) {
       setDraft({ from: triggerDate, to: undefined })
@@ -444,190 +349,751 @@ export function MovementFilters({ basePath, query, categories }: Props) {
     setDraft(range)
   }
 
-  /**
-   * Abrir/cerrar el popover del período. Radix manda ACÁ los tres caminos de
-   * cierre (Escape, click afuera, o el propio trigger de nuevo — los tres
-   * llaman a `context.onOpenChange(false)` adentro de Radix, se verificó
-   * leyendo `@radix-ui/react-popover`), así que un solo callback alcanza
-   * para aplicar el borrador sin importar cómo se cerró.
-   */
   function handlePeriodoOpenChange(open: boolean) {
     setPeriodoAbierto(open)
     if (open) {
-      // Única vez que el borrador copia algo de afuera: se siembra desde el
-      // filtro YA aplicado (`query`, igual que el resto de los controles de
-      // esta barra — ver el comentario de `draft` más arriba). De acá en
-      // más vive solo hasta que este mismo popover se cierre.
       setDraft(rangeFromQuery(query))
       return
     }
     const patch = rangeToPatch(draft)
-    // El borrador vive y muere con esta apertura (ver el comentario de
-    // `draft`): se descarta ACÁ, se haya aplicado o no, para que la próxima
-    // apertura nunca herede nada de ésta.
     setDraft(undefined)
-    // Contra `queryRef.current`, no contra la prop `query`: la prop se queda
-    // vieja hasta que el viaje al servidor commitea (mismo motivo que en
-    // `go()`, ver el comentario de `queryRef`). Comparar contra la prop
-    // dejaba una ventana: clickear "Borrar rango" (que ya navegó y actualizó
-    // `queryRef.current`, ver más abajo) y cerrar el popover ANTES de que
-    // ese push commitee comparaba contra una `query` que todavía mostraba el
-    // rango viejo, así que disparaba un segundo push idéntico — inocuo en el
-    // resultado final, pero una entrada de historial de más y un viaje de
-    // más que nadie pidió.
     if (patch.from === queryRef.current.from && patch.to === queryRef.current.to) return
     go(patch)
   }
 
-  function limpiar() {
-    // Mismo motivo que en `go()`: los filtros viejos ya no vuelven —la línea
-    // de abajo deja `queryRef` en cero—, pero el texto que quedó capturado en
-    // el timeout sí, y volvería solo 400ms después de vaciar el campo.
-    clearTimeout(searchTimeout.current)
-    setSearch("")
-    // También hay que dejarla en sync acá: si no, un filtro elegido justo
-    // después de "Limpiar" (todavía sin commitear) compondría sobre los
-    // filtros que se acaban de borrar en vez de partir de cero.
-    queryRef.current = hrefToQuery(basePath)
-    startTransition(() => {
-      push(basePath)
+  function handlePresetClick(presetId: (typeof DATE_PRESETS)[number]["id"]) {
+    const range = presetRange(presetId, today)
+    setDraft(undefined)
+    setPeriodoAbierto(false)
+    go(range)
+  }
+
+  function handleAmountOpenChange(open: boolean) {
+    setAmountOpen(open)
+    if (open) {
+      setMinInput(centsToInputValue(query.minCents))
+      setMaxInput(centsToInputValue(query.maxCents))
+    }
+  }
+
+  function applyAmountPopover(e?: React.FormEvent) {
+    e?.preventDefault()
+    const minCents = minInput.trim() ? parseAmountToCents(minInput) : null
+    const maxCents = maxInput.trim() ? parseAmountToCents(maxInput) : null
+    setAmountOpen(false)
+    go({
+      minCents: minCents !== null && minCents >= 0 ? minCents : null,
+      maxCents: maxCents !== null && maxCents >= 0 ? maxCents : null,
+    })
+  }
+
+  function handleMobileSheetOpenChange(open: boolean) {
+    setMobileFiltersOpen(open)
+    if (open) {
+      const current = queryRef.current
+      setMobileDraft(current)
+      setMobileMinInput(centsToInputValue(current.minCents))
+      setMobileMaxInput(centsToInputValue(current.maxCents))
+      setMobileShowCalendar(detectDatePreset(current.from, current.to, today) === "custom")
+      setMobileCatSearch("")
+    }
+  }
+
+  function applyMobileSheet() {
+    const minCents = mobileMinInput.trim() ? parseAmountToCents(mobileMinInput) : null
+    const maxCents = mobileMaxInput.trim() ? parseAmountToCents(mobileMaxInput) : null
+    setMobileFiltersOpen(false)
+    go({
+      ...mobileDraft,
+      minCents: minCents !== null && minCents >= 0 ? minCents : null,
+      maxCents: maxCents !== null && maxCents >= 0 ? maxCents : null,
+    })
+  }
+
+  const prevShift = shiftPeriod(query.from, query.to, -1)
+  const nextShift = shiftPeriod(query.from, query.to, 1)
+  const activePreset = detectDatePreset(query.from, query.to, today)
+  const periodLabel = formatPeriodLabel(query.from, query.to, today)
+  const labels = categoryLabels(categories)
+  const catSummary = categorySummaryText(query.categoryIds, categories)
+  const amountLabel = formatAmountRangeLabel(query.minCents, query.maxCents)
+  const cardOptions = cards.filter((c) => !c.archived || c.id === query.cardId)
+
+  const chips: {
+    key: string
+    label: string
+    patch: Partial<MovementQuery>
+    clearSearch?: boolean
+  }[] = []
+  if (query.search) {
+    chips.push({
+      key: "search",
+      label: `Buscar: "${query.search}"`,
+      patch: { search: "" },
+      clearSearch: true,
+    })
+  }
+  for (const catId of query.categoryIds) {
+    const cat = labels.get(catId)
+    const name = cat ? (cat.parentName ? `${cat.parentName} › ${cat.name}` : cat.name) : catId
+    chips.push({
+      key: `cat-${catId}`,
+      label: `Categoría: ${name}`,
+      patch: { categoryIds: query.categoryIds.filter((id) => id !== catId) },
+    })
+  }
+  if (query.cardId !== "all") {
+    chips.push({
+      key: "card",
+      label:
+        query.cardId === CARD_FILTER_CASH
+          ? "Medio: Efectivo / débito"
+          : `Tarjeta: ${cardLabel(query.cardId, cards)}`,
+      patch: { cardId: "all" },
+    })
+  }
+  if (query.currency !== "all") {
+    chips.push({
+      key: "currency",
+      label: `Moneda: ${query.currency}`,
+      patch: { currency: "all" },
+    })
+  }
+  if (query.minCents !== null || query.maxCents !== null) {
+    chips.push({
+      key: "amount",
+      label: `Importe: ${amountLabel}`,
+      patch: { minCents: null, maxCents: null },
+    })
+  }
+  if (query.from || query.to) {
+    chips.push({
+      key: "period",
+      label: `Período: ${periodLabel}`,
+      patch: { from: "", to: "" },
+    })
+  }
+  if (query.status !== "all") {
+    chips.push({
+      key: "status",
+      label: `Estado: ${STATUS_LABELS[query.status]}`,
+      patch: { status: "all" },
     })
   }
 
   return (
-    // Los Select muestran el valor viejo hasta que llegan las props nuevas del
-    // server (arquitectura 100% URL, sin estado optimista): atenuar mientras
-    // `pending` está prendido es la señal de "esto ya está cargando", no un
-    // intento de esconder el viaje.
-    <div
-      className={cn(BAR_CLASS, "transition-opacity", pending && "opacity-60")}
-      aria-busy={pending}
-    >
-      <div className={cn(FIELD_WIDTH.search, "space-y-1.5")}>
-        <Label htmlFor="filtro-buscar" className={LABEL_CLASS}>
-          Buscar
-        </Label>
-        {/* El ícono es lo único que distingue de un vistazo este campo de
-            cualquier otro input de texto de la app; sin él, el único que decía
-            "esto busca" era el placeholder, que desaparece apenas se tipea.
-            `pointer-events-none` para que clickear encima siga cayendo en el
-            input y no coma el foco. */}
-        <div className="relative">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            id="filtro-buscar"
-            value={search}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            placeholder="Descripción"
-            maxLength={SEARCH_MAX}
-            className="pl-8"
-          />
-        </div>
-      </div>
+    <div className="space-y-2.5">
+      <div
+        className={cn(BAR_CLASS, "transition-opacity", pending && "opacity-60")}
+        aria-busy={pending}
+      >
+        {showSearch && (
+          <div className="w-full space-y-1.5 sm:w-52 md:w-52">
+            <Label htmlFor="filtro-buscar" className={LABEL_CLASS}>
+              Buscar
+            </Label>
+            <div className="relative">
+              <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="filtro-buscar"
+                value={search}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                placeholder="Texto, categoría o $"
+                maxLength={SEARCH_MAX}
+                className="h-10 pl-8 md:h-8"
+              />
+            </div>
+          </div>
+        )}
 
-      <div className="flex w-full items-end gap-2 md:hidden">
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <Label htmlFor="filtro-mobile-estado" className={LABEL_CLASS}>
-            Estado actual
-          </Label>
-          <Select
-            value={query.status}
-            onValueChange={(v) => go({ status: v as MovementStatus | "all" })}
-          >
-            <SelectTrigger id="filtro-mobile-estado" className="h-11 w-full">
-              <SelectValue>{query.status === "all" ? "Todos" : STATUS_LABELS[query.status]}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {option === "all" ? "Todos" : STATUS_LABELS[option]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* Fila móvil: botón de Filtros (n) con hoja inferior y botón Aplicar (§4). */}
+        <div className="flex w-full items-center gap-2 md:hidden">
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-10 shrink-0"
+              aria-label="Período anterior"
+              disabled={!prevShift}
+              onClick={() => prevShift && go(prevShift)}
+            >
+              <ChevronLeft />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 max-w-44 justify-start truncate px-2.5 text-xs font-normal"
+              onClick={() => handleMobileSheetOpenChange(true)}
+            >
+              <CalendarIcon className="size-3.5 shrink-0" />
+              <span className="truncate">{periodLabel}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-10 shrink-0"
+              aria-label="Período siguiente"
+              disabled={!nextShift}
+              onClick={() => nextShift && go(nextShift)}
+            >
+              <ChevronRight />
+            </Button>
+          </div>
 
-        <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
-          <Button
-            type="button"
-            variant="outline"
-            className="h-11 shrink-0"
-            onClick={() => setMobileFiltersOpen(true)}
-          >
-            <SlidersHorizontal />
-            Filtros ({activeFilterCount(query)})
-          </Button>
-          <SheetContent side="bottom" className="max-h-[80dvh] overflow-y-auto rounded-t-xl">
-            <SheetHeader>
-              <SheetTitle>Filtros</SheetTitle>
-            </SheetHeader>
-            <div className="space-y-4 px-4 pb-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="filtro-mobile-categoria" className={LABEL_CLASS}>
-                  Categoría
-                </Label>
-                <Select value={query.categoryId} onValueChange={(v) => go({ categoryId: v })}>
-                  <SelectTrigger id="filtro-mobile-categoria" className="h-11 w-full">
-                    <SelectValue>{categoriaValue(query.categoryId, categories)}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{TODAS}</SelectItem>
-                    {categoriaItems(categories)}
-                  </SelectContent>
-                </Select>
-              </div>
+          <Sheet open={mobileFiltersOpen} onOpenChange={handleMobileSheetOpenChange}>
+            <Button
+              type="button"
+              variant="outline"
+              className="ml-auto h-10 shrink-0"
+              onClick={() => handleMobileSheetOpenChange(true)}
+            >
+              <SlidersHorizontal />
+              Filtros ({activeFilterCount(query)})
+            </Button>
+            <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-xl">
+              <SheetHeader>
+                <SheetTitle>Filtros</SheetTitle>
+              </SheetHeader>
+              <div className="space-y-5 px-4 pb-4">
+                {showStatus && (
+                  <div className="space-y-1.5">
+                    <Label className={LABEL_CLASS}>Estado</Label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(["all", "overdue", "pending", "paid"] as const).map((st) => {
+                        const active = mobileDraft.status === st
+                        return (
+                          <Button
+                            key={st}
+                            type="button"
+                            variant="outline"
+                            className={cn(
+                              "h-10 justify-start text-xs",
+                              active && "border-mist/40 bg-accent text-paper",
+                            )}
+                            onClick={() => setMobileDraft((d) => ({ ...d, status: st }))}
+                          >
+                            {st === "all" ? "Todos" : STATUS_LABELS[st]}
+                          </Button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
 
-              <div className="space-y-1.5">
-                <Label htmlFor="filtro-mobile-moneda" className={LABEL_CLASS}>
-                  Moneda
-                </Label>
-                <Select
-                  value={query.currency}
-                  onValueChange={(v) => go({ currency: v as QueryCurrency | "all" })}
-                >
-                  <SelectTrigger id="filtro-mobile-moneda" className="h-11 w-full">
-                    <SelectValue>{query.currency === "all" ? TODAS : query.currency}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CURRENCY_OPTIONS.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option === "all" ? TODAS : option}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label
-                  id="filtro-mobile-periodo-label"
-                  htmlFor="filtro-mobile-periodo"
-                  className={LABEL_CLASS}
-                >
-                  Período
-                </Label>
-                <Popover onOpenChange={handlePeriodoOpenChange}>
-                  <PopoverTrigger asChild>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className={LABEL_CLASS}>Período</Label>
+                    {(mobileDraft.from || mobileDraft.to) && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => {
+                          setMobileDraft((d) => ({ ...d, from: "", to: "" }))
+                          setMobileShowCalendar(false)
+                        }}
+                      >
+                        Quitar fechas
+                      </Button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DATE_PRESETS.map((preset) => {
+                      const range = presetRange(preset.id, today)
+                      const active =
+                        mobileDraft.from === range.from && mobileDraft.to === range.to
+                      return (
+                        <Button
+                          key={preset.id}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className={cn(
+                            "h-8 text-xs",
+                            active && "border-mist/40 bg-accent text-paper",
+                          )}
+                          onClick={() => {
+                            setMobileDraft((d) => ({ ...d, ...range }))
+                            setMobileShowCalendar(false)
+                          }}
+                        >
+                          {preset.label}
+                        </Button>
+                      )
+                    })}
                     <Button
-                      id="filtro-mobile-periodo"
                       type="button"
                       variant="outline"
-                      aria-label={`Período: ${rangoLabel(query.from, query.to)}`}
+                      size="sm"
                       className={cn(
-                        "h-11 w-full justify-start font-normal",
-                        !query.from && !query.to && "text-muted-foreground",
+                        "h-8 text-xs",
+                        mobileShowCalendar && "border-mist/40 bg-accent text-paper",
+                      )}
+                      onClick={() => setMobileShowCalendar((v) => !v)}
+                    >
+                      Personalizado
+                    </Button>
+                  </div>
+                  {mobileShowCalendar && (
+                    <div className="flex justify-center rounded-lg border border-border p-1">
+                      <Calendar
+                        mode="range"
+                        locale={es}
+                        captionLayout="dropdown"
+                        startMonth={CALENDAR_START_MONTH}
+                        endMonth={CALENDAR_END_MONTH}
+                        defaultMonth={
+                          rangeFromQuery(mobileDraft)?.from ?? rangeFromQuery(mobileDraft)?.to
+                        }
+                        selected={rangeFromQuery(mobileDraft)}
+                        onSelect={(range, triggerDate) => {
+                          if (!mobileDraft.from) {
+                            setMobileDraft((d) => ({ ...d, from: dateToIso(triggerDate), to: "" }))
+                            return
+                          }
+                          setMobileDraft((d) => ({ ...d, ...rangeToPatch(range) }))
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className={LABEL_CLASS}>Categoría</Label>
+                  <Input
+                    value={mobileCatSearch}
+                    onChange={(e) => setMobileCatSearch(e.target.value)}
+                    placeholder="Buscar categoría..."
+                    className="h-9"
+                  />
+                  <div className="max-h-48 overflow-y-auto rounded-lg border border-border p-1.5">
+                    <CategoryChecklist
+                      categories={categories}
+                      selectedIds={mobileDraft.categoryIds}
+                      searchTerm={mobileCatSearch}
+                      onToggle={(id) =>
+                        setMobileDraft((d) => ({
+                          ...d,
+                          categoryIds: toggleCategorySelection(d.categoryIds, id, categories),
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+
+                {showPaymentMethod && cards.length > 0 && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="filtro-mobile-tarjeta" className={LABEL_CLASS}>
+                      Medio de pago
+                    </Label>
+                    <Select
+                      value={mobileDraft.cardId}
+                      onValueChange={(v) => setMobileDraft((d) => ({ ...d, cardId: v }))}
+                    >
+                      <SelectTrigger id="filtro-mobile-tarjeta" className="h-11 w-full">
+                        <SelectValue>
+                          {mobileDraft.cardId === "all"
+                            ? TODOS
+                            : cardLabel(mobileDraft.cardId, cards)}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{TODOS}</SelectItem>
+                        <SelectItem value={CARD_FILTER_CASH}>Efectivo / débito</SelectItem>
+                        {cards
+                          .filter((c) => !c.archived || c.id === mobileDraft.cardId)
+                          .map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.archived ? `${c.name} (archivada)` : c.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  {showCurrency && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="filtro-mobile-moneda" className={LABEL_CLASS}>
+                        Moneda
+                      </Label>
+                      <Select
+                        value={mobileDraft.currency}
+                        onValueChange={(v) =>
+                          setMobileDraft((d) => ({ ...d, currency: v as QueryCurrency | "all" }))
+                        }
+                      >
+                        <SelectTrigger id="filtro-mobile-moneda" className="h-11 w-full">
+                          <SelectValue>
+                            {mobileDraft.currency === "all" ? TODAS : mobileDraft.currency}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CURRENCY_OPTIONS.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {option === "all" ? TODAS : option}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {showSort && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="filtro-mobile-orden" className={LABEL_CLASS}>
+                        Orden
+                      </Label>
+                      <Select
+                        value={mobileDraft.sort}
+                        onValueChange={(v) =>
+                          setMobileDraft((d) => ({ ...d, sort: v as MovementSort }))
+                        }
+                      >
+                        <SelectTrigger id="filtro-mobile-orden" className="h-11 w-full">
+                          <SelectValue>{SORT_LABELS[mobileDraft.sort]}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(["due", "date", "amount"] as const).map((s) => (
+                            <SelectItem key={s} value={s}>
+                              {SORT_LABELS[s]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className={LABEL_CLASS}>Importe</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      aria-label="Importe mínimo"
+                      inputMode="decimal"
+                      placeholder="Mínimo"
+                      value={mobileMinInput}
+                      onChange={(e) =>
+                        setMobileMinInput((prev) => formatAmountInput(e.target.value, prev))
+                      }
+                      className="h-10 tabular-nums"
+                    />
+                    <Input
+                      aria-label="Importe máximo"
+                      inputMode="decimal"
+                      placeholder="Máximo"
+                      value={mobileMaxInput}
+                      onChange={(e) =>
+                        setMobileMaxInput((prev) => formatAmountInput(e.target.value, prev))
+                      }
+                      className="h-10 tabular-nums"
+                    />
+                  </div>
+                </div>
+              </div>
+              <SheetFooter className="flex-row justify-end border-t">
+                {(hayFiltrosActivos(query) || hayFiltrosActivos(mobileDraft)) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-11"
+                    onClick={() => {
+                      limpiar()
+                      setMobileFiltersOpen(false)
+                    }}
+                  >
+                    Limpiar todo
+                  </Button>
+                )}
+                <Button type="button" className="h-11" onClick={applyMobileSheet}>
+                  Aplicar
+                </Button>
+              </SheetFooter>
+            </SheetContent>
+          </Sheet>
+        </div>
+
+        {/* Categoría multiselección (escritorio) */}
+        <div className="hidden w-40 space-y-1.5 md:block">
+          <Label id="filtro-categoria-label" htmlFor="filtro-categoria" className={LABEL_CLASS}>
+            Categoría
+          </Label>
+          <Popover
+            onOpenChange={(open) => {
+              if (!open) setCategorySearch("")
+            }}
+          >
+            <PopoverTrigger asChild>
+              <Button
+                id="filtro-categoria"
+                type="button"
+                variant="outline"
+                aria-label={`Categoría: ${catSummary}`}
+                className="w-full justify-between font-normal"
+              >
+                <span className="truncate">
+                  {query.categoryIds.length === 0 ? (
+                    TODAS
+                  ) : query.categoryIds.length === 1 && labels.get(query.categoryIds[0]) ? (
+                    <CategoryBadge {...labels.get(query.categoryIds[0])!} />
+                  ) : (
+                    catSummary
+                  )}
+                </span>
+                <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              className={cn("w-72 p-2.5", pending && "opacity-60")}
+              aria-labelledby="filtro-categoria-label"
+              align="start"
+            >
+              <Input
+                value={categorySearch}
+                onChange={(e) => setCategorySearch(e.target.value)}
+                placeholder="Buscar categoría..."
+                aria-label="Buscar categoría"
+                className="mb-2 h-8"
+              />
+              <div className="max-h-64 overflow-y-auto">
+                <CategoryChecklist
+                  categories={categories}
+                  selectedIds={query.categoryIds}
+                  searchTerm={categorySearch}
+                  onToggle={(id) =>
+                    go({ categoryIds: toggleCategorySelection(query.categoryIds, id, categories) })
+                  }
+                />
+              </div>
+              {query.categoryIds.length > 0 && (
+                <div className="mt-2 flex justify-end border-t pt-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => go({ categoryIds: [] })}
+                  >
+                    Limpiar selección
+                  </Button>
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        {/* Medio de pago / tarjeta (escritorio, cuando hay tarjetas) */}
+        {showPaymentMethod && cards.length > 0 && (
+          <div className="hidden w-36 space-y-1.5 md:block">
+            <Label htmlFor="filtro-tarjeta" className={LABEL_CLASS}>
+              Medio de pago
+            </Label>
+            <div>
+              <Select value={query.cardId} onValueChange={(v) => go({ cardId: v })}>
+                <SelectTrigger id="filtro-tarjeta" className="w-full">
+                  <SelectValue>
+                    {query.cardId === "all" ? (
+                      TODOS
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 truncate">
+                        {query.cardId !== CARD_FILTER_CASH && (
+                          <CreditCard className="size-3.5 shrink-0" aria-hidden />
+                        )}
+                        <span className="truncate">{cardLabel(query.cardId, cards)}</span>
+                      </span>
+                    )}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{TODOS}</SelectItem>
+                  <SelectItem value={CARD_FILTER_CASH}>Efectivo / débito</SelectItem>
+                  {cardOptions.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.archived ? `${c.name} (archivada)` : c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
+
+        {/* Moneda (escritorio) */}
+        {showCurrency && (
+          <div className="hidden w-24 space-y-1.5 md:block">
+            <Label htmlFor="filtro-moneda" className={LABEL_CLASS}>
+              Moneda
+            </Label>
+            <div>
+              <Select
+                value={query.currency}
+                onValueChange={(v) => go({ currency: v as QueryCurrency | "all" })}
+              >
+                <SelectTrigger id="filtro-moneda" className="w-full">
+                  <SelectValue>{query.currency === "all" ? TODAS : query.currency}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {CURRENCY_OPTIONS.map((o) => (
+                    <SelectItem key={o} value={o}>
+                      {o === "all" ? TODAS : o}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
+
+        {/* Importe mínimo y máximo (escritorio) */}
+        <div className="hidden w-32 space-y-1.5 md:block">
+          <Label id="filtro-importe-label" htmlFor="filtro-importe" className={LABEL_CLASS}>
+            Importe
+          </Label>
+          <Popover open={amountOpen} onOpenChange={handleAmountOpenChange}>
+            <PopoverTrigger asChild>
+              <Button
+                id="filtro-importe"
+                type="button"
+                variant="outline"
+                aria-label={`Importe: ${amountLabel}`}
+                className={cn(
+                  "w-full justify-start truncate font-normal",
+                  query.minCents === null && query.maxCents === null && "text-muted-foreground",
+                )}
+              >
+                <span className="truncate">{amountLabel}</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              className="w-64 p-3"
+              aria-labelledby="filtro-importe-label"
+              align="start"
+            >
+              <form onSubmit={applyAmountPopover} className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label htmlFor="filtro-min" className={LABEL_CLASS}>
+                      Mínimo
+                    </Label>
+                    <Input
+                      id="filtro-min"
+                      inputMode="decimal"
+                      placeholder="0"
+                      value={minInput}
+                      onChange={(e) =>
+                        setMinInput((prev) => formatAmountInput(e.target.value, prev))
+                      }
+                      className="h-8 tabular-nums"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="filtro-max" className={LABEL_CLASS}>
+                      Máximo
+                    </Label>
+                    <Input
+                      id="filtro-max"
+                      inputMode="decimal"
+                      placeholder="Sin tope"
+                      value={maxInput}
+                      onChange={(e) =>
+                        setMaxInput((prev) => formatAmountInput(e.target.value, prev))
+                      }
+                      className="h-8 tabular-nums"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-1.5">
+                  {(query.minCents !== null || query.maxCents !== null) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => {
+                        setAmountOpen(false)
+                        go({ minCents: null, maxCents: null })
+                      }}
+                    >
+                      Borrar
+                    </Button>
+                  )}
+                  <Button type="submit" size="xs">
+                    Aplicar
+                  </Button>
+                </div>
+              </form>
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        {/* Período con atajos + flechas ‹ › (escritorio) */}
+        <div className="hidden space-y-1.5 md:block">
+          <Label id="filtro-periodo-label" htmlFor="filtro-periodo" className={LABEL_CLASS}>
+            Período
+          </Label>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label="Período anterior"
+              disabled={!prevShift}
+              onClick={() => prevShift && go(prevShift)}
+            >
+              <ChevronLeft />
+            </Button>
+            <Popover open={periodoAbierto} onOpenChange={handlePeriodoOpenChange}>
+              <PopoverTrigger asChild>
+                <Button
+                  id="filtro-periodo"
+                  type="button"
+                  variant="outline"
+                  aria-label={`Período: ${periodLabel}`}
+                  className={cn(
+                    "w-44 justify-start font-normal",
+                    !query.from && !query.to && "text-muted-foreground",
+                  )}
+                >
+                  <CalendarIcon />
+                  <span className="truncate">{periodLabel}</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                className={cn("w-auto p-0 transition-opacity", pending && "opacity-60")}
+                aria-busy={pending}
+                aria-labelledby="filtro-periodo-label"
+                align="start"
+              >
+                <div className="flex flex-col sm:flex-row">
+                  <div className="flex flex-col gap-0.5 border-b p-2 sm:w-44 sm:border-r sm:border-b-0">
+                    {DATE_PRESETS.map((preset) => (
+                      <Button
+                        key={preset.id}
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                          "justify-start font-normal",
+                          activePreset === preset.id && "bg-accent text-paper font-medium",
+                        )}
+                        onClick={() => handlePresetClick(preset.id)}
+                      >
+                        {preset.label}
+                      </Button>
+                    ))}
+                    <span
+                      className={cn(
+                        "mt-1 rounded-md px-2.5 py-1 text-xs",
+                        activePreset === "custom"
+                          ? "bg-accent text-paper font-medium"
+                          : "text-muted-foreground",
                       )}
                     >
-                      <CalendarIcon />
-                      {rangoLabel(query.from, query.to)}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    className={cn("w-auto p-0 transition-opacity", pending && "opacity-60")}
-                    aria-busy={pending}
-                    aria-labelledby="filtro-mobile-periodo-label"
-                    align="start"
-                  >
+                      Personalizado
+                    </span>
+                  </div>
+                  <div>
                     <Calendar
                       mode="range"
                       locale={es}
@@ -643,7 +1109,7 @@ export function MovementFilters({ basePath, query, categories }: Props) {
                         <Button
                           type="button"
                           variant="ghost"
-                          className="h-11"
+                          size="sm"
                           onClick={() => {
                             setDraft(undefined)
                             go(rangeToPatch(undefined))
@@ -653,289 +1119,116 @@ export function MovementFilters({ basePath, query, categories }: Props) {
                         </Button>
                       </div>
                     )}
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
-            <SheetFooter className="flex-row justify-end border-t">
-              {hayFiltrosActivos(query) && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-11"
-                  onClick={() => {
-                    limpiar()
-                    setMobileFiltersOpen(false)
-                  }}
-                >
-                  Limpiar
-                </Button>
-              )}
-              <SheetClose asChild>
-                <Button type="button" className="h-11">
-                  Listo
-                </Button>
-              </SheetClose>
-            </SheetFooter>
-          </SheetContent>
-        </Sheet>
-      </div>
-
-      <div className={cn(FIELD_WIDTH.category, "hidden space-y-1.5 md:block")}>
-        <Label htmlFor="filtro-categoria" className={LABEL_CLASS}>
-          Categoría
-        </Label>
-        {/*
-          El div envolvente no es decorativo. En el HTML del servidor el Select
-          de Radix deja TRES hijos en esta columna, no dos: la etiqueta, el
-          botón, y un nodo auxiliar propio que recién desaparece al hidratar.
-          `space-y-1.5` le pone margen superior a todo hijo que no sea el
-          primero, así que ese tercero se llevaba 6px y las dos columnas con
-          desplegable quedaban 6px más altas que Buscar y Período. Con
-          `items-end` en la fila, eso se veía como Categoría y Estado corridos
-          hacia arriba hasta que hidrataba, y saltando a su lugar después —una
-          ventana que antes casi no se veía y que ahora, con la barra llegando
-          mucho antes que la tabla, sí se ve. El envoltorio deja siempre
-          exactamente dos hijos acá y se lleva el nodo auxiliar adentro, donde
-          ningún `space-y` lo cuenta.
-        */}
-        <div>
-          <Select value={query.categoryId} onValueChange={(v) => go({ categoryId: v })}>
-            <SelectTrigger id="filtro-categoria" className="w-full">
-              <SelectValue>{categoriaValue(query.categoryId, categories)}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{TODAS}</SelectItem>
-              {categoriaItems(categories)}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Desplegable y no segmentado como Estado: acá las tres opciones no
-          traen ninguna referencia de color que valga la pena tener a la vista
-          —la tabla no pinta la moneda, la escribe adentro del importe— así que
-          no hay motivo para gastar el ancho que cuesta un segmentado. Misma
-          estructura que Categoría, envoltorio incluido: ver el comentario de
-          ese div. */}
-      <div className={cn(FIELD_WIDTH.currency, "hidden space-y-1.5 md:block")}>
-        <Label htmlFor="filtro-moneda" className={LABEL_CLASS}>
-          Moneda
-        </Label>
-        <div>
-          <Select
-            value={query.currency}
-            onValueChange={(v) => go({ currency: v as QueryCurrency | "all" })}
-          >
-            <SelectTrigger id="filtro-moneda" className="w-full">
-              {/* Mismo motivo que en Categoría: sin `children`, Radix resuelve
-                  el texto porteando el item elegido, y en el HTML del servidor
-                  ese portal todavía no existe. */}
-              <SelectValue>{query.currency === "all" ? TODAS : query.currency}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {CURRENCY_OPTIONS.map((o) => (
-                <SelectItem key={o} value={o}>
-                  {o === "all" ? TODAS : o}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/*
-        Segmentado y no desplegable: son cuatro opciones fijas y conocidas, así
-        que un `Select` cobraba dos clicks (abrir, elegir) y escondía tres de
-        las cuatro hasta abrirlo. Acá se ve el estado activo y los otros tres a
-        la vez, y cambiar de filtro es un solo click. De paso la fila funciona
-        como referencia de color de la tabla: el punto de cada segmento es el
-        mismo color que el badge de esa columna.
-
-        `type="single"` de Radix devuelve "" al deseleccionar el activo
-        (clickearlo de nuevo). Eso se mapea a "all" y no se descarta: apagar el
-        estado que estaba puesto es exactamente pedir "todos".
-      */}
-      <div className={cn(FIELD_WIDTH.status, "hidden space-y-1.5 md:block")}>
-        <Label id="filtro-estado-label" className={LABEL_CLASS}>
-          Estado
-        </Label>
-        <ToggleGroup
-          id="filtro-estado"
-          type="single"
-          spacing={0}
-          variant="outline"
-          value={query.status}
-          onValueChange={(v) => go({ status: (v || "all") as MovementStatus | "all" })}
-          aria-labelledby="filtro-estado-label"
-        >
-          {STATUS_OPTIONS.map((o) => (
-            <ToggleGroupItem key={o} value={o} className="data-[state=on]:text-paper">
-              {o !== "all" && <span className={cn(DOT_CLASS, DOT_COLOR[o])} />}
-              {o === "all" ? "Todos" : STATUS_LABELS[o]}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </div>
-
-      <div className={cn(FIELD_WIDTH.period, "hidden space-y-1.5 md:block")}>
-        {/* Id propio en el Label: hace falta como blanco de `aria-labelledby`
-            más abajo (hallazgo D). El `htmlFor` se deja como estaba, no
-            estorba — con `aria-labelledby` puesto en el botón, el accname
-            algorithm lo consulta a él primero y ni llega a mirar el `for`. */}
-        <Label id="filtro-periodo-label" htmlFor="filtro-periodo" className={LABEL_CLASS}>
-          Período
-        </Label>
-        <Popover onOpenChange={handlePeriodoOpenChange}>
-          <PopoverTrigger asChild>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
             <Button
-              id="filtro-periodo"
               type="button"
               variant="outline"
-              // El <Label htmlFor> de arriba es una asociación válida, y ese
-              // es justo el problema (hallazgo D): el accname algorithm
-              // consulta el <label> primero y corta ahí — nunca llega a leer
-              // el contenido del botón, así que un lector de pantalla
-              // anunciaba "Período, botón" igual con el rango puesto que
-              // vacío. `aria-label` gana esa resolución ANTES que el `for` y
-              // reemplaza el nombre entero (se probó primero con
-              // `aria-labelledby` apuntando al propio botón para reusar su
-              // contenido visible sin duplicar el string, pero el cómputo de
-              // nombre accesible que usan los tests, al toparse con una
-              // auto-referencia, no cae al contenido — devuelve sólo el
-              // label; de ahí el string armado a mano): cambia solo cada vez
-              // que cambia `rangoLabel`, así que nunca puede quedar
-              // desincronizado del texto que se ve.
-              aria-label={`Período: ${rangoLabel(query.from, query.to)}`}
-              className={cn(
-                "w-full justify-start font-normal",
-                !query.from && !query.to && "text-muted-foreground",
-              )}
+              size="icon"
+              aria-label="Período siguiente"
+              disabled={!nextShift}
+              onClick={() => nextShift && go(nextShift)}
             >
-              <CalendarIcon />
-              {rangoLabel(query.from, query.to)}
+              <ChevronRight />
             </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            // El wrapper de más arriba atenúa mientras `pending` está
-            // prendido, pero ese div no alcanza a este contenido: Radix lo
-            // porta a `document.body` (hallazgo C), fuera de ese subárbol.
-            // Bajo el modelo de borrador ya no hay carrera de datos al
-            // clickear (nada navega hasta que el popover cierra), pero SÍ
-            // sigue habiendo un caso real: reabrir este mismo popover
-            // mientras OTRO filtro todavía está en tránsito siembra el
-            // borrador desde `query.from`/`query.to` (a propósito, ver
-            // `handlePeriodoOpenChange`), que en ese momento puede seguir
-            // mostrando el valor viejo. Repetir la atenuación acá adentro
-            // es lo que avisa que ese valor recién sembrado podría no ser
-            // el definitivo, igual que ya pasa con los Select de esta
-            // barra.
-            className={cn("w-auto p-0 transition-opacity", pending && "opacity-60")}
-            aria-busy={pending}
-            // El primitivo de Radix pone `role="dialog"` sin nombre propio
-            // (hallazgo D, ítem menor); reusa la misma etiqueta del trigger
-            // en vez de inventar un string aparte.
-            aria-labelledby="filtro-periodo-label"
-            align="start"
-          >
-            <Calendar
-              mode="range"
-              locale={es}
-              captionLayout="dropdown"
-              startMonth={CALENDAR_START_MONTH}
-              endMonth={CALENDAR_END_MONTH}
-              // Sin esto el calendario siempre abre en el mes de "hoy" (no
-              // hay `forceMount`, así que se remonta en cada apertura) — con
-              // años de movimientos cargados, un filtro de marzo de 2025
-              // quedaba a 17 clicks de distancia (hallazgo B). Se deriva del
-              // borrador, no de `query`, porque es lo que el calendario va a
-              // mostrar seleccionado.
-              defaultMonth={draft?.from ?? draft?.to}
-              selected={draft}
-              onSelect={handleCalendarSelect}
-            />
-            {/* "Limpiar" ya borra todo el filtrado; esto es aparte porque
-                alguien puede querer sacar sólo el rango de fechas y dejar el
-                resto (buscador, categoría, estado) como está. A diferencia
-                de un click en un día, esto SÍ navega al toque: es una
-                acción explícita de "borrar ya", no un paso de armado de
-                rango, y tiene que poder usarse aunque el borrador todavía
-                no tenga nada aplicado (por eso mira `draft`, no `query`). */}
-            {(draft?.from || draft?.to) && (
-              <div className="flex justify-end border-t p-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setDraft(undefined)
-                    go(rangeToPatch(undefined))
-                  }}
-                >
-                  Borrar rango
-                </Button>
-              </div>
-            )}
-          </PopoverContent>
-        </Popover>
+          </div>
+        </div>
+
+        {/* Orden (escritorio) */}
+        {showSort && (
+          <div className="hidden w-32 space-y-1.5 md:block">
+            <Label htmlFor="filtro-orden" className={LABEL_CLASS}>
+              Orden
+            </Label>
+            <div>
+              <Select
+                value={query.sort}
+                onValueChange={(v) => go({ sort: v as MovementSort })}
+              >
+                <SelectTrigger id="filtro-orden" className="w-full">
+                  <SelectValue>{SORT_LABELS[query.sort]}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {(["due", "date", "amount"] as const).map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {SORT_LABELS[s]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
       </div>
 
-      {hayFiltrosActivos(query) && (
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={limpiar}
-          className="hidden text-muted-foreground md:inline-flex"
+      {/* Chips de filtros activos con × y "Limpiar todo" (§4). */}
+      {chips.length > 0 && (
+        <div
+          aria-label="Filtros activos"
+          className="flex flex-wrap items-center gap-1.5"
         >
-          <XIcon />
-          Limpiar
-        </Button>
+          {chips.map((chip) => (
+            <span
+              key={chip.key}
+              className="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-secondary pr-1.5 pl-2.5 text-xs text-foreground"
+            >
+              <span>{chip.label}</span>
+              <button
+                type="button"
+                aria-label={`Quitar filtro ${chip.label}`}
+                onClick={() => {
+                  if (chip.clearSearch) setSearch("")
+                  go(chip.patch)
+                }}
+                className="inline-flex size-4 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-paper"
+              >
+                <XIcon className="size-3" />
+              </button>
+            </span>
+          ))}
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={limpiar}
+            className="text-muted-foreground"
+          >
+            Limpiar todo
+          </Button>
+        </div>
       )}
     </div>
   )
 }
 
-/**
- * Lo que se ve en el lugar de la barra mientras el servidor trae las
- * categorías (ver el `Suspense` de `movement-screen.tsx`).
- *
- * Reusa `BAR_CLASS`, `FIELD_WIDTH` y `LABEL_CLASS` de la barra real y muestra
- * las MISMAS etiquetas, no barritas grises: la fila queda ocupando
- * exactamente el mismo lugar, y cuando llegan las categorías lo único que
- * cambia son los cuatro controles. Sin eso, el esqueleto y la barra real se
- * pueden ir separando en anchos con cualquier retoque futuro y el cambio se
- * ve como un salto.
- *
- * Usa el mismo `Label` que la barra real y no un `<span>` con las mismas
- * clases: `Label` es un `flex items-center`, así que su caja no mide igual
- * que la de un span aunque el texto y el tamaño coincidan — con el span, las
- * etiquetas se corrían 2px al llegar las categorías.
- *
- * Todo el bloque va `aria-hidden`: son etiquetas sin ningún control al que
- * apunten. Que un lector de pantalla anuncie cuatro filtros que todavía no
- * existen es peor que que no anuncie nada — el `Suspense` de
- * `movement-screen.tsx` es quien tiene que contar esa espera.
- */
-export function MovementFiltersSkeleton() {
+export function MovementFiltersSkeleton({
+  showPaymentMethod = false,
+  showSort = true,
+  showCurrency = true,
+  showSearch = true,
+}: {
+  showPaymentMethod?: boolean
+  showSort?: boolean
+  showCurrency?: boolean
+  showSearch?: boolean
+}) {
+  const fields: { label: string; width: string }[] = []
+  if (showSearch) fields.push({ label: "Buscar", width: "w-full sm:w-52" })
+  fields.push({ label: "Categoría", width: "hidden w-40 md:block" })
+  if (showPaymentMethod) fields.push({ label: "Medio de pago", width: "hidden w-36 md:block" })
+  if (showCurrency) fields.push({ label: "Moneda", width: "hidden w-24 md:block" })
+  fields.push({ label: "Importe", width: "hidden w-32 md:block" })
+  fields.push({ label: "Período", width: "hidden w-[248px] md:block" })
+  if (showSort) fields.push({ label: "Orden", width: "hidden w-32 md:block" })
+
   return (
     <div className={BAR_CLASS} aria-hidden>
-      {[
-        { label: "Buscar", width: FIELD_WIDTH.search, box: "w-full" },
-        { label: "Categoría", width: FIELD_WIDTH.category, box: "w-full" },
-        { label: "Moneda", width: FIELD_WIDTH.currency, box: "w-full" },
-        // El segmentado no tiene ancho de campo: reserva el que miden sus
-        // cuatro etiquetas fijas, medido sobre el control ya renderizado.
-        { label: "Estado", width: FIELD_WIDTH.status, box: "w-[309px]" },
-        { label: "Período", width: FIELD_WIDTH.period, box: "w-full" },
-      ].map((f) => (
+      {fields.map((f) => (
         <div key={f.label} className={cn(f.width, "space-y-1.5")}>
           <Label className={LABEL_CLASS}>{f.label}</Label>
-          <div
-            className={cn(
-              "h-8 animate-pulse rounded-lg border border-input bg-white/[0.02]",
-              f.box,
-            )}
-          />
+          <div className="h-8 w-full animate-pulse rounded-lg border border-input bg-white/[0.02]" />
         </div>
       ))}
     </div>

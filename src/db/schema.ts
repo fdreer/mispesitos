@@ -269,6 +269,10 @@ export const movement = pgTable(
   },
   (t) => [
     index("movement_user_date_idx").on(t.userId, t.date),
+    // Los listados siempre filtran por (user_id, kind) y ordenan/acotan por
+    // fecha o importe (Fase 4 del plan v2).
+    index("movement_user_kind_date_idx").on(t.userId, t.kind, t.date),
+    index("movement_user_kind_amount_idx").on(t.userId, t.kind, t.amountCents),
     // Lo consultan los triggers de categoría hoja (migración 0011) y el
     // filtro por categoría de los listados.
     index("movement_category_idx").on(t.categoryId),

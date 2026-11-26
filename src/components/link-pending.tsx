@@ -18,12 +18,18 @@ import { cn } from "@/lib/utils"
  * el estado del `Link` más cercano y nada más. Es la señal mínima —"tomé el
  * click, estoy yendo"— que es lo que faltaba.
  */
-export function LinkPending({ children }: { children: React.ReactNode }) {
+export function LinkPending({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
   const { pending } = useLinkStatus()
 
   return (
     <span
-      className={cn("transition-opacity", pending && "animate-pulse opacity-60")}
+      className={cn("transition-opacity", pending && "animate-pulse opacity-60", className)}
       aria-busy={pending || undefined}
     >
       {children}

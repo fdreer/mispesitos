@@ -1,4 +1,4 @@
-import { addMonthsClamped, isValidIsoDate, type IsoDate } from "@/lib/dates"
+import { addMonthsClamped, formatRelativeDue, isValidIsoDate, type IsoDate } from "@/lib/dates"
 
 /**
  * Techo de cuotas de un movimiento. La cota no es de negocio: es de volumen.
@@ -110,17 +110,16 @@ export function formatShortDate(iso: IsoDate, today: IsoDate): string {
 }
 
 /**
- * Lo que muestra la fila sobre su próxima cuota: "Cuota 3/12 · vence 15/12", o
- * "Vence 15/12" cuando el plan es de una sola (decir "Cuota 1/1" es ruido). Si
- * ya venció, "venció" en lugar de "vence".
+ * Lo que muestra la fila sobre su próxima cuota: "Cuota 3/12 · vence en 3
+ * días", o "Vence hoy" cuando el plan es de una sola (decir "Cuota 1/1" es
+ * ruido). Si ya venció, "venció hace N días" o la fecha corta.
  */
 export function describeNextInstallment(
   next: { number: number; dueDate: IsoDate },
   total: number,
   today: IsoDate,
 ): string {
-  const verb = next.dueDate < today ? "venció" : "vence"
-  const when = `${verb} ${formatShortDate(next.dueDate, today)}`
+  const when = formatRelativeDue(next.dueDate, today, formatShortDate(next.dueDate, today))
   if (total <= 1) return when.charAt(0).toUpperCase() + when.slice(1)
   return `Cuota ${next.number}/${total} · ${when}`
 }

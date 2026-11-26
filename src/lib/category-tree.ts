@@ -228,3 +228,88 @@ export function spendByParent(
     .map((g) => ({ ...g, children: g.children.sort((a, b) => b.arsCents - a.arsCents) }))
     .sort((a, b) => b.arsCents - a.arsCents)
 }
+
+/**
+ * Estado de selección de una categoría en el filtro múltiple (§4 del plan v2).
+ *
+ * Si el padre está guardado en `selected`, todas sus hijas también cuentan como
+ * seleccionadas — así una URL `?categoryId=hogar` (o un link desde Informes)
+ * marca al padre y a cada subcategoría. Si sólo algunas hijas están en
+ * `selected`, el padre aparece en estado `"indeterminate"`.
+ */
+export type CategoryCheckState = boolean | "indeterminate"
+
+export function categoryCheckState(
+  selected: readonly string[],
+  id: string,
+  categories: readonly TreeCategory[],
+): CategoryCheckState {
+  const selectedSet = new Set(selected)
+  const children = categories.filter((c) => c.parentId === id)
+  if (children.length === 0) {
+    if (selectedSet.has(id)) return true
+    const cat = categories.find((c) => c.id === id)
+    return cat?.parentId ? selectedSet.has(cat.parentId) : false
+  }
+  if (selectedSet.has(id)) return true
+  const checkedChildren = children.filter((c) => selectedSet.has(c.id)).length
+  if (checkedChildren === 0) return false
+  return checkedChildren === children.length ? true : "indeterminate"
+}
+
+/**
+ * Alterna una categoría en el filtro múltiple, respetando la regla de que
+ * elegir un padre incluye a todas sus hijas (§4):
+ *
+ * - Tocar un padre lo prende o apaga entero y limpia las selecciones sueltas de
+ *   sus hijas para que la URL no cargue ids redundantes.
+ * - Tocar una hija cuando el padre entero estaba seleccionado desarma ese
+ *   padre en las demás hijas menos la desmarcada.
+ * - Si al marcar una hija quedan todas las hijas del mismo padre elegidas, se
+ *   compactan de vuelta en el id del padre.
+ */
+export function toggleCategorySelection(
+  selected: readonly string[],
+  id: string,
+  categories: readonly TreeCategory[],
+): string[] {
+  const next = new Set(selected)
+  const children = categories.filter((c) => c.parentId === id)
+
+  if (children.length > 0) {
+    const state = categoryCheckState(selected, id, categories)
+    for (const child of children) next.delete(child.id)
+    if (state === true) {
+      next.delete(id)
+    } else {
+      next.add(id)
+    }
+    return [...next]
+  }
+
+  const target = categories.find((c) => c.id === id)
+  const parentId = target?.parentId ?? null
+  if (parentId && next.has(parentId)) {
+    next.delete(parentId)
+    for (const sibling of categories) {
+      if (sibling.parentId === parentId && sibling.id !== id) {
+        next.add(sibling.id)
+      }
+    }
+    return [...next]
+  }
+
+  if (next.has(id)) {
+    next.delete(id)
+  } else {
+    next.add(id)
+    if (parentId) {
+      const siblings = categories.filter((c) => c.parentId === parentId)
+      if (siblings.length > 0 && siblings.every((s) => next.has(s.id))) {
+        for (const s of siblings) next.delete(s.id)
+        next.add(parentId)
+      }
+    }
+  }
+  return [...next]
+}

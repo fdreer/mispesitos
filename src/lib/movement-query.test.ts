@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest"
 
 import {
   PAGE_SIZE,
+  activeFilterCount,
   buildMovementHref,
+  defaultSortForKind,
   hayFiltrosActivos,
   movementFiltersFromQuery,
   paginate,
@@ -13,46 +15,73 @@ describe("parseMovementQuery", () => {
   it("una URL pelada da todos los filtros vacíos y la página 1", () => {
     expect(parseMovementQuery({})).toEqual({
       search: "",
-      categoryId: "all",
+      categoryIds: [],
+      cardId: "all",
       currency: "all",
       status: "all",
       from: "",
       to: "",
+      minCents: null,
+      maxCents: null,
+      sort: "date",
       page: 1,
     })
   })
 
-  it("lee los filtros que vienen bien", () => {
+  it("usa vencimiento por defecto en egresos y fecha en ingresos", () => {
+    expect(parseMovementQuery({}, defaultSortForKind("expense")).sort).toBe("due")
+    expect(parseMovementQuery({}, defaultSortForKind("income")).sort).toBe("date")
+  })
+
+  it("lee los filtros que vienen bien, incluyendo múltiples categorías, tarjeta, importes y orden", () => {
     expect(
       parseMovementQuery({
         search: "kiosco",
-        categoryId: "cat-1",
+        categoryId: "cat-1,cat-2",
+        cardId: "card-1",
         currency: "USD",
         status: "overdue",
         from: "2026-01-01",
         to: "2026-12-31",
+        min: "1000",
+        max: "2500.5",
+        sort: "amount",
         page: "3",
       }),
     ).toEqual({
       search: "kiosco",
-      categoryId: "cat-1",
+      categoryIds: ["cat-1", "cat-2"],
+      cardId: "card-1",
       currency: "USD",
       status: "overdue",
       from: "2026-01-01",
       to: "2026-12-31",
+      minCents: 100_000,
+      maxCents: 250_050,
+      sort: "amount",
       page: 3,
     })
   })
 
-  it("un estado inventado cae en 'all' en vez de filtrar por nada", () => {
-    expect(parseMovementQuery({ status: "borracho" }).status).toBe("all")
+  it("acepta categoryId repetido como array y descarta 'all' o duplicados", () => {
+    expect(parseMovementQuery({ categoryId: ["cat-1", "cat-2", "cat-1", "all"] }).categoryIds).toEqual([
+      "cat-1",
+      "cat-2",
+    ])
   })
 
-  it("una moneda inventada cae en 'all', igual que el estado", () => {
-    // Las dos son enumeraciones cerradas y la URL la escribe cualquiera:
-    // ?currency=EUR no puede dejar la lista vacía sin explicación.
+  it("un estado, moneda u orden inventado cae en su default", () => {
+    expect(parseMovementQuery({ status: "borracho" }).status).toBe("all")
     expect(parseMovementQuery({ currency: "EUR" }).currency).toBe("all")
     expect(parseMovementQuery({ currency: "ars" }).currency).toBe("all")
+    expect(parseMovementQuery({ sort: "color" }, "due").sort).toBe("due")
+  })
+
+  it("importes negativos o inválidos se descartan", () => {
+    expect(parseMovementQuery({ min: "-100", max: "abc" })).toMatchObject({
+      minCents: null,
+      maxCents: null,
+    })
   })
 
   it("una fecha que no es ISO se descarta", () => {
@@ -73,8 +102,7 @@ describe("parseMovementQuery", () => {
     expect(parseMovementQuery({ search: "x".repeat(500) }).search).toHaveLength(200)
   })
 
-  it("con el parámetro repetido se queda con el primero", () => {
-    // Next entrega string[] cuando la URL trae ?status=paid&status=overdue.
+  it("con el parámetro repetido se queda con el primero (salvo categoryId)", () => {
     expect(parseMovementQuery({ status: ["paid", "overdue"] }).status).toBe("paid")
   })
 })
@@ -82,10 +110,10 @@ describe("parseMovementQuery", () => {
 describe("paginate", () => {
   const items = Array.from({ length: 45 }, (_, i) => i)
 
-  it("corta la página pedida", () => {
-    expect(paginate(items, 1).items).toEqual(items.slice(0, 20))
-    expect(paginate(items, 2).items).toEqual(items.slice(20, 40))
-    expect(paginate(items, 3).items).toEqual(items.slice(40, 45))
+  it("corta la página pedida y devuelve totalCount", () => {
+    expect(paginate(items, 1)).toMatchObject({ items: items.slice(0, 20), totalCount: 45 })
+    expect(paginate(items, 2)).toMatchObject({ items: items.slice(20, 40), totalCount: 45 })
+    expect(paginate(items, 3)).toMatchObject({ items: items.slice(40, 45), totalCount: 45 })
   })
 
   it("cuenta las páginas contando la última incompleta", () => {
@@ -94,33 +122,45 @@ describe("paginate", () => {
     expect(paginate(Array.from({ length: PAGE_SIZE + 1 }, (_, i) => i), 1).totalPages).toBe(2)
   })
 
-  it("una lista vacía es una página vacía, no cero páginas", () => {
-    expect(paginate([], 1)).toEqual({ items: [], page: 1, totalPages: 1 })
+  it("una lista vacía es una página vacía con totalCount 0", () => {
+    expect(paginate([], 1)).toEqual({ items: [], page: 1, totalPages: 1, totalCount: 0 })
   })
 
   it("una página que ya no existe muestra la última, no una tabla en blanco", () => {
-    // Pasa siempre: se filtra estando en la página 7 y el resultado tiene 2.
     expect(paginate(items, 99)).toMatchObject({ page: 3 })
     expect(paginate(items, 99).items).toEqual(items.slice(40, 45))
   })
 })
 
-describe("hayFiltrosActivos", () => {
+describe("hayFiltrosActivos / activeFilterCount", () => {
   it("una query pelada no tiene filtros activos", () => {
     expect(hayFiltrosActivos(parseMovementQuery({}))).toBe(false)
+    expect(activeFilterCount(parseMovementQuery({}))).toBe(0)
   })
 
-  it("cualquiera de los seis campos alcanza para contar como filtro activo", () => {
+  it("cualquier filtro activo cuenta y activeFilterCount incluye el estado", () => {
     expect(hayFiltrosActivos(parseMovementQuery({ search: "kiosco" }))).toBe(true)
     expect(hayFiltrosActivos(parseMovementQuery({ categoryId: "cat-1" }))).toBe(true)
+    expect(hayFiltrosActivos(parseMovementQuery({ cardId: "cash" }))).toBe(true)
     expect(hayFiltrosActivos(parseMovementQuery({ currency: "USD" }))).toBe(true)
     expect(hayFiltrosActivos(parseMovementQuery({ status: "paid" }))).toBe(true)
     expect(hayFiltrosActivos(parseMovementQuery({ from: "2026-01-01" }))).toBe(true)
-    expect(hayFiltrosActivos(parseMovementQuery({ to: "2026-12-31" }))).toBe(true)
+    expect(hayFiltrosActivos(parseMovementQuery({ min: "500" }))).toBe(true)
+
+    expect(
+      activeFilterCount(
+        parseMovementQuery({
+          status: "overdue",
+          categoryId: "c1,c2",
+          min: "100",
+          max: "500",
+        }),
+      ),
+    ).toBe(3)
   })
 
-  it("la página sola no cuenta como filtro activo", () => {
-    expect(hayFiltrosActivos(parseMovementQuery({ page: "3" }))).toBe(false)
+  it("la página y el orden solos no cuentan como filtros activos", () => {
+    expect(hayFiltrosActivos(parseMovementQuery({ page: "3", sort: "amount" }))).toBe(false)
   })
 })
 
@@ -128,28 +168,37 @@ describe("movementFiltersFromQuery", () => {
   it("una query pelada no manda ningún filtro a la consulta", () => {
     expect(movementFiltersFromQuery(parseMovementQuery({}))).toEqual({
       search: undefined,
-      categoryId: undefined,
+      categoryIds: undefined,
+      cardId: undefined,
       currency: undefined,
       from: undefined,
       to: undefined,
+      minCents: undefined,
+      maxCents: undefined,
     })
   })
 
-  it("manda los que están puestos, con el mismo nombre que espera la consulta", () => {
+  it("manda los que están puestos", () => {
     const query = parseMovementQuery({
       search: "kiosco",
-      categoryId: "cat-1",
+      categoryId: "cat-1,cat-2",
+      cardId: "card-1",
       currency: "USD",
       from: "2026-01-01",
       to: "2026-12-31",
+      min: "100",
+      max: "500",
     })
 
     expect(movementFiltersFromQuery(query)).toEqual({
       search: "kiosco",
-      categoryId: "cat-1",
+      categoryIds: ["cat-1", "cat-2"],
+      cardId: "card-1",
       currency: "USD",
       from: "2026-01-01",
       to: "2026-12-31",
+      minCents: 10_000,
+      maxCents: 50_000,
     })
   })
 
@@ -160,46 +209,50 @@ describe("movementFiltersFromQuery", () => {
 })
 
 describe("buildMovementHref", () => {
-  const vacia = parseMovementQuery({})
+  const vacia = parseMovementQuery({}, "due")
 
-  it("sin filtros devuelve la ruta pelada", () => {
-    expect(buildMovementHref("/ingresos", vacia)).toBe("/ingresos")
+  it("sin filtros devuelve la ruta pelada sin escribir el orden por defecto", () => {
+    expect(buildMovementHref("/egresos", vacia, {}, "due")).toBe("/egresos")
   })
 
   it("no escribe los valores que ya son el default", () => {
-    expect(buildMovementHref("/ingresos", vacia, { categoryId: "all", status: "all" })).toBe(
-      "/ingresos",
+    expect(buildMovementHref("/egresos", vacia, { categoryIds: [], status: "all" }, "due")).toBe(
+      "/egresos",
     )
   })
 
   it("escribe sólo los filtros puestos", () => {
-    expect(buildMovementHref("/egresos", vacia, { status: "overdue" })).toBe(
+    expect(buildMovementHref("/egresos", vacia, { status: "overdue" }, "due")).toBe(
+      "/egresos?status=overdue",
+    )
+    expect(
+      buildMovementHref(
+        "/egresos",
+        vacia,
+        { categoryIds: ["c1", "c2"], cardId: "cash", minCents: 100_000, sort: "amount" },
+        "due",
+      ),
+    ).toBe("/egresos?categoryId=c1%2Cc2&cardId=cash&min=1000&sort=amount")
+  })
+
+  it("cambiar un filtro vuelve a la página 1", () => {
+    const enPagina7 = parseMovementQuery({ status: "paid", page: "7" }, "due")
+
+    expect(buildMovementHref("/egresos", enPagina7, { status: "overdue" }, "due")).toBe(
       "/egresos?status=overdue",
     )
   })
 
-  it("cambiar un filtro vuelve a la página 1", () => {
-    const enPagina7 = parseMovementQuery({ status: "paid", page: "7" })
-
-    expect(buildMovementHref("/ingresos", enPagina7, { status: "overdue" })).toBe(
-      "/ingresos?status=overdue",
-    )
-  })
-
   it("cambiar sólo de página conserva los filtros", () => {
-    const conFiltros = parseMovementQuery({ search: "kiosco", status: "paid" })
+    const conFiltros = parseMovementQuery({ search: "kiosco", status: "paid" }, "due")
 
-    expect(buildMovementHref("/ingresos", conFiltros, { page: 4 })).toBe(
-      "/ingresos?search=kiosco&status=paid&page=4",
+    expect(buildMovementHref("/egresos", conFiltros, { page: 4 }, "due")).toBe(
+      "/egresos?search=kiosco&status=paid&page=4",
     )
-  })
-
-  it("escribe la moneda cuando está puesta", () => {
-    expect(buildMovementHref("/egresos", vacia, { currency: "USD" })).toBe("/egresos?currency=USD")
   })
 
   it("codifica el buscador", () => {
-    expect(buildMovementHref("/ingresos", vacia, { search: "café & co" })).toBe(
+    expect(buildMovementHref("/ingresos", parseMovementQuery({}), { search: "café & co" })).toBe(
       "/ingresos?search=caf%C3%A9+%26+co",
     )
   })

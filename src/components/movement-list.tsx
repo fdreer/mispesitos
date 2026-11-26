@@ -1,11 +1,19 @@
 "use client"
 
-import { Fragment, useState } from "react"
+import { Fragment, useState, useTransition } from "react"
+import Link from "next/link"
 import { ChevronDown, ChevronRight, CreditCard } from "lucide-react"
 
 import { CategoryBadge } from "@/components/category-badge"
-import { categoryLabels, type CategoryLabel } from "@/lib/category-tree"
+import { InstallmentRows, InstallmentTableRows } from "@/components/installment-rows"
+import { MovementFormDialog } from "@/components/movement-form-dialog"
+import {
+  MovementRowActions,
+  nextInstallmentText,
+  PayNextButton,
+} from "@/components/movement-row-actions"
 import { StatusBadge } from "@/components/status-badge"
+import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -14,42 +22,42 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { InstallmentRows, InstallmentTableRows } from "@/components/installment-rows"
-import {
-  MovementRowActions,
-  nextInstallmentText,
-  PayNextButton,
-} from "@/components/movement-row-actions"
+import { categoryLabels, type CategoryLabel } from "@/lib/category-tree"
 import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
 import { assertCurrency, assertInstallmentMovementKind } from "@/lib/movement-asserts"
+import {
+  groupMovements,
+  pluralize,
+  type MovementGroupMode,
+} from "@/lib/movement-list-view"
+import type { MovementQuery } from "@/lib/movement-query"
 import { summarizeMovementStatus } from "@/lib/movement-status"
+import { fetchMovementListPage } from "@/server/actions/movements"
 import type { CardOption } from "@/server/card-queries"
 import type { Category, MovementWithInstallments } from "@/server/queries"
 
 type Props = {
   movements: MovementWithInstallments[]
   categories: Category[]
-  /**
-   * Las tarjetas, para nombrar el medio de pago de cada compra y para el
-   * formulario de edición. Vacío en ingresos.
-   */
   cards?: CardOption[]
   today: IsoDate
-  /**
-   * Sin esto, filtrar hasta cero resultados decía "todavía no cargaste nada":
-   * el mensaje contradecía la tabla que la persona acababa de llenar.
-   */
   emptyMessage: string
+  /** Para distinguir la acción en estado vacío ("Cargar primer..." vs "Limpiar filtros"). */
+  hasActiveFilters?: boolean
+  /** Ruta base para "Limpiar filtros" en estado vacío. */
+  basePath?: string
+  /** Tipo de movimiento de la pantalla (para alta vacía y "Cargar más"). */
+  kind?: "income" | "expense"
+  /** Modo de agrupación: por vencimientos (egresos), por mes (ingresos), o plano. */
+  groupBy?: MovementGroupMode
+  /** Datos de paginado para "Cargar más" en móvil (§5.3). */
+  query?: MovementQuery
+  page?: number
+  totalPages?: number
+  totalCount?: number
 }
 
-/**
- * Los encabezados en un solo lugar: el esqueleto de más abajo pinta la MISMA
- * fila de encabezados mientras la consulta viaja, así que si viviera duplicada
- * agregar una columna a la tabla dejaría al esqueleto prometiendo otra grilla.
- * La primera columna (el chevron que despliega las cuotas) y la última (Pagar
- * y el menú ⋯) no tienen título visible y por eso van aparte, no en esta lista.
- */
 const COLUMNS = ["Fecha", "Descripción", "Categoría", "Importe", "Estado"] as const
 
 function MovementTableHeader() {
@@ -73,12 +81,23 @@ function MovementStatusBadge({
   pendingCount,
   overdueCount,
 }: ReturnType<typeof summarizeMovementStatus>) {
-  if (status === "overdue") return <StatusBadge status="overdue">{overdueCount} vencida(s)</StatusBadge>
-  if (status === "pending") return <StatusBadge status="pending">{pendingCount} pendiente(s)</StatusBadge>
+  if (status === "overdue") {
+    return (
+      <StatusBadge status="overdue">
+        {pluralize(overdueCount, "vencida", "vencidas")}
+      </StatusBadge>
+    )
+  }
+  if (status === "pending") {
+    return (
+      <StatusBadge status="pending">
+        {pluralize(pendingCount, "pendiente", "pendientes")}
+      </StatusBadge>
+    )
+  }
   return <StatusBadge status="paid">Pagado</StatusBadge>
 }
 
-/** "Visa Galicia", con el icono de tarjeta: el medio de pago de una compra. */
 function CardName({ name }: { name: string }) {
   return (
     <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -96,6 +115,8 @@ function MovementCards({
   today,
   expanded,
   toggle,
+  groupBy,
+  paidGroupLabel,
 }: {
   movements: MovementWithInstallments[]
   categories: Category[]
@@ -104,86 +125,132 @@ function MovementCards({
   today: IsoDate
   expanded: Set<string>
   toggle: (id: string) => void
+  groupBy: MovementGroupMode
+  paidGroupLabel: string
 }) {
+  const groups = groupMovements(movements, groupBy, today, paidGroupLabel)
+
   return (
-    <div className="space-y-2 md:hidden">
-      {movements.map((m) => {
-        const summary = summarizeMovementStatus(m.installments, today)
-        const currency = assertCurrency(m.currency)
-        const kind = assertInstallmentMovementKind(m.kind)
-        const isOpen = expanded.has(m.id)
-        const categoria = m.categoryId ? categoryLabel.get(m.categoryId) : undefined
-        const detailsId = `cuotas-${m.id}`
-        const nextText = nextInstallmentText(m, today)
-        const cardName = m.creditCardId ? cards.find((c) => c.id === m.creditCardId)?.name : undefined
+    <div className="space-y-4 md:hidden">
+      {groups.map((group) => (
+        <section key={group.key} className="space-y-2">
+          {group.label && (
+            <h2 className="text-xs font-medium text-muted-foreground">
+              {group.label} · {group.items.length}
+            </h2>
+          )}
+          {group.items.map((m) => {
+            const summary = summarizeMovementStatus(m.installments, today)
+            const currency = assertCurrency(m.currency)
+            const kind = assertInstallmentMovementKind(m.kind)
+            const isOpen = expanded.has(m.id)
+            const categoria = m.categoryId ? categoryLabel.get(m.categoryId) : undefined
+            const detailsId = `cuotas-${m.id}`
+            const nextText = nextInstallmentText(m, today)
+            const cardName = m.creditCardId
+              ? cards.find((c) => c.id === m.creditCardId)?.name
+              : undefined
 
-        return (
-          <article key={m.id} aria-label={m.description} className="rounded-lg border border-border bg-background p-3">
-            <button
-              type="button"
-              className="flex min-h-11 w-full items-start justify-between gap-3 text-left"
-              aria-label={`${isOpen ? "Ocultar" : "Ver"} cuotas de ${m.description}`}
-              aria-expanded={isOpen}
-              aria-controls={detailsId}
-              onClick={() => toggle(m.id)}
-            >
-              <span className="min-w-0">
-                <span className="block truncate font-medium text-foreground">{m.description}</span>
-                <span className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  {formatIsoForDisplay(m.date)}
-                  {m.installments.length > 1 && <span>· {m.installments.length} cuotas</span>}
-                </span>
-                {cardName && <CardName name={cardName} />}
-              </span>
-              <span className="shrink-0 text-right tabular-nums font-medium text-foreground">
-                {formatMoney(m.amountCents, currency)}
-              </span>
-            </button>
+            return (
+              <article
+                key={m.id}
+                aria-label={m.description}
+                className="rounded-lg border border-border bg-background p-3"
+              >
+                <button
+                  type="button"
+                  className="flex min-h-11 w-full items-start justify-between gap-3 text-left"
+                  aria-label={`${isOpen ? "Ocultar" : "Ver"} cuotas de ${m.description}`}
+                  aria-expanded={isOpen}
+                  aria-controls={detailsId}
+                  onClick={() => toggle(m.id)}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-foreground">
+                      {m.description}
+                    </span>
+                    <span className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      {formatIsoForDisplay(m.date)}
+                      {m.installments.length > 1 && <span>· {m.installments.length} cuotas</span>}
+                    </span>
+                    {cardName && <CardName name={cardName} />}
+                  </span>
+                  <span className="shrink-0 text-right tabular-nums font-medium text-foreground">
+                    {formatMoney(m.amountCents, currency)}
+                  </span>
+                </button>
 
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <span>{categoria ? <CategoryBadge {...categoria} /> : "—"}</span>
-              <MovementStatusBadge {...summary} />
-            </div>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span>{categoria ? <CategoryBadge {...categoria} /> : "—"}</span>
+                  <MovementStatusBadge {...summary} />
+                </div>
 
-            {/* La próxima cuota y las acciones de un toque: Pagar sin tener
-                que desplegar nada, y el menú ⋯ con Editar y Borrar. */}
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate text-xs text-muted-foreground">{nextText}</span>
-              <span className="flex shrink-0 items-center gap-1">
-                <PayNextButton movement={m} kind={kind} />
-                <MovementRowActions
-                  movement={m}
-                  kind={kind}
-                  categories={categories}
-                  cards={cards}
-                  today={today}
-                />
-              </span>
-            </div>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-xs text-muted-foreground">{nextText}</span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    <PayNextButton movement={m} kind={kind} />
+                    <MovementRowActions
+                      movement={m}
+                      kind={kind}
+                      categories={categories}
+                      cards={cards}
+                      today={today}
+                    />
+                  </span>
+                </div>
 
-            {isOpen && (
-              <div id={detailsId} className="mt-3 border-t pt-1">
-                <InstallmentRows
-                  rows={m.installments}
-                  currency={currency}
-                  today={today}
-                  description={m.description}
-                  kind={kind}
-                  cardId={m.creditCardId}
-                />
-              </div>
-            )}
-          </article>
-        )
-      })}
+                {isOpen && (
+                  <div id={detailsId} className="mt-3 border-t pt-1">
+                    <InstallmentRows
+                      rows={m.installments}
+                      currency={currency}
+                      today={today}
+                      description={m.description}
+                      kind={kind}
+                      cardId={m.creditCardId}
+                    />
+                  </div>
+                )}
+              </article>
+            )
+          })}
+        </section>
+      ))}
     </div>
   )
 }
 
-export function MovementList({ movements, categories, cards = [], today, emptyMessage }: Props) {
-  // Nombre, padre y color de cada categoría, con la herencia ya resuelta.
+export function MovementList({
+  movements,
+  categories,
+  cards = [],
+  today,
+  emptyMessage,
+  hasActiveFilters = false,
+  basePath,
+  kind,
+  groupBy = "none",
+  query,
+  page = 1,
+  totalPages = 1,
+  totalCount,
+}: Props) {
   const categoryLabel = categoryLabels(categories)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [extraMovements, setExtraMovements] = useState<MovementWithInstallments[]>([])
+  const [loadedPage, setLoadedPage] = useState(page)
+  const [lastInitialMovements, setLastInitialMovements] = useState(movements)
+  const [lastPage, setLastPage] = useState(page)
+  const [loadingMore, startLoadMore] = useTransition()
+
+  // Si llegan movimientos nuevos del servidor (cambio de filtro, recarga o
+  // acción), reinicia el acumulado de "Cargar más" en móvil.
+  if (movements !== lastInitialMovements || page !== lastPage) {
+    setLastInitialMovements(movements)
+    setLastPage(page)
+    setExtraMovements([])
+    setLoadedPage(page)
+  }
 
   function toggle(id: string) {
     setExpanded((prev) => {
@@ -194,9 +261,47 @@ export function MovementList({ movements, categories, cards = [], today, emptyMe
     })
   }
 
-  if (movements.length === 0) {
-    return <p className="text-muted-foreground py-8 text-center text-sm">{emptyMessage}</p>
+  function handleLoadMore() {
+    if (!kind || !query || loadedPage >= totalPages) return
+    const nextPage = loadedPage + 1
+    startLoadMore(async () => {
+      const res = await fetchMovementListPage(kind, query, nextPage)
+      setExtraMovements((prev) => {
+        const seen = new Set([...movements, ...prev].map((m) => m.id))
+        return [...prev, ...res.items.filter((m) => !seen.has(m.id))]
+      })
+      setLoadedPage(res.page)
+    })
   }
+
+  if (movements.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-3 rounded-lg border border-border bg-card/40 px-4 py-10 text-center">
+        <p className="text-muted-foreground text-sm">{emptyMessage}</p>
+        {hasActiveFilters && basePath ? (
+          <Button asChild variant="outline">
+            <Link href={basePath}>Limpiar filtros</Link>
+          </Button>
+        ) : (
+          kind && (
+            <MovementFormDialog
+              kind={kind}
+              categories={categories}
+              cards={cards}
+              suggestedRate={null}
+              today={today}
+              triggerLabel={kind === "income" ? "Cargar primer ingreso" : "Cargar primer egreso"}
+            />
+          )
+        )}
+      </div>
+    )
+  }
+
+  const paidGroupLabel = kind === "income" ? "Cobrados" : "Pagados"
+  const desktopGroups = groupMovements(movements, groupBy, today, paidGroupLabel)
+  const mobileMovements = [...movements, ...extraMovements]
+  const canLoadMore = Boolean(kind && query && loadedPage < totalPages)
 
   return (
     <>
@@ -204,158 +309,186 @@ export function MovementList({ movements, categories, cards = [], today, emptyMe
         <Table>
           <MovementTableHeader />
           <TableBody>
-            {movements.map((m) => {
-              // El mismo cálculo que usa el filtro de estado de esta pantalla:
-              // el badge y el filtro no pueden discrepar sobre qué está vencido.
-              const summary = summarizeMovementStatus(m.installments, today)
-              const currency = assertCurrency(m.currency)
-              const kind = assertInstallmentMovementKind(m.kind)
-              const isOpen = expanded.has(m.id)
-              const categoria = m.categoryId ? categoryLabel.get(m.categoryId) : undefined
-              const nextText = nextInstallmentText(m, today)
-              const cardName = m.creditCardId
-                ? cards.find((c) => c.id === m.creditCardId)?.name
-                : undefined
-
-              return (
-                <Fragment key={m.id}>
-                  {/* La fila entera es el disparador, pero el teclado necesita
-                      un control real: sin `tabIndex`/`onKeyDown` las cuotas de
-                      cada movimiento eran inalcanzables sin mouse.
-                      `role="button"` no va acá —rompería la semántica de tabla
-                      para un lector de pantalla—; `aria-expanded` sobre la fila
-                      ya comunica el estado, y la celda del chevron lleva el
-                      nombre accesible. */}
-                  <TableRow
-                    className="cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
-                    tabIndex={0}
-                    aria-expanded={isOpen}
-                    onClick={() => toggle(m.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault()
-                        toggle(m.id)
-                      }
-                    }}
-                  >
-                    <TableCell>
-                      {isOpen ? (
-                        <ChevronDown className="text-muted-foreground size-4" />
-                      ) : (
-                        <ChevronRight className="text-muted-foreground size-4" />
-                      )}
-                      <span className="sr-only">
-                        {isOpen ? "Ocultar cuotas de" : "Ver cuotas de"} {m.description}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground tabular-nums">
-                      {formatIsoForDisplay(m.date)}
-                    </TableCell>
-                    <TableCell className="max-w-64 truncate whitespace-normal">
-                      {m.description}
-                      {m.installments.length > 1 && (
-                        <span className="text-muted-foreground"> · {m.installments.length} cuotas</span>
-                      )}
-                      {nextText && (
-                        <span className="block text-xs text-muted-foreground">{nextText}</span>
-                      )}
-                      {cardName && (
-                        <span className="block">
-                          <CardName name={cardName} />
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {/* `categoryLabel.get` puede no encontrar nada aunque el
-                          movimiento tenga `categoryId`: la lista que llega por
-                          props es la del tipo de esta pantalla. El guión es
-                          para los dos casos, sin categoría y sin nombre
-                          resoluble. */}
-                      {categoria ? <CategoryBadge {...categoria} /> : "—"}
-                    </TableCell>
-                    <TableCell className="tabular-nums">{formatMoney(m.amountCents, currency)}</TableCell>
-                    <TableCell>
-                      <MovementStatusBadge {...summary} />
-                    </TableCell>
-                    {/* Los clics y las teclas de esta celda no llegan a la
-                        fila: si no, pagar desplegaría las cuotas. Y como React
-                        propaga los eventos a través de los portales, sin esto
-                        escribir un espacio en el formulario de edición —que
-                        cuelga de acá— plegaría la fila, y el `preventDefault`
-                        de su `onKeyDown` se comería el espacio. */}
+            {desktopGroups.map((group) => (
+              <Fragment key={group.key}>
+                {group.label && (
+                  <TableRow className="bg-muted/30 hover:bg-muted/30">
                     <TableCell
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
+                      colSpan={7}
+                      className="py-1.5 text-xs font-medium text-muted-foreground"
                     >
-                      <div className="flex items-center justify-end gap-1">
-                        <PayNextButton movement={m} kind={kind} />
-                        <MovementRowActions
-                          movement={m}
-                          kind={kind}
-                          categories={categories}
-                          cards={cards}
-                          today={today}
-                        />
-                      </div>
+                      {group.label} · {group.items.length}
                     </TableCell>
                   </TableRow>
-                  {isOpen && (
-                    <InstallmentTableRows
-                      rows={m.installments}
-                      currency={currency}
-                      today={today}
-                      description={m.description}
-                      kind={kind}
-                      cardId={m.creditCardId}
-                    />
-                  )}
-                </Fragment>
-              )
-            })}
+                )}
+                {group.items.map((m) => {
+                  const summary = summarizeMovementStatus(m.installments, today)
+                  const currency = assertCurrency(m.currency)
+                  const itemKind = assertInstallmentMovementKind(m.kind)
+                  const isOpen = expanded.has(m.id)
+                  const categoria = m.categoryId ? categoryLabel.get(m.categoryId) : undefined
+                  const nextText = nextInstallmentText(m, today)
+                  const cardName = m.creditCardId
+                    ? cards.find((c) => c.id === m.creditCardId)?.name
+                    : undefined
+
+                  return (
+                    <Fragment key={m.id}>
+                      <TableRow
+                        className="cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                        tabIndex={0}
+                        aria-expanded={isOpen}
+                        onClick={() => toggle(m.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            toggle(m.id)
+                          }
+                        }}
+                      >
+                        <TableCell>
+                          {isOpen ? (
+                            <ChevronDown className="text-muted-foreground size-4" />
+                          ) : (
+                            <ChevronRight className="text-muted-foreground size-4" />
+                          )}
+                          <span className="sr-only">
+                            {isOpen ? "Ocultar cuotas de" : "Ver cuotas de"} {m.description}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground tabular-nums">
+                          {formatIsoForDisplay(m.date)}
+                        </TableCell>
+                        <TableCell className="max-w-64 truncate whitespace-normal">
+                          {m.description}
+                          {m.installments.length > 1 && (
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · {m.installments.length} cuotas
+                            </span>
+                          )}
+                          {nextText && (
+                            <span className="block text-xs text-muted-foreground">{nextText}</span>
+                          )}
+                          {cardName && (
+                            <span className="block">
+                              <CardName name={cardName} />
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {categoria ? <CategoryBadge {...categoria} /> : "—"}
+                        </TableCell>
+                        <TableCell className="tabular-nums">
+                          {formatMoney(m.amountCents, currency)}
+                        </TableCell>
+                        <TableCell>
+                          <MovementStatusBadge {...summary} />
+                        </TableCell>
+                        <TableCell
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-end gap-1">
+                            <PayNextButton movement={m} kind={itemKind} />
+                            <MovementRowActions
+                              movement={m}
+                              kind={itemKind}
+                              categories={categories}
+                              cards={cards}
+                              today={today}
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {isOpen && (
+                        <InstallmentTableRows
+                          rows={m.installments}
+                          currency={currency}
+                          today={today}
+                          description={m.description}
+                          kind={itemKind}
+                          cardId={m.creditCardId}
+                        />
+                      )}
+                    </Fragment>
+                  )
+                })}
+              </Fragment>
+            ))}
           </TableBody>
         </Table>
       </div>
+
       <MovementCards
-        movements={movements}
+        movements={mobileMovements}
         categories={categories}
         cards={cards}
         categoryLabel={categoryLabel}
         today={today}
         expanded={expanded}
         toggle={toggle}
+        groupBy={groupBy}
+        paidGroupLabel={paidGroupLabel}
       />
+
+      {canLoadMore && (
+        <div className="flex flex-col items-center gap-2 md:hidden">
+          {totalCount !== undefined && (
+            <p className="text-muted-foreground text-xs tabular-nums">
+              Mostrando {mobileMovements.length} de {totalCount}
+            </p>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 w-full"
+            disabled={loadingMore}
+            onClick={handleLoadMore}
+          >
+            {loadingMore ? "Cargando..." : "Cargar más"}
+          </Button>
+        </div>
+      )}
     </>
   )
 }
 
-/**
- * La tabla mientras la consulta viaja: encabezados de verdad (los mismos que
- * `MovementList`, ver `MovementTableHeader`) y filas en gris. La grilla ya
- * está pintada cuando llegan los datos, así que lo único que cambia es el
- * contenido de las celdas.
- *
- * `rows` no puede adivinar cuántos movimientos van a venir. Cinco es un piso
- * que casi siempre se llena —la página trae hasta PAGE_SIZE— y deja la tabla
- * con altura suficiente para leerse como tabla sin empujar media pantalla
- * hacia abajo si al final vienen menos.
- */
 export function MovementListSkeleton({ rows = 5 }: { rows?: number }) {
   return (
-    <Table>
-      <MovementTableHeader />
-      <TableBody>
-        {Array.from({ length: rows }, (_, i) => (
-          <TableRow key={i} className="hover:bg-transparent">
-            <TableCell />
-            {COLUMNS.map((c) => (
-              <TableCell key={c}>
-                <div className="h-4 animate-pulse rounded bg-graphite" />
-              </TableCell>
+    <>
+      <div className="hidden md:block">
+        <Table>
+          <MovementTableHeader />
+          <TableBody>
+            {Array.from({ length: rows }, (_, i) => (
+              <TableRow key={i} className="hover:bg-transparent">
+                <TableCell />
+                {COLUMNS.map((c) => (
+                  <TableCell key={c}>
+                    <div className="h-4 animate-pulse rounded bg-graphite" />
+                  </TableCell>
+                ))}
+                <TableCell />
+              </TableRow>
             ))}
-            <TableCell />
-          </TableRow>
+          </TableBody>
+        </Table>
+      </div>
+      <div className="space-y-2 md:hidden" aria-hidden>
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i} className="space-y-3 rounded-lg border border-border bg-background p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="h-4 w-40 animate-pulse rounded bg-graphite" />
+              <div className="h-4 w-20 animate-pulse rounded bg-graphite" />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="h-5 w-24 animate-pulse rounded bg-graphite" />
+              <div className="h-5 w-20 animate-pulse rounded bg-graphite" />
+            </div>
+          </div>
         ))}
-      </TableBody>
-    </Table>
+      </div>
+    </>
   )
 }

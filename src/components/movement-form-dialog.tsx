@@ -47,6 +47,8 @@ type Props = {
    */
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  /** Texto del botón disparador cuando no es controlado ("Nuevo" por defecto). */
+  triggerLabel?: string
 }
 
 export function MovementFormDialog({
@@ -59,6 +61,7 @@ export function MovementFormDialog({
   suggestions,
   open: controlledOpen,
   onOpenChange,
+  triggerLabel = "Nuevo",
 }: Props) {
   const [ownOpen, setOwnOpen] = useState(false)
   const controlled = controlledOpen !== undefined
@@ -71,7 +74,7 @@ export function MovementFormDialog({
         <DialogTrigger asChild>
           <Button type="button">
             <Plus />
-            Nuevo
+            {triggerLabel}
           </Button>
         </DialogTrigger>
       )}

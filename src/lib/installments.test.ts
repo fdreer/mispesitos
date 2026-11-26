@@ -246,9 +246,15 @@ describe("describeNextInstallment", () => {
     )
   })
 
-  it("vence hoy no es 'venció'", () => {
+  it("vence hoy usa texto relativo en vez de la fecha", () => {
     expect(describeNextInstallment({ number: 1, dueDate: "2026-11-26" }, 1, "2026-11-26")).toBe(
-      "Vence 26/11",
+      "Vence hoy",
+    )
+    expect(describeNextInstallment({ number: 2, dueDate: "2026-11-29" }, 4, "2026-11-26")).toBe(
+      "Cuota 2/4 · vence en 3 días",
+    )
+    expect(describeNextInstallment({ number: 2, dueDate: "2026-11-24" }, 4, "2026-11-26")).toBe(
+      "Cuota 2/4 · venció hace 2 días",
     )
   })
 })

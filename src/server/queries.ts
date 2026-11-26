@@ -28,12 +28,29 @@ import {
   userSettings,
 } from "@/db/schema"
 import { perceivedPayment } from "@/lib/cards"
+import type { IsoDate } from "@/lib/dates"
+import { parseAmountToCents } from "@/lib/money"
 import {
   assertExchangeDirection,
   assertInstallmentMovementKind,
   assertPaidDate,
 } from "@/lib/movement-asserts"
-import { PAGE_SIZE, type Page } from "@/lib/movement-query"
+import {
+  summarizeMovementCounts,
+  summarizeMovementTotals,
+  sortMovements,
+  type FilterTotals,
+  type StatusCounts,
+} from "@/lib/movement-list-view"
+import {
+  CARD_FILTER_CASH,
+  movementFiltersFromQuery,
+  PAGE_SIZE,
+  paginate,
+  type MovementQuery,
+  type Page,
+} from "@/lib/movement-query"
+import { getMovementStatus } from "@/lib/movement-status"
 import { buildUsdPositionEvents, type PositionEvent } from "@/lib/position"
 
 export type Settings = typeof userSettings.$inferSelect
@@ -120,11 +137,18 @@ export const countMovementsByCategory = cache(async function countMovementsByCat
 
 export type MovementFilters = {
   kind?: "income" | "expense" | "exchange"
+  /** Compatibilidad con llamadores simples; se combina con `categoryIds`. */
   categoryId?: string
+  /** Lista de categorías elegidas (puede incluir padres; trae sus hijas). */
+  categoryIds?: string[]
+  /** Id de tarjeta, `"cash"` para efectivo/débito/transferencia, o undefined. */
+  cardId?: string
   currency?: "ARS" | "USD"
   from?: string
   to?: string
-  /** Texto libre contra la descripción, sin distinguir mayúsculas. */
+  minCents?: number
+  maxCents?: number
+  /** Texto libre contra descripción, categoría o importe. */
   search?: string
 }
 
@@ -140,26 +164,62 @@ function escapeLike(term: string): string {
 function movementConditions(userId: string, filters: MovementFilters) {
   const conditions = [eq(movement.userId, userId)]
   if (filters.kind) conditions.push(eq(movement.kind, filters.kind))
-  if (filters.categoryId) {
+
+  const selectedCategories = [
+    ...(filters.categoryId ? [filters.categoryId] : []),
+    ...(filters.categoryIds ?? []),
+  ]
+  if (selectedCategories.length > 0) {
     // Filtrar por un padre trae también lo de sus subcategorías: los
-    // movimientos van siempre a una hoja (decisión 7.4 del plan v2), así que
-    // filtrar sólo por el id del padre daría una lista vacía. La subconsulta
-    // corre bajo la misma RLS que la principal.
+    // movimientos van siempre a una hoja (decisión 7.4 del plan v2). La
+    // subconsulta corre bajo la misma RLS que la principal.
+    const idsSql = sql.join(
+      selectedCategories.map((id) => sql`${id}`),
+      sql`, `,
+    )
     conditions.push(
-      or(
-        eq(movement.categoryId, filters.categoryId),
-        inArray(
-          movement.categoryId,
-          sql`(SELECT ${category.id} FROM ${category} WHERE ${category.parentId} = ${filters.categoryId})`,
-        ),
-      )!,
+      sql`EXISTS (
+        SELECT 1 FROM "category" c
+        WHERE c."id" = ${movement.categoryId}
+          AND c."user_id" = ${userId}
+          AND (c."id" IN (${idsSql}) OR c."parent_id" IN (${idsSql}))
+      )`,
     )
   }
+
+  if (filters.cardId === CARD_FILTER_CASH) {
+    conditions.push(isNull(movement.creditCardId))
+  } else if (filters.cardId) {
+    conditions.push(eq(movement.creditCardId, filters.cardId))
+  }
+
   if (filters.currency) conditions.push(eq(movement.currency, filters.currency))
   if (filters.from) conditions.push(gte(movement.date, filters.from))
   if (filters.to) conditions.push(lte(movement.date, filters.to))
+  if (filters.minCents !== undefined) conditions.push(gte(movement.amountCents, filters.minCents))
+  if (filters.maxCents !== undefined) conditions.push(lte(movement.amountCents, filters.maxCents))
+
   if (filters.search) {
-    conditions.push(ilike(movement.description, `%${escapeLike(filters.search)}%`))
+    const pattern = `%${escapeLike(filters.search)}%`
+    const searchOr = [
+      ilike(movement.description, pattern),
+      // Busca también en el nombre de la categoría y de su padre.
+      sql`EXISTS (
+        SELECT 1 FROM "category" c
+        LEFT JOIN "category" p ON p."id" = c."parent_id"
+        WHERE c."id" = ${movement.categoryId}
+          AND c."user_id" = ${userId}
+          AND (c."name" ILIKE ${pattern} OR p."name" ILIKE ${pattern})
+      )`,
+    ]
+
+    const cleanedAmount = filters.search.trim().replace(/^(?:US\$|\$)\s*/i, "")
+    const amountCents = parseAmountToCents(cleanedAmount)
+    if (amountCents !== null && amountCents >= 0) {
+      searchOr.push(eq(movement.amountCents, amountCents))
+    }
+
+    conditions.push(or(...searchOr)!)
   }
   return conditions
 }
@@ -254,7 +314,8 @@ export async function listMovementsPage(
       .from(movement)
       .where(and(...conditions))
 
-    const totalPages = Math.max(1, Math.ceil((total?.value ?? 0) / PAGE_SIZE))
+    const totalCount = total?.value ?? 0
+    const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
     const current = Math.min(Math.max(1, page), totalPages)
 
     const movements = await tx
@@ -265,8 +326,44 @@ export async function listMovementsPage(
       .limit(PAGE_SIZE)
       .offset((current - 1) * PAGE_SIZE)
 
-    return { items: await conCuotas(tx, movements), page: current, totalPages }
+    return { items: await conCuotas(tx, movements), page: current, totalPages, totalCount }
   })
+}
+
+export type MovementListView = Page<MovementWithInstallments> & {
+  statusCounts: StatusCounts
+  totals: FilterTotals
+}
+
+/**
+ * Consulta compartida de /ingresos, /egresos y la carga incremental móvil:
+ * trae lo que pasa los filtros SQL una sola vez, calcula los conteos por
+ * estado (antes del filtro de estado, para que las pastillas conserven sus
+ * números al cambiar de estado), corta por estado, calcula totales, ordena y
+ * pagina.
+ */
+export async function queryMovementsView(
+  userId: string,
+  kind: "income" | "expense",
+  query: MovementQuery,
+  today: IsoDate,
+): Promise<MovementListView> {
+  const matching = await listMovements(userId, {
+    kind,
+    ...movementFiltersFromQuery(query),
+  })
+  const statusCounts = summarizeMovementCounts(matching, today)
+  const filtered =
+    query.status === "all"
+      ? matching
+      : matching.filter((m) => getMovementStatus(m.installments, today) === query.status)
+  const totals = summarizeMovementTotals(filtered, today)
+  const sorted = sortMovements(filtered, query.sort)
+  return {
+    ...paginate(sorted, query.page),
+    statusCounts,
+    totals,
+  }
 }
 
 /** Todas las cuotas pagadas, para el cálculo de saldo. */

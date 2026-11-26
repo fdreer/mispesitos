@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 
 import { MovementList } from "@/components/movement-list"
+import { parseMovementQuery } from "@/lib/movement-query"
 import type { MovementWithInstallments } from "@/server/queries"
 
 /**
@@ -11,14 +12,31 @@ import type { MovementWithInstallments } from "@/server/queries"
  * verdad abre una conexión a Postgres apenas se las importa. Mismo criterio
  * que `movement-form.test.tsx`.
  */
-const mocks = vi.hoisted(() => ({ setInstallmentPaid: vi.fn(async () => ({ ok: true })) }))
+const mocks = vi.hoisted(() => ({
+  setInstallmentPaid: vi.fn(async () => ({ ok: true })),
+  fetchMovementListPage: vi.fn(async () => ({
+    items: [] as MovementWithInstallments[],
+    page: 2,
+    totalPages: 2,
+    totalCount: 2,
+  })),
+}))
 
 vi.mock("@/server/actions/movements", () => ({
   setInstallmentPaid: mocks.setInstallmentPaid,
+  fetchMovementListPage: mocks.fetchMovementListPage,
   deleteMovement: async () => ({ ok: true }),
   // Las dos del formulario de edición, que ahora cuelga de la misma fila.
   createMovement: async () => ({ ok: true }),
   updateMovement: async () => ({ ok: true }),
+}))
+
+vi.mock("next/link", () => ({
+  default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
 }))
 
 vi.mock("next/navigation", () => ({
@@ -32,6 +50,7 @@ Element.prototype.scrollIntoView ??= () => {}
 afterEach(() => {
   cleanup()
   mocks.setInstallmentPaid.mockClear()
+  mocks.fetchMovementListPage.mockClear()
 })
 
 const CATEGORIAS = [
@@ -134,8 +153,8 @@ describe("MovementList", () => {
     const movimiento = celdas(filas[0])
     expect(movimiento[1]).toBe("11/08/2026")
     expect(movimiento[2]).toContain("Proyecto")
-    // La próxima cuota impaga, debajo de la descripción.
-    expect(movimiento[2]).toContain("Cuota 1/2 · vence 11/08")
+    // La próxima cuota impaga, con fecha relativa debajo de la descripción.
+    expect(movimiento[2]).toContain("Cuota 1/2 · vence hoy")
     expect(movimiento[3]).toBe("Freelance")
     expect(movimiento[4]).toBe("$ 2.000,00")
 
@@ -271,7 +290,7 @@ describe("MovementList", () => {
     expect(tarjeta.textContent).toContain("Freelance")
     expect(tarjeta.textContent).toContain("2 cuotas")
     // La tarjeta también muestra la próxima cuota y se cobra sin desplegar.
-    expect(tarjeta.textContent).toContain("Cuota 1/2 · vence 11/08")
+    expect(tarjeta.textContent).toContain("Cuota 1/2 · vence hoy")
     expect(within(tarjeta).getByRole("button", { name: "Cobrar cuota 1/2 de Proyecto" })).toBeTruthy()
     expect(within(tarjeta).getByRole("button", { name: "Acciones de Proyecto" })).toBeTruthy()
 
@@ -284,5 +303,152 @@ describe("MovementList", () => {
     const detalle = within(document.getElementById("cuotas-mov-1")!)
     expect(detalle.getByText(/Cuota\s+1/)).toBeTruthy()
     expect(detalle.getByRole("button", { name: "Marcar cobrada" })).toBeTruthy()
+  })
+
+  it("usa plurales correctos en los badges de estado e incluye un icono", () => {
+    const { container } = render(
+      <MovementList
+        movements={[MOVIMIENTO]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="vacío"
+      />,
+    )
+    const tabla = within(container.querySelector("table")!)
+    const badge = tabla.getByText("1 pendiente").closest("[data-slot='badge']")!
+    expect(badge.querySelector("svg")).toBeTruthy()
+
+    cleanup()
+
+    const dosVencidas: MovementWithInstallments = {
+      ...MOVIMIENTO,
+      installments: MOVIMIENTO.installments.map((i) => ({ ...i, paid: false, paidDate: null })),
+    }
+    const { container: c2 } = render(
+      <MovementList
+        movements={[dosVencidas]}
+        categories={CATEGORIAS}
+        today="2026-12-01"
+        emptyMessage="vacío"
+      />,
+    )
+    expect(within(c2.querySelector("table")!).getByText("2 vencidas")).toBeTruthy()
+  })
+
+  it("agrupa por vencimiento en egresos y por mes en ingresos", () => {
+    const vencido: MovementWithInstallments = {
+      ...MOVIMIENTO,
+      id: "m-v",
+      kind: "expense",
+      description: "Luz",
+      installments: [
+        { ...MOVIMIENTO.installments[0], id: "i-v", movementId: "m-v", dueDate: "2026-08-01", paid: false },
+      ],
+    }
+    const semana: MovementWithInstallments = {
+      ...MOVIMIENTO,
+      id: "m-s",
+      kind: "expense",
+      description: "Gas",
+      installments: [
+        { ...MOVIMIENTO.installments[0], id: "i-s", movementId: "m-s", dueDate: "2026-08-14", paid: false },
+      ],
+    }
+
+    const { container } = render(
+      <MovementList
+        movements={[vencido, semana]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="vacío"
+        kind="expense"
+        groupBy="due"
+      />,
+    )
+
+    const tabla = within(container.querySelector("table")!)
+    expect(tabla.getByText("Vencidos · 1")).toBeTruthy()
+    expect(tabla.getByText("Esta semana · 1")).toBeTruthy()
+
+    cleanup()
+
+    const { container: cIng } = render(
+      <MovementList
+        movements={[MOVIMIENTO]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="vacío"
+        kind="income"
+        groupBy="month"
+      />,
+    )
+    expect(within(cIng.querySelector("table")!).getByText("Agosto 2026 · 1")).toBeTruthy()
+  })
+
+  it("en estado vacío ofrece 'Limpiar filtros' o 'Cargar primer egreso'", () => {
+    render(
+      <MovementList
+        movements={[]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="Ningún movimiento entra en el filtro."
+        hasActiveFilters
+        basePath="/egresos"
+      />,
+    )
+    expect(screen.getByRole("link", { name: "Limpiar filtros" }).getAttribute("href")).toBe(
+      "/egresos",
+    )
+
+    cleanup()
+
+    render(
+      <MovementList
+        movements={[]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="Todavía no cargaste ningún egreso."
+        hasActiveFilters={false}
+        kind="expense"
+      />,
+    )
+    expect(screen.getByRole("button", { name: "Cargar primer egreso" })).toBeTruthy()
+  })
+
+  it("en móvil 'Cargar más' trae la página siguiente y la agrega a la lista", async () => {
+    const segundo: MovementWithInstallments = {
+      ...MOVIMIENTO,
+      id: "mov-2",
+      description: "Segundo cobro",
+    }
+    mocks.fetchMovementListPage.mockResolvedValueOnce({
+      items: [segundo],
+      page: 2,
+      totalPages: 2,
+      totalCount: 2,
+    })
+
+    render(
+      <MovementList
+        movements={[MOVIMIENTO]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="vacío"
+        kind="income"
+        query={parseMovementQuery({})}
+        page={1}
+        totalPages={2}
+        totalCount={2}
+      />,
+    )
+
+    expect(screen.getByText("Mostrando 1 de 2")).toBeTruthy()
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cargar más" }))
+    })
+
+    expect(mocks.fetchMovementListPage).toHaveBeenCalledWith("income", parseMovementQuery({}), 2)
+    expect(screen.getByRole("article", { name: "Segundo cobro" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Cargar más" })).toBeNull()
   })
 })

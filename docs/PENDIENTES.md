@@ -1022,3 +1022,104 @@ en los tests parametrizados y en el de FORCE, y 10 casos de FK y triggers),
 `actions.db.test.ts` (9 casos de tarjetas y resúmenes) y `queries.db.test.ts`
 (los campos nuevos de pendientes y el pago en pesos de una cuota en dólares).
 Hay que correrlos contra una base descartable antes de mergear.
+
+---
+
+## 15. Fase 4 del plan v2: listados y filtros (2026-11-26)
+
+La fase "Listados y filtros" de `docs/superpowers/specs/2026-11-26-v2-plan.md`
+(§4, §5.3 y §6), completando la deuda de multiselección de categoría que dejó §13.1.
+
+| Qué | Dónde | Sección |
+|---|---|---|
+| Índices compuestos `(user_id, kind, date)` y `(user_id, kind, amount_cents)` en `movement` | `drizzle/0013_indices_listados_y_filtros.sql`, `src/db/schema.ts` | §6 |
+| Atajos de fecha, detección de rango y corrimiento ‹ › por mes calendario o días | `src/lib/date-presets.ts`, `src/lib/dates.ts` | §4 |
+| Fechas relativas ("vence hoy", "vence en 3 días", "venció hace 2 días") | `formatRelativeDue` en `src/lib/dates.ts`, `describeNextInstallment` en `src/lib/installments.ts` | §5.3 |
+| Multiselección jerárquica (padre marca/desmarca hijas; desmarcar una hija desarma el padre) | `categoryCheckState` y `toggleCategorySelection` en `src/lib/category-tree.ts` | §4 |
+| Parseo y serialización de filtros nuevos (`categoryId` múltiple, `cardId`, `min`/`max`, `sort`) | `src/lib/movement-query.ts` | §4 |
+| Conteos por estado, totales cuota por cuota, orden (`due`/`date`/`amount`), agrupación y plurales | `src/lib/movement-list-view.ts` | §4, §5.3 |
+| Filtros SQL nuevos (múltiples categorías con padre, tarjeta/efectivo, min/max, búsqueda por descripción, categoría, padre e importe) y `queryMovementsView` | `src/server/queries.ts` | §4 |
+| Carga incremental de página para "Cargar más" en móvil | `fetchMovementListPage` en `src/server/actions/movements.ts` | §5.3 |
+| Barra de filtros unificada (reusable en `/informes`), chips con ×, hoja móvil con Aplicar, pastillas con conteo, totales, iconos en estados, agrupación, estados vacíos con acción y rango en escritorio | `movement-filters.tsx`, `movement-status-pills.tsx`, `status-badge.tsx`, `movement-list.tsx`, `movement-pagination.tsx`, `movement-screen.tsx` | §4, §5.3 |
+
+`tsc --noEmit` y `eslint` limpios (queda el aviso previo de `<img>` en
+`app-sidebar.tsx`). `drizzle-kit generate` dice "No schema changes". La suite
+pasó de 568 a 588 tests (587 en verde; falla sólo el que ya fallaba antes, el
+tope de 120 filas en `movement-form.test.tsx`).
+
+### 15.1 Qué se decidió
+
+- **Una sola pasada en `queryMovementsView` para los listados.** Con los conteos
+  de las pastillas de estado (`Vencidos (n) · Pendientes (n)`) y los totales
+  (`Pendiente · Vencido · Pagado`) arriba de la lista, un `LIMIT 20` en SQL sin
+  mirar cuotas no puede calcular ni los conteos ni los totales ni el orden por
+  vencimiento. `queryMovementsView` trae los movimientos que pasan el WHERE una
+  sola vez, calcula `statusCounts` antes de filtrar por `status` (para que
+  elegir `Vencidos` no borre el conteo de `Pendientes`), filtra por estado,
+  calcula `totals` cuota por cuota, ordena y pagina. `listMovementsPage` queda
+  actualizada en `queries.ts` con las mismas condiciones SQL.
+- **Totales por cuota, no por estado entero del movimiento.** Una compra en 3
+  cuotas con 1 pagada y 2 impagas suma la pagada a `Pagado` y las impagas a
+  `Pendiente`/`Vencido`, coherente con el criterio de lo percibido (§0). En
+  listas con ARS y USD juntos, cada moneda se muestra separada (`$ X + US$ Y`).
+- **Fechas relativas dentro de ±14 días.** Más allá de dos semanas (`> 14` días)
+  `describeNextInstallment` vuelve a mostrar la fecha corta (`15/12`), para no
+  obligar a contar días mentales en vencimientos lejanos.
+- **"Esta semana" son los próximos 7 días contando hoy (`today .. today + 6`).**
+  Usar semana calendario fija (lunes a domingo) dejaba "Esta semana" de un solo
+  día los domingos; con ventana móvil de 7 días siempre muestra lo inmediato
+  incluso si cruza el fin de mes.
+- **"Cargar más" en móvil sin cambiar `?page=` en la URL.** En escritorio la
+  URL lleva `?page=` y muestra el rango (`21–40 de 134`); en móvil, apretar
+  "Cargar más" pide la página siguiente vía `fetchMovementListPage` y la apila
+  debajo de las tarjetas ya cargadas, reiniciando si cambia cualquier filtro.
+- **Orden por importe consolidado a pesos (`amountInArs`)** usando `convertToArs`
+  y el `rate` del movimiento, para comparar ARS y USD en una misma escala sin
+  poner $ 10.000 arriba de US$ 100.
+- **Orden por defecto según pantalla y sin contar como filtro activo.** Egresos
+  arranca ordenado por `due` (vencimiento más cercano arriba, pagados al final)
+  e ingresos por `date`; `buildMovementHref` omite `sort` cuando coincide con el
+  default de la pantalla, y `hayFiltrosActivos` / `activeFilterCount` no cuentan
+  `sort` ni `page`.
+- **La barra de filtros queda lista para `/informes` (Fase 5)** mediante props
+  (`showPaymentMethod`, `showSort`, `showStatus`, `showCurrency`, `showSearch`),
+  sin duplicar el componente. En `/egresos` y `/ingresos` las pastillas con
+  conteo viven en `ListaConPaginacion` (encima de la tabla) para conservar el
+  streaming en tres bloques (§3.4), y dentro de la hoja móvil `Filtros (n)` se
+  incluye `Estado` en el borrador local hasta pulsar `Aplicar` (por eso el
+  contador incluye el estado).
+- **`Importe` mínimo/máximo en popover en escritorio** y par de inputs en la hoja
+  móvil, para que los 7 controles de la barra entren en una sola fila de
+  escritorio (`1200px`). En la URL viajan en pesos (`min`/`max`) y se parsean a
+  centavos; las categorías múltiples viajan en `categoryId` separadas por coma
+  (aceptando también parámetros repetidos).
+
+### 15.2 Lo que se verificó y lo que no
+
+Verificado en el navegador, escritorio (`1280×800`) y móvil (`375×812`), contra
+la instalación Docker local (no contra la base de `.env.local`), con la
+migración `0013` aplicada por el servicio `migrate`: barra de filtros completa en
+`/egresos` (7 controles en una fila), ausencia de `Medio de pago` y orden por
+`Fecha` en `/ingresos`, multiselección de categoría padre marcando sus hijas,
+chips removibles con × y `Limpiar todo`, atajo `Este mes` y corrimiento con `‹`
+a `Mes pasado`, rango de importe con chip, buscador sin coincidencias mostrando
+`Limpiar filtros`, estado vacío en `/ingresos` mostrando `+ Cargar primer
+ingreso`, pastillas con conteo, barra de totales, badges con icono y plurales
+correctos, agrupación (`Más adelante` / `Pagados`), hoja inferior móvil que
+espera a `Aplicar` y contador `Filtros (N)` incluyendo el estado. Tras la
+primera pasada móvil se cambió el contenedor de las pastillas de scroll
+horizontal a `flex-wrap` y se ajustaron los anchos de escritorio para evitar la
+barra de scroll horizontal en 375px y el salto de `Orden` a segunda línea; ese
+ajuste quedó verificado en la segunda pasada.
+
+**No se vio en el navegador**: el paginado con más de 20 movimientos (`"21–40 de
+134"` en escritorio y `"Cargar más"` en móvil), porque la cuenta de prueba de
+Docker tenía 4 egresos y 0 ingresos; esa lógica quedó cubierta por los tests
+unitarios y de componente (`movement-pagination.test.tsx` y
+`movement-list.test.tsx`).
+
+**`pnpm test:db` no se corrió**, por el mismo motivo que §11.3: apunta a la base
+de `.env.local`. Se actualizaron igual los tests en `src/server/queries.db.test.ts`
+(múltiples categorías con padre, tarjeta vs efectivo, importe min/max, búsqueda
+por categoría/padre/importe, y `queryMovementsView`). Hay que correrlos contra
+una base descartable antes de mergear.

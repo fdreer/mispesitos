@@ -27,7 +27,9 @@ import {
   listPaidInstallments,
   listPendingInstallments,
   listUsdPositionEvents,
+  queryMovementsView,
 } from "@/server/queries"
+import { CARD_FILTER_CASH, parseMovementQuery } from "@/lib/movement-query"
 
 /**
  * Tests de la capa de lectura contra la base real. Todo lo que se siembra
@@ -761,6 +763,143 @@ describe("listMovements", () => {
     // `inArray` saldría con una lista de ids vacía.
     expect(await listMovements(USUARIO_A, { from: "2030-01-01" })).toEqual([])
     expect(await listMovements(USUARIO_SIN_ONBOARDING)).toEqual([])
+  })
+
+  it("filtra por múltiples categorías y expande cada padre a sus hijas", async () => {
+    const HOGAR = "q-cat-a-hogar-multi"
+    try {
+      await withUser(USUARIO_A, async (tx) => {
+        await tx
+          .insert(category)
+          .values({ id: HOGAR, userId: USUARIO_A, name: "Hogar", kind: "expense" })
+        await tx.update(category).set({ parentId: HOGAR }).where(eq(category.id, CAT.alquiler))
+      })
+
+      const movs = await listMovements(USUARIO_A, {
+        kind: "expense",
+        categoryIds: [HOGAR, CAT.comida],
+      })
+      expect([...ids(movs)].sort()).toEqual(
+        [MOV.alquiler, MOV.comida, MOV.junioTemprano, MOV.junioTarde].sort(),
+      )
+    } finally {
+      await withUser(USUARIO_A, async (tx) => {
+        await tx.update(category).set({ parentId: null }).where(eq(category.id, CAT.alquiler))
+        await tx.delete(category).where(eq(category.id, HOGAR))
+      })
+    }
+  })
+
+  it("filtra por medio de pago: tarjeta específica o efectivo/débito", async () => {
+    const CARD_A = "q-card-a-visa"
+    const MOV_TARJETA = "q-mov-a-tarjeta"
+    try {
+      await withUser(USUARIO_A, async (tx) => {
+        await tx.insert(creditCard).values({
+          id: CARD_A,
+          userId: USUARIO_A,
+          name: "Visa Test",
+          closingDay: 20,
+          dueDay: 5,
+        })
+        await tx.insert(movement).values({
+          id: MOV_TARJETA,
+          userId: USUARIO_A,
+          kind: "expense",
+          description: "Compra Visa",
+          categoryId: CAT.comida,
+          date: "2026-06-05",
+          currency: "ARS",
+          amountCents: 50_00,
+          rate: "1",
+          creditCardId: CARD_A,
+          createdAt: new Date("2026-06-05T10:00:00Z"),
+        })
+      })
+
+      expect(ids(await listMovements(USUARIO_A, { kind: "expense", cardId: CARD_A }))).toEqual([
+        MOV_TARJETA,
+      ])
+      const enEfectivo = ids(
+        await listMovements(USUARIO_A, { kind: "expense", cardId: CARD_FILTER_CASH }),
+      )
+      expect(enEfectivo).not.toContain(MOV_TARJETA)
+      expect(enEfectivo).toContain(MOV.comida)
+    } finally {
+      await withUser(USUARIO_A, async (tx) => {
+        await tx.delete(movement).where(eq(movement.id, MOV_TARJETA))
+        await tx.delete(creditCard).where(eq(creditCard.id, CARD_A))
+      })
+    }
+  })
+
+  it("filtra por importe mínimo y máximo", async () => {
+    const movs = await listMovements(USUARIO_A, {
+      kind: "expense",
+      minCents: 20_00,
+      maxCents: 200_00,
+    })
+    expect([...ids(movs)].sort()).toEqual([MOV.comida, MOV.junioTarde].sort())
+  })
+
+  it("el buscador también encuentra por nombre de categoría, padre o importe exacto", async () => {
+    const HOGAR = "q-cat-a-hogar-search"
+    try {
+      await withUser(USUARIO_A, async (tx) => {
+        await tx
+          .insert(category)
+          .values({ id: HOGAR, userId: USUARIO_A, name: "Hogar", kind: "expense" })
+        await tx.update(category).set({ parentId: HOGAR }).where(eq(category.id, CAT.alquiler))
+      })
+
+      // Por categoría hoja ("Comida" -> Supermercado + Kioscos).
+      expect([...ids(await listMovements(USUARIO_A, { kind: "expense", search: "comid" }))].sort()).toEqual(
+        [MOV.comida, MOV.junioTemprano, MOV.junioTarde].sort(),
+      )
+      // Por categoría padre ("Hogar" -> Alquiler).
+      expect(ids(await listMovements(USUARIO_A, { kind: "expense", search: "hogar" }))).toEqual([
+        MOV.alquiler,
+      ])
+      // Por importe exacto ("180" = $180,00 = 18000 centavos).
+      expect(ids(await listMovements(USUARIO_A, { kind: "expense", search: "180" }))).toEqual([
+        MOV.comida,
+      ])
+    } finally {
+      await withUser(USUARIO_A, async (tx) => {
+        await tx.update(category).set({ parentId: null }).where(eq(category.id, CAT.alquiler))
+        await tx.delete(category).where(eq(category.id, HOGAR))
+      })
+    }
+  })
+})
+
+describe("queryMovementsView", () => {
+  it("calcula conteos por estado, totales de cuotas y orden por vencimiento", async () => {
+    // El 2026-04-20: comida tiene cuota 2 vencida (2026-04-10) -> overdue;
+    // alquiler tiene cuota 2 pendiente (2026-05-01) -> pending; kioscos sin cuotas -> paid.
+    const view = await queryMovementsView(
+      USUARIO_A,
+      "expense",
+      parseMovementQuery({}, "due"),
+      "2026-04-20",
+    )
+
+    expect(view.statusCounts).toEqual({
+      all: 4,
+      overdue: 1,
+      pending: 1,
+      paid: 2,
+    })
+    expect(view.totals.overdue).toEqual({ arsCents: 60_00, usdCents: 0 })
+    expect(view.totals.pending).toEqual({ arsCents: 75_00, usdCents: 180_00 })
+    expect(view.totals.paid).toEqual({ arsCents: 45_00, usdCents: 120_00 })
+    // Por vencimiento: primero el vencido (comida, 2026-04-10), luego pendiente (alquiler, 2026-05-01), luego pagados por fecha desc.
+    expect(ids(view.items)).toEqual([
+      MOV.comida,
+      MOV.alquiler,
+      MOV.junioTarde,
+      MOV.junioTemprano,
+    ])
   })
 })
 

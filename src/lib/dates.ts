@@ -133,3 +133,81 @@ export function formatIsoForDisplay(iso: string): string {
 export function isOverdue(dueDate: IsoDate, today: IsoDate): boolean {
   return dueDate < today
 }
+
+const MS_PER_DAY = 86_400_000
+
+function isoToUtcDayNumber(date: IsoDate): number {
+  if (!isValidIsoDate(date)) {
+    throw new Error(`La fecha debe ser un día real en formato YYYY-MM-DD, no ${JSON.stringify(date)}`)
+  }
+  const [year, month, day] = date.split("-").map(Number)
+  return Math.floor(utcDate(year, month - 1, day).getTime() / MS_PER_DAY)
+}
+
+/**
+ * Suma (o resta) días calendario a una `IsoDate`. Trabaja en UTC por número de
+ * día para evitar cualquier salto por cambio de hora.
+ */
+export function addDaysIso(date: IsoDate, days: number): IsoDate {
+  const dayNum = isoToUtcDayNumber(date)
+  const d = new Date((dayNum + days) * MS_PER_DAY)
+  const paddedYear = String(d.getUTCFullYear()).padStart(4, "0")
+  return `${paddedYear}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
+}
+
+/** Diferencia en días (`target - base`): positivo si `target` es posterior. */
+export function diffDaysIso(target: IsoDate, base: IsoDate): number {
+  return isoToUtcDayNumber(target) - isoToUtcDayNumber(base)
+}
+
+/** Primer y último día del mes `YYYY-MM`. */
+export function monthRange(yearMonth: string): { from: IsoDate; to: IsoDate } {
+  const [year, month] = yearMonth.split("-").map(Number)
+  const lastDay = utcDate(year, month, 0).getUTCDate()
+  return {
+    from: `${yearMonth}-01`,
+    to: `${yearMonth}-${pad(lastDay)}`,
+  }
+}
+
+const MONTH_NAMES_ES = [
+  "Enero",
+  "Febrero",
+  "Marzo",
+  "Abril",
+  "Mayo",
+  "Junio",
+  "Julio",
+  "Agosto",
+  "Septiembre",
+  "Octubre",
+  "Noviembre",
+  "Diciembre",
+] as const
+
+/** `"2026-11"` -> `"Noviembre 2026"`. */
+export function formatMonthLabel(yearMonth: string): string {
+  const [year, month] = yearMonth.split("-").map(Number)
+  const name = MONTH_NAMES_ES[month - 1]
+  if (!name) return yearMonth
+  return `${name} ${year}`
+}
+
+/**
+ * Distancia legible para un vencimiento cercano ("vence hoy", "vence en 3
+ * días", "venció hace 2 días"). Más allá de 14 días muestra la fecha corta
+ * para no obligar a contar días en el calendario (§5.3 del plan v2).
+ */
+export function formatRelativeDue(
+  dueDate: IsoDate,
+  today: IsoDate,
+  fallbackShortDate: string,
+): string {
+  const diff = diffDaysIso(dueDate, today)
+  if (diff === 0) return "vence hoy"
+  if (diff === 1) return "vence mañana"
+  if (diff >= 2 && diff <= 14) return `vence en ${diff} días`
+  if (diff === -1) return "venció ayer"
+  if (diff <= -2 && diff >= -14) return `venció hace ${-diff} días`
+  return diff < 0 ? `venció ${fallbackShortDate}` : `vence ${fallbackShortDate}`
+}

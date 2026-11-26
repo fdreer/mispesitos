@@ -1,0 +1,2 @@
+CREATE INDEX "movement_user_kind_date_idx" ON "movement" USING btree ("user_id","kind","date");--> statement-breakpoint
+CREATE INDEX "movement_user_kind_amount_idx" ON "movement" USING btree ("user_id","kind","amount_cents");

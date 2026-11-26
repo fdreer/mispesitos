@@ -22,13 +22,19 @@ vi.mock("next/link", () => ({
   useLinkStatus: () => ({ pending: false }),
 }))
 
-function montar(page: number, totalPages: number, raw: Record<string, string> = {}) {
+function montar(
+  page: number,
+  totalPages: number,
+  raw: Record<string, string> = {},
+  totalCount?: number,
+) {
   return render(
     <MovementPagination
       basePath="/ingresos"
       query={parseMovementQuery(raw)}
       page={page}
       totalPages={totalPages}
+      totalCount={totalCount}
     />,
   )
 }
@@ -129,5 +135,10 @@ describe("MovementPagination", () => {
       "39",
       "40",
     ])
+  })
+
+  it("en escritorio muestra el rango visible ('21–40 de 134')", () => {
+    montar(2, 7, {}, 134)
+    expect(screen.getByText("21–40 de 134")).toBeTruthy()
   })
 })
