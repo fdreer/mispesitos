@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.env
+.env.*
+!.env.selfhost.example
+coverage
+.claude
+.agents
+.playwright
+.playwright-cli
+.superpowers
+docs
+*.tsbuildinfo
+next-env.d.ts

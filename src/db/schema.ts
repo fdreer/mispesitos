@@ -190,3 +190,35 @@ export const installment = pgTable(
     }).onDelete("cascade"),
   ],
 )
+
+/**
+ * Invitaciones para entrar a una instalación privada (§0.1 del plan v2).
+ *
+ * Es una tabla del lado de auth, no de datos del usuario: la consultan el alta
+ * de better-auth y la pantalla del admin, siempre FUERA de withUser(), con el
+ * rol de conexión `app_user`. Por eso su acceso va como el de `user` y
+ * `session` (migración 0004), no por las policies `TO authenticated`.
+ *
+ * Del token sólo se guarda el hash: con un volcado de la base no se puede
+ * armar un link válido.
+ */
+export const invitation = pgTable(
+  "invitation",
+  {
+    id: text("id").primaryKey(),
+    /** sha256 en hex del token que viaja en el link. */
+    tokenHash: text("token_hash").notNull().unique(),
+    /** Si está, sólo esa dirección puede usar la invitación. */
+    email: text("email"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** Se marca al reclamarla, antes de crear el usuario: un link, una cuenta. */
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    usedBy: text("used_by").references(() => user.id, { onDelete: "set null" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [index("invitation_created_by_idx").on(t.createdBy)],
+)

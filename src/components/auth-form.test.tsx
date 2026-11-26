@@ -115,7 +115,11 @@ describe("AuthForm", () => {
       fireEvent.click(screen.getByRole("button", { name: "Continuar con Google" }))
     })
 
-    expect(signIn.social).toHaveBeenCalledWith({ provider: "google", callbackURL: "/dashboard" })
+    expect(signIn.social).toHaveBeenCalledWith({
+      provider: "google",
+      callbackURL: "/dashboard",
+      errorCallbackURL: "/login",
+    })
     expect(screen.getByText("Google dijo que no.")).toBeTruthy()
   })
 

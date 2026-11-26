@@ -42,3 +42,6 @@ next-env.d.ts
 /.playwright-cli/
 /.superpowers/
 skills-lock.json
+
+# Variables de la instalación propia con Docker Compose (ver .env.selfhost.example)
+/.env

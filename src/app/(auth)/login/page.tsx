@@ -1,37 +1,32 @@
-import Image from "next/image"
-import Link from "next/link"
 import { redirect } from "next/navigation"
 
 import { googleEnabled } from "@/auth"
+import { AuthCard, AuthNotice } from "@/components/auth-card"
 import { AuthForm } from "@/components/auth-form"
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
+import { authErrorMessage } from "@/lib/invitations"
+import { hasAnyUser } from "@/server/access"
 import { getOptionalUser } from "@/server/session"
 
-export default async function LoginPage() {
+type Props = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}
+
+/**
+ * Sin enlace a "Creá una cuenta": la instalación es privada y se entra por
+ * invitación (§0.1 del plan v2). La única excepción es la instalación vacía,
+ * que manda directo a crear la cuenta de administrador.
+ */
+export default async function LoginPage({ searchParams }: Props) {
   if (await getOptionalUser()) redirect("/dashboard")
+  if (!(await hasAnyUser())) redirect("/registro")
+
+  const params = await searchParams
+  const error = authErrorMessage(typeof params.error === "string" ? params.error : undefined)
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md items-center justify-center px-4 py-8">
-      <Card className="w-full border border-border/80 shadow-hairline">
-        <CardHeader className="gap-5 px-6 pb-5 pt-8 text-center sm:px-8">
-          <div className="flex flex-col items-center gap-3">
-            <Image src="/brand/mark.svg" alt="Mis Pesitos" width={48} height={60} priority className="h-12 w-auto" />
-            <div className="space-y-1.5">
-              <h1 className="text-2xl font-semibold tracking-tight text-paper">Entrar a Mis Pesitos</h1>
-              <CardDescription>Tus finanzas, ordenadas.</CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-6 px-6 pb-8 sm:px-8">
-          <AuthForm mode="login" googleEnabled={googleEnabled} />
-          <p className="text-muted-foreground text-center text-sm">
-            ¿No tenés cuenta?{" "}
-            <Link href="/registro" className="cursor-pointer font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary/80">
-              Creá una
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
-    </main>
+    <AuthCard title="Entrar a Mis Pesitos" description="Tus finanzas, ordenadas.">
+      {error && <AuthNotice>{error}</AuthNotice>}
+      <AuthForm mode="login" googleEnabled={googleEnabled} />
+    </AuthCard>
   )
 }

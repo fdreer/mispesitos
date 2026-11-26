@@ -11,13 +11,21 @@ import { Label } from "@/components/ui/label"
 export function AuthForm({
   mode,
   googleEnabled,
+  fixedEmail,
+  submitLabel,
 }: {
   mode: "login" | "registro"
   googleEnabled: boolean
+  /**
+   * Invitación con correo: sólo esa dirección puede usarla (lo hace cumplir
+   * el servidor), así que el campo viene completo y no se edita.
+   */
+  fixedEmail?: string
+  submitLabel?: string
 }) {
   const router = useRouter()
   const [name, setName] = useState("")
-  const [email, setEmail] = useState("")
+  const [email, setEmail] = useState(fixedEmail ?? "")
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
@@ -58,7 +66,14 @@ export function AuthForm({
     setError(null)
     setPending(true)
 
-    const result = await signIn.social({ provider: "google", callbackURL: "/dashboard" })
+    // Si el alta se rechaza en el callback (instalación privada, invitación
+    // inválida), better-auth vuelve acá con `?error=` en vez de a su página
+    // de error genérica. La página lo traduce.
+    const result = await signIn.social({
+      provider: "google",
+      callbackURL: "/dashboard",
+      errorCallbackURL: mode === "registro" ? "/registro" : "/login",
+    })
 
     setPending(false)
 
@@ -111,8 +126,10 @@ export function AuthForm({
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            readOnly={Boolean(fixedEmail)}
+            aria-readonly={fixedEmail ? true : undefined}
             required
-            className="h-11"
+            className="h-11 read-only:opacity-70"
           />
         </div>
 
@@ -137,7 +154,7 @@ export function AuthForm({
         )}
 
         <Button type="submit" className="mt-2 h-11 w-full" disabled={pending}>
-          {pending ? "Un segundo…" : mode === "registro" ? "Crear cuenta" : "Entrar"}
+          {pending ? "Un segundo…" : (submitLabel ?? (mode === "registro" ? "Crear cuenta" : "Entrar"))}
         </Button>
       </form>
     </div>

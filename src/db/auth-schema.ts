@@ -1,18 +1,39 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { pgTable, text, timestamp, boolean, index, check, uniqueIndex } from "drizzle-orm/pg-core";
 
-export const user = pgTable("user", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified").default(false).notNull(),
-  image: text("image"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at")
-    .defaultNow()
-    .$onUpdate(() => /* @__PURE__ */ new Date())
-    .notNull(),
-});
+export const user = pgTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("email_verified").default(false).notNull(),
+    image: text("image"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    /**
+     * "admin" | "member". Campos propios, declarados también en
+     * `user.additionalFields` de src/auth.ts para que better-auth los lea y
+     * los devuelva en la sesión. Ver §0.1 del plan v2.
+     */
+    role: text("role").notNull().default("member"),
+    /** Con valor, la persona no puede entrar: el admin le quitó el acceso. */
+    disabledAt: timestamp("disabled_at"),
+  },
+  (table) => [
+    check("user_role_valid", sql`${table.role} IN ('admin', 'member')`),
+    /**
+     * Un solo administrador por instalación. Además de la regla, es lo que
+     * resuelve la carrera de dos registros simultáneos en una base vacía: los
+     * dos ven cero usuarios y piden ser admin, y el segundo INSERT choca acá.
+     */
+    uniqueIndex("user_single_admin").on(table.role).where(sql`role = 'admin'`),
+  ],
+);
 
 export const session = pgTable(
   "session",

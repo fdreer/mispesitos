@@ -1,37 +1,76 @@
-import Image from "next/image"
 import Link from "next/link"
+import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 
 import { googleEnabled } from "@/auth"
+import { AuthCard, AuthNotice } from "@/components/auth-card"
 import { AuthForm } from "@/components/auth-form"
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
+import { INVITE_COOKIE, INVITE_INVALID_MESSAGE, authErrorMessage } from "@/lib/invitations"
+import { findUsableInvitation, hasAnyUser } from "@/server/access"
 import { getOptionalUser } from "@/server/session"
 
-export default async function RegistroPage() {
+type Props = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}
+
+const loginLink = (
+  <p className="text-muted-foreground text-center text-sm">
+    ¿Ya tenés cuenta?{" "}
+    <Link href="/login" className="cursor-pointer font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary/80">
+      Entrá
+    </Link>
+  </p>
+)
+
+/**
+ * Tres caras, según el estado de la instalación (§0.1 del plan v2):
+ *
+ * - **Vacía:** quien llega crea la cuenta de administrador.
+ * - **Con invitación válida en la cookie:** el formulario, con el correo fijo
+ *   si la invitación es para uno.
+ * - **Sin invitación:** el aviso de instalación privada, sin formulario.
+ *
+ * La página sólo decide qué mostrar. Quién puede crear una cuenta lo decide el
+ * hook de src/auth.ts, que también cubre el alta con Google.
+ */
+export default async function RegistroPage({ searchParams }: Props) {
   if (await getOptionalUser()) redirect("/dashboard")
 
+  const params = await searchParams
+  const errorParam = typeof params.error === "string" ? params.error : undefined
+  const error = authErrorMessage(errorParam)
+
+  if (!(await hasAnyUser())) {
+    return (
+      <AuthCard
+        title="Crear cuenta de administrador"
+        description="Sos la primera persona en esta instalación. Después vas a poder invitar a quien quieras."
+      >
+        {error && <AuthNotice>{error}</AuthNotice>}
+        <AuthForm mode="registro" googleEnabled={googleEnabled} submitLabel="Crear cuenta de administrador" />
+      </AuthCard>
+    )
+  }
+
+  const token = (await cookies()).get(INVITE_COOKIE)?.value
+  const inv = token ? await findUsableInvitation(token) : null
+
+  if (inv) {
+    return (
+      <AuthCard title="Crear cuenta" description="Te invitaron a Mis Pesitos. Tus finanzas son solo tuyas.">
+        {error && <AuthNotice>{error}</AuthNotice>}
+        <AuthForm mode="registro" googleEnabled={googleEnabled} fixedEmail={inv.email ?? undefined} />
+        {loginLink}
+      </AuthCard>
+    )
+  }
+
+  const invalid = params.invitacion === "invalida" || Boolean(token)
+
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md items-center justify-center px-4 py-8">
-      <Card className="w-full border border-border/80 shadow-hairline">
-        <CardHeader className="gap-5 px-6 pb-5 pt-8 text-center sm:px-8">
-          <div className="flex flex-col items-center gap-3">
-            <Image src="/brand/mark.svg" alt="Mis Pesitos" width={48} height={60} priority className="h-12 w-auto" />
-            <div className="space-y-1.5">
-              <h1 className="text-2xl font-semibold tracking-tight text-paper">Crear cuenta</h1>
-              <CardDescription>Empezá a ordenar tu plata hoy.</CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-6 px-6 pb-8 sm:px-8">
-          <AuthForm mode="registro" googleEnabled={googleEnabled} />
-          <p className="text-muted-foreground text-center text-sm">
-            ¿Ya tenés cuenta?{" "}
-            <Link href="/login" className="cursor-pointer font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary/80">
-              Entrá
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
-    </main>
+    <AuthCard title="Instalación privada" description="Para crear una cuenta necesitás una invitación de quien administra esta instalación.">
+      {(error || invalid) && <AuthNotice>{error ?? INVITE_INVALID_MESSAGE}</AuthNotice>}
+      {loginLink}
+    </AuthCard>
   )
 }

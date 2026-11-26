@@ -5,6 +5,7 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 
 import { auth } from "@/auth"
+import { getUserRole } from "@/server/access"
 import { getSettings } from "@/server/queries"
 
 /**
@@ -18,7 +19,13 @@ import { getSettings } from "@/server/queries"
  */
 export const getOptionalUser = cache(async () => {
   const session = await auth.api.getSession({ headers: await headers() })
-  return session?.user ?? null
+  const user = session?.user
+  if (!user) return null
+  // Cinturón además del tirante: quitar el acceso ya borra las sesiones
+  // (src/server/access.ts), pero si alguna sobrevive no abre nada. Devolver
+  // null —y no redirigir— evita el ida y vuelta entre /login y /dashboard.
+  if (user.disabledAt) return null
+  return user
 })
 
 /**
@@ -28,6 +35,16 @@ export const getOptionalUser = cache(async () => {
 export async function requireUser() {
   const user = await getOptionalUser()
   if (!user) redirect("/login")
+  return user
+}
+
+/**
+ * Exige ser el administrador de la instalación. El rol se relee de la base y
+ * no de la sesión: es el dato que decide, y cuesta una consulta.
+ */
+export async function requireAdmin() {
+  const user = await requireUser()
+  if ((await getUserRole(user.id)) !== "admin") redirect("/dashboard")
   return user
 }
 

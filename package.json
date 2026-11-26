@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "dotenv -e .env.local -- drizzle-kit generate",
     "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
-    "db:studio": "dotenv -e .env.local -- drizzle-kit studio"
+    "db:studio": "dotenv -e .env.local -- drizzle-kit studio",
+    "db:setup": "dotenv -e .env.local -- node scripts/db-setup.mjs"
   },
   "dependencies": {
     "better-auth": "1.6.29",

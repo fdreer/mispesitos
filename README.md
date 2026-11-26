@@ -3,14 +3,22 @@
 App web de finanzas personales: ingresos, egresos en cuotas, compra y venta de
 dólares, y un dashboard con saldo, deudas y flujo proyectado.
 
+**Es privada y se instala donde quieras** (tu servidor con Docker, o Vercel +
+Supabase). No es un servicio abierto: quien la instala crea la primera cuenta,
+que queda como administradora, y el resto entra sólo por invitación. Cada
+persona lleva sus propias finanzas y nadie ve las de otro, tampoco el admin.
+Ver [Acceso privado e invitaciones](#acceso-privado-e-invitaciones) e
+[Instalación propia](#instalación-propia-docker).
+
 - Diseño: `docs/superpowers/specs/2026-08-09-mis-pesitos-design.md`
 - Sistema visual: `docs/superpowers/specs/2026-08-10-linear-design-system-design.md`
+- Plan v2 (tarjetas, subcategorías, informes, self-hosting): `docs/superpowers/specs/2026-11-26-v2-plan.md`
 - **Lo que falta y lo que se decidió no hacer: [`docs/PENDIENTES.md`](docs/PENDIENTES.md)**
 
 ## Stack
 
-Next.js 16 · React 19 · TypeScript · Tailwind 4 · shadcn/ui · Drizzle · Supabase ·
-better-auth · Recharts · Vitest. Gestor de paquetes: **pnpm**.
+Next.js 16 · React 19 · TypeScript · Tailwind 4 · shadcn/ui · Drizzle · Postgres
+(propio o Supabase) · better-auth · Recharts · Vitest. Gestor de paquetes: **pnpm**.
 
 ## El sistema visual
 
@@ -34,14 +42,16 @@ falta para señalar estado.
 
 | Ruta | Qué es |
 |---|---|
-| `/` | Landing pública. Con sesión abierta, redirige al dashboard |
-| `/login`, `/registro` | Correo y contraseña, más "Continuar con Google" |
+| `/` | Sin landing: con sesión va al dashboard, sin sesión a `/login` |
+| `/login`, `/registro` | Correo y contraseña, más "Continuar con Google". En una instalación vacía, `/registro` crea la cuenta de administrador; después, sólo con invitación |
+| `/invitacion/<token>` | El link que comparte el admin: guarda la invitación y manda a `/registro` |
 | `/onboarding` | Saldo inicial en pesos y en dólares, el TC al que se compraron esos dólares, la fecha desde la que se cuenta, y qué dólar usar de referencia. Precarga 15 categorías |
 | `/dashboard` | Saldos por moneda, total consolidado, vencimientos del próximo mes, proyección a 6 meses, egresos del mes por categoría y los últimos 12 meses |
 | `/ingresos`, `/egresos` | Alta con plan de cuotas editable, lista con filtro por estado (pendiente / pagado / vencido), marcar cuotas pagadas y borrar |
 | `/cambios` | Compra y venta de dólares, tenencia, TC promedio ponderado y diferencia de cambio realizada |
 | `/categorias` | ABM con archivado. Las archivadas dejan de ofrecerse en la carga pero siguen mostrándose en los movimientos viejos |
 | `/ajustes` | Editar el saldo inicial y la preferencia de dólar |
+| `/ajustes/usuarios` | Sólo admin: generar y revocar invitaciones, quitar o devolver el acceso |
 
 ## Puesta en marcha
 
@@ -54,9 +64,13 @@ falta para señalar estado.
      el puerto en el que corre el servidor (`pnpm dev` levanta en el **3100**, no en
      el 3000): si no coincide, better-auth rechaza todo con `INVALID_ORIGIN`.
    - `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` — opcionales, ver más abajo.
-3. `pnpm db:migrate`
-4. Poner la contraseña de `app_user` (paso manual, ver más abajo).
-5. `pnpm dev` y abrir `http://localhost:3100`
+3. `pnpm db:setup` — crea los roles que falten, aplica las migraciones y, si
+   definiste `APP_USER_PASSWORD`, le pone esa contraseña a `app_user`. Es
+   idempotente. (`pnpm db:migrate` sigue existiendo y sólo migra.)
+4. Si no usaste `APP_USER_PASSWORD`, poner la contraseña de `app_user` a mano
+   (ver más abajo).
+5. `pnpm dev` y abrir `http://localhost:3100`. La primera cuenta que crees es
+   la de administrador.
 
 ### Dos cadenas de conexión, no una
 
@@ -86,7 +100,10 @@ Aparte, y por otro camino, `pnpm test:db` corre `src/db/rls.db.test.ts`, que es 
 test de integración del aislamiento en sí: verifica contra la base real que un
 usuario no ve las filas de otro.
 
-### Puesta en marcha de `app_user` (paso manual, una sola vez)
+### Contraseña de `app_user` (una sola vez)
+
+Lo más simple: definí `APP_USER_PASSWORD` y corré `pnpm db:setup`, que la aplica
+sola. Si preferís hacerlo a mano, seguí leyendo.
 
 La migración 0004 crea el rol `app_user` **sin contraseña y sin LOGIN**, a
 propósito: una contraseña adentro de una migración queda commiteada en git para
@@ -119,6 +136,64 @@ Si la pantalla de consentimiento está en modo **Prueba**, sólo pueden entrar l
 cuentas cargadas como usuarios de prueba; el resto ve "Acceso bloqueado: la app no
 completó la verificación". Se resuelve en Google Cloud, no en el código.
 
+## Acceso privado e invitaciones
+
+- **La primera cuenta que se crea es la del administrador.** Con eso el registro
+  se cierra. Si la base ya tenía usuarios al aplicar la migración 0010, el más
+  antiguo pasa a ser el admin. Hay un solo admin por instalación (lo impone un
+  índice único).
+- **El resto entra por invitación.** En `/ajustes/usuarios` el admin genera un
+  link de un solo uso que vence a los 7 días, opcionalmente atado a un correo. El
+  link se muestra una sola vez: en la base sólo queda su hash.
+- **El cierre vive en el servidor**, en el hook de alta de usuario de better-auth
+  (`src/auth.ts`), así que cubre igual el registro con correo, el primer ingreso
+  con Google y una llamada directa a `/api/auth/sign-up/email`.
+- **Quitar el acceso** cierra las sesiones de esa persona y le impide abrir
+  otras. Sus datos no se borran; el acceso se puede devolver.
+- **El admin no ve finanzas ajenas.** La pantalla de usuarios sólo lee las tablas
+  de auth; los datos de cada uno siguen detrás de RLS.
+
+## Instalación propia (Docker)
+
+Necesitás Docker con Compose. Levanta Postgres, prepara la base y arranca la app:
+
+1. Copiá `.env.selfhost.example` a `.env` y completalo. Las contraseñas, en hex
+   (`openssl rand -hex 24`). `BETTER_AUTH_URL` es la URL pública exacta con la
+   que vas a entrar (ej. `https://pesitos.midominio.com`): con ella se arman los
+   links de invitación.
+2. `docker compose up -d --build`
+3. Abrí la URL y creá la cuenta de administrador.
+
+Qué corre:
+
+- **`db`**: Postgres 17 con los datos en el volumen `pgdata`.
+- **`migrate`**: corre `scripts/db-setup.mjs` y termina. En un Postgres común
+  no existen los roles `anon` y `authenticated` que Supabase trae de fábrica y
+  que usan las migraciones de RLS: el script los crea. Corre en cada `up`, así
+  que actualizar es `git pull && docker compose up -d --build`.
+- **`app`**: la build `standalone` de Next, conectada como `app_user` (nunca
+  como `postgres`), en el puerto `APP_PORT` (3000 por defecto).
+
+Para HTTPS poné adelante el proxy que uses (Caddy, nginx, Traefik). Si es nginx,
+desactivá el buffering de respuestas para que el streaming de Next funcione.
+
+**Backups.** Un volcado de la base:
+
+```bash
+docker compose exec db pg_dump -U postgres -Fc mispesitos > mispesitos-$(date +%F).dump
+```
+
+y para restaurarlo en una base vacía:
+
+```bash
+docker compose exec -T db pg_restore -U postgres -d mispesitos --clean --if-exists < archivo.dump
+```
+
+**Postgres externo o Supabase.** Sin Docker para la base: `pnpm db:setup` con
+`MIGRATION_DATABASE_URL` (y `APP_USER_PASSWORD`) prepara cualquier Postgres 15+,
+y la app corre en cualquier hosting de Node (o en Vercel) con `DATABASE_URL`
+apuntando a `app_user`.
+
 ## Comandos
 
 | Comando | Qué hace |
@@ -130,6 +205,7 @@ completó la verificación". Se resuelve en Google Cloud, no en el código.
 | `pnpm typecheck` | Chequeo de tipos |
 | `pnpm lint` | Linter |
 | `pnpm build` | Build de producción |
+| `pnpm db:setup` | Prepara la base: roles, migraciones y contraseña de `app_user`. Idempotente |
 | `pnpm db:generate` / `pnpm db:migrate` | Migraciones de Drizzle |
 | `pnpm db:studio` | Explorador de la base de drizzle-kit |
 
@@ -156,6 +232,9 @@ corras contra producción, ni dos veces en paralelo.**
 - **La plata son centavos enteros.** Nunca decimales. Una sola función convierte monedas
   (`convertToArs`); ningún otro archivo multiplica un importe por una cotización.
 - **Las fechas son strings `YYYY-MM-DD`**, con "hoy" calculado en la zona de Buenos Aires.
+  Es fija a propósito: la app es argentina (dólar blue, MEP) y la usan también
+  componentes del navegador, así que hacerla configurable obligaría a fijarla al
+  compilar la imagen.
   Nunca `new Date()` para una fecha de negocio.
 - **Toda la lógica de negocio vive en `src/lib/`** como funciones puras testeadas: reparto
   de cuotas, saldo, posición en dólares y agregados del dashboard.

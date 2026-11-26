@@ -1,8 +1,32 @@
 import { Suspense } from "react"
+import Link from "next/link"
+import { ChevronRight, Users } from "lucide-react"
 
 import { SettingsForm } from "@/components/settings-form"
 import { Card, CardContent } from "@/components/ui/card"
-import { requireSettings } from "@/server/session"
+import { getUserRole } from "@/server/access"
+import { requireSettings, requireUser } from "@/server/session"
+
+/** Sólo para el admin: el acceso a la pantalla de usuarios e invitaciones. */
+async function UsuariosLink() {
+  const user = await requireUser()
+  if ((await getUserRole(user.id)) !== "admin") return null
+
+  return (
+    <Link href="/ajustes/usuarios" className="block">
+      <Card size="sm" className="transition-colors hover:bg-muted/40">
+        <CardContent className="flex items-center gap-3">
+          <Users className="size-5 text-muted-foreground" aria-hidden />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-paper">Usuarios</p>
+            <p className="text-xs text-muted-foreground">Invitá gente y manejá quién tiene acceso.</p>
+          </div>
+          <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+        </CardContent>
+      </Card>
+    </Link>
+  )
+}
 
 /**
  * El formulario, con los valores guardados adentro. Detrás de un Suspense por
@@ -67,6 +91,10 @@ export default function AjustesPage() {
           </Suspense>
         </CardContent>
       </Card>
+
+      <Suspense fallback={null}>
+        <UsuariosLink />
+      </Suspense>
     </div>
   )
 }
