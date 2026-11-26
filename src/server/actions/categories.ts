@@ -2,56 +2,17 @@
 
 import { randomUUID } from "node:crypto"
 import { revalidatePath } from "next/cache"
-import { and, eq } from "drizzle-orm"
+import { and, eq, isNull, or } from "drizzle-orm"
 import { z } from "zod"
 
-import { withUser } from "@/db/client"
-import { category } from "@/db/schema"
-import { isUniqueViolation } from "@/lib/db-errors"
+import { withUser, type Tx } from "@/db/client"
+import { category, movement } from "@/db/schema"
+import { CATEGORY_COLOR_KEYS } from "@/lib/category-color"
+import { CATEGORY_ICON_KEYS } from "@/lib/category-icons"
+import { isCheckViolation, isUniqueViolation } from "@/lib/db-errors"
 import { logDbError } from "@/lib/log-db-error"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { requireUser } from "@/server/session"
-
-const schema = z.object({
-  name: z.string().trim().min(1, "Poné un nombre.").max(60),
-  kind: z.enum(["income", "expense"]),
-})
-
-export async function createCategory(
-  _prev: ActionResult | null,
-  formData: FormData,
-): Promise<ActionResult> {
-  const user = await requireUser()
-
-  const parsed = schema.safeParse({
-    name: formData.get("name"),
-    kind: formData.get("kind"),
-  })
-  if (!parsed.success) {
-    return failure("Revisá los datos.", z.flattenError(parsed.error).fieldErrors)
-  }
-
-  try {
-    await withUser(user.id, (tx) =>
-      tx.insert(category).values({ id: randomUUID(), userId: user.id, ...parsed.data }),
-    )
-  } catch (error) {
-    // El índice único parcial (category_active_unique) sólo mira las
-    // categorías activas y Postgres lo rechaza con 23505. Cualquier otro
-    // error —conexión caída, RLS, timeout— tiene que quedar con un mensaje
-    // genérico: decirle "nombre repetido" al usuario cuando no lo es no le
-    // deja forma de entender qué pasa.
-    if (isUniqueViolation(error, "category_active_unique")) {
-      logDbError("createCategory: nombre repetido", error)
-      return failure("Ya tenés una categoría con ese nombre.")
-    }
-    logDbError("createCategory", error)
-    return failure("No pudimos crear la categoría. Probá de nuevo.")
-  }
-
-  revalidatePath("/", "layout")
-  return success()
-}
 
 /**
  * Los ids de categoría los genera `randomUUID()`, igual que los de movimiento
@@ -61,26 +22,338 @@ export async function createCategory(
  */
 const categoryIdSchema = z.uuid("Esa categoría no existe.")
 
+/** Un campo opcional de formulario: vacío o ausente es "sin valor". */
+const optional = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((v) => (v === "" || v === null ? undefined : v), schema.optional())
+
 /**
- * El UPDATE que comparten archivar y desarchivar: es la misma fila, la misma
- * columna y los mismos dos filtros, y sólo cambia el booleano. Devuelve
- * `false` cuando no tocó ninguna fila (id de otro usuario, o inexistente) para
- * que cada llamador ponga su propio mensaje.
+ * Nombre, color e icono: lo que se elige al crear y al editar. El color y el
+ * icono son claves de las listas fijas (ver @/lib/category-color y
+ * @/lib/category-icons); vacíos = "automático" / "sin icono".
  */
-async function setArchived(userId: string, id: string, archived: boolean): Promise<boolean> {
-  const updated = await withUser(userId, (tx) =>
-    tx
-      .update(category)
-      .set({ archived })
-      .where(and(eq(category.id, id), eq(category.userId, userId)))
-      .returning({ id: category.id }),
-  )
-  return updated.length > 0
+const appearanceSchema = z.object({
+  name: z.string().trim().min(1, "Poné un nombre.").max(60),
+  color: optional(z.enum(CATEGORY_COLOR_KEYS, "Ese color no existe.")),
+  icon: optional(z.enum(CATEGORY_ICON_KEYS, "Ese icono no existe.")),
+})
+
+/**
+ * Qué pasa con los movimientos de una categoría que recibe su PRIMERA
+ * subcategoría (§2.1 del plan: "pide a cuál subcategoría pasan esos
+ * movimientos, por defecto una nueva General"):
+ *
+ * - "general": a una subcategoría nueva "General", creada en el momento.
+ * - "child": a la subcategoría que se está creando o moviendo.
+ *
+ * Hace falta porque un movimiento sólo puede apuntar a una hoja (decisión
+ * 7.4): el padre tiene que quedar vacío.
+ */
+const movementsToSchema = z.enum(["general", "child"]).catch("general")
+
+const createSchema = appearanceSchema.extend({
+  kind: z.enum(["income", "expense"]),
+  parentId: optional(categoryIdSchema),
+  movementsTo: movementsToSchema,
+})
+
+/** Los mensajes de las reglas que hace cumplir la base (migración 0011). */
+const MENSAJE_TERCER_NIVEL = "Una subcategoría no puede tener subcategorías."
+const MENSAJE_PADRE_CON_MOVIMIENTOS =
+  "La categoría todavía tiene movimientos. Recargá la página y probá de nuevo."
+
+/**
+ * El error de la base traducido a un mensaje para la persona, o null si es
+ * uno que no se espera (que cada llamador convierte en su genérico).
+ *
+ * Las Server Actions ya validan estas reglas antes de escribir; lo que llega
+ * acá es la carrera (dos pestañas) o un camino que se olvidó de validar. La
+ * base no deja pasar el dato, y la persona ve algo que entiende.
+ */
+function knownDbError(error: unknown): { message: string; label: string } | null {
+  // "Con ese nombre" y no "en ese lugar": desde la 0011 el índice es único
+  // entre hermanas, pero para una de primer nivel el lugar es "arriba de
+  // todo", y el mensaje de siempre se sigue leyendo bien en los dos casos.
+  if (isUniqueViolation(error, "category_active_unique")) {
+    return { message: "Ya tenés una categoría con ese nombre.", label: "nombre repetido" }
+  }
+  if (isCheckViolation(error, "category_two_levels")) {
+    return { message: MENSAJE_TERCER_NIVEL, label: "tercer nivel" }
+  }
+  if (isCheckViolation(error, "movement_category_is_leaf")) {
+    return { message: MENSAJE_PADRE_CON_MOVIMIENTOS, label: "padre con movimientos" }
+  }
+  return null
+}
+
+type ParentCheck = { ok: true; hadChildren: boolean } | { ok: false; message: string }
+
+/**
+ * Valida que `parentId` pueda recibir una subcategoría: que exista, sea del
+ * mismo tipo, esté activa y sea de primer nivel. La FK compuesta y el trigger
+ * de la 0011 ya lo impiden en la base; validarlo acá es para dar un mensaje
+ * que se entienda en vez del genérico.
+ *
+ * Devuelve además si ya tenía hijas: si no tenía, sus movimientos tienen que
+ * pasar a una subcategoría (ver `reassignParentMovements`).
+ */
+async function checkParent(
+  tx: Tx,
+  userId: string,
+  parentId: string,
+  kind: string,
+): Promise<ParentCheck> {
+  const [parent] = await tx
+    .select({ kind: category.kind, parentId: category.parentId, archived: category.archived })
+    .from(category)
+    .where(and(eq(category.id, parentId), eq(category.userId, userId)))
+  if (!parent || parent.kind !== kind || parent.archived) {
+    return { ok: false, message: "No encontramos esa categoría padre." }
+  }
+  if (parent.parentId !== null) return { ok: false, message: MENSAJE_TERCER_NIVEL }
+
+  const [child] = await tx
+    .select({ id: category.id })
+    .from(category)
+    .where(eq(category.parentId, parentId))
+    .limit(1)
+  return { ok: true, hadChildren: child !== undefined }
+}
+
+/**
+ * Pasa los movimientos de `parentId` a una subcategoría, para que el padre
+ * quede vacío y la regla de "sólo hojas" se siga cumpliendo. `childId` es la
+ * que se está creando o moviendo; con `movementsTo = "general"` se crea (o se
+ * reusa, si ya hay una activa con ese nombre abajo del padre) una "General".
+ *
+ * Corre en la misma transacción que crea o mueve la hija: el trigger
+ * `movement_category_is_leaf` es diferido justamente para que este estado
+ * intermedio —un padre con hija y con movimientos— no reviente antes de
+ * llegar acá.
+ */
+async function reassignParentMovements(
+  tx: Tx,
+  userId: string,
+  parent: { id: string; kind: string },
+  childId: string,
+  childName: string,
+  movementsTo: "general" | "child",
+): Promise<void> {
+  const [any] = await tx
+    .select({ id: movement.id })
+    .from(movement)
+    .where(and(eq(movement.userId, userId), eq(movement.categoryId, parent.id)))
+    .limit(1)
+  if (!any) return
+
+  let targetId = childId
+  if (movementsTo === "general" && childName !== "General") {
+    targetId = randomUUID()
+    await tx.insert(category).values({
+      id: targetId,
+      userId,
+      name: "General",
+      kind: parent.kind,
+      parentId: parent.id,
+    })
+  }
+
+  await tx
+    .update(movement)
+    .set({ categoryId: targetId, updatedAt: new Date() })
+    .where(and(eq(movement.userId, userId), eq(movement.categoryId, parent.id)))
+}
+
+/**
+ * Alta de una categoría: de primer nivel, o subcategoría si viene `parentId`.
+ */
+export async function createCategory(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser()
+
+  const parsed = createSchema.safeParse({
+    name: formData.get("name"),
+    kind: formData.get("kind"),
+    color: formData.get("color"),
+    icon: formData.get("icon"),
+    parentId: formData.get("parentId"),
+    movementsTo: formData.get("movementsTo"),
+  })
+  if (!parsed.success) {
+    return failure("Revisá los datos.", z.flattenError(parsed.error).fieldErrors)
+  }
+  const { name, kind, color, icon, parentId, movementsTo } = parsed.data
+
+  try {
+    const result = await withUser(user.id, async (tx) => {
+      let parentHadChildren = true
+      if (parentId) {
+        const check = await checkParent(tx, user.id, parentId, kind)
+        if (!check.ok) return failure(check.message)
+        parentHadChildren = check.hadChildren
+      }
+
+      const id = randomUUID()
+      await tx.insert(category).values({
+        id,
+        userId: user.id,
+        name,
+        kind,
+        parentId: parentId ?? null,
+        color: color ?? null,
+        icon: icon ?? null,
+      })
+
+      if (parentId && !parentHadChildren) {
+        await reassignParentMovements(tx, user.id, { id: parentId, kind }, id, name, movementsTo)
+      }
+      return success()
+    })
+    if (!result.ok) return result
+  } catch (error) {
+    // Cualquier error que no sea una de las reglas conocidas —conexión
+    // caída, RLS, timeout— queda con un mensaje genérico: decirle "nombre
+    // repetido" a alguien cuando no lo es no le deja forma de entender qué
+    // pasa.
+    const known = knownDbError(error)
+    logDbError(known ? `createCategory: ${known.label}` : "createCategory", error)
+    return failure(known?.message ?? "No pudimos crear la categoría. Probá de nuevo.")
+  }
+
+  revalidatePath("/", "layout")
+  return success()
+}
+
+const updateSchema = appearanceSchema.extend({ id: categoryIdSchema })
+
+/** Cambiar nombre, color o icono. No toca el lugar en el árbol: eso es `moveCategory`. */
+export async function updateCategory(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser()
+
+  const parsed = updateSchema.safeParse({
+    id: formData.get("id"),
+    name: formData.get("name"),
+    color: formData.get("color"),
+    icon: formData.get("icon"),
+  })
+  if (!parsed.success) {
+    return failure("Revisá los datos.", z.flattenError(parsed.error).fieldErrors)
+  }
+  const { id, name, color, icon } = parsed.data
+
+  try {
+    const updated = await withUser(user.id, (tx) =>
+      tx
+        .update(category)
+        .set({ name, color: color ?? null, icon: icon ?? null })
+        .where(and(eq(category.id, id), eq(category.userId, user.id)))
+        .returning({ id: category.id }),
+    )
+    if (updated.length === 0) return failure("No encontramos esa categoría.")
+  } catch (error) {
+    const known = knownDbError(error)
+    logDbError(known ? `updateCategory: ${known.label}` : "updateCategory", error)
+    return failure(known?.message ?? "No pudimos guardar la categoría. Probá de nuevo.")
+  }
+
+  revalidatePath("/", "layout")
+  return success()
+}
+
+const moveSchema = z.object({
+  id: categoryIdSchema,
+  // Vacío = pasa a primer nivel.
+  parentId: optional(categoryIdSchema),
+  movementsTo: movementsToSchema,
+})
+
+/**
+ * "Mover a…" de /categorias, que es también el "Agrupar" del plan (§2.2): las
+ * categorías que ya existían quedan de primer nivel, y se agrupan moviéndolas
+ * de a una abajo de un padre. Los movimientos no se tocan: siguen apuntando a
+ * la misma categoría, que ahora tiene padre.
+ *
+ * Salvo un caso: si el padre de destino no tenía hijas y sí movimientos,
+ * esos movimientos pasan a una subcategoría, igual que al crear la primera
+ * (ver `reassignParentMovements`).
+ */
+export async function moveCategory(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser()
+
+  const parsed = moveSchema.safeParse({
+    id: formData.get("id"),
+    parentId: formData.get("parentId"),
+    movementsTo: formData.get("movementsTo"),
+  })
+  if (!parsed.success) return failure("Revisá los datos.")
+  const { id, parentId, movementsTo } = parsed.data
+  if (parentId === id) return failure("Una categoría no puede ir adentro de sí misma.")
+
+  try {
+    const result = await withUser(user.id, async (tx) => {
+      const [current] = await tx
+        .select({ kind: category.kind, name: category.name, parentId: category.parentId })
+        .from(category)
+        .where(and(eq(category.id, id), eq(category.userId, user.id)))
+      if (!current) return failure("No encontramos esa categoría.")
+      if ((current.parentId ?? undefined) === parentId) return success()
+
+      if (parentId) {
+        const [child] = await tx
+          .select({ id: category.id })
+          .from(category)
+          .where(eq(category.parentId, id))
+          .limit(1)
+        if (child) {
+          return failure(
+            "Tiene subcategorías: no puede ir adentro de otra. Mové primero sus subcategorías.",
+          )
+        }
+
+        const check = await checkParent(tx, user.id, parentId, current.kind)
+        if (!check.ok) return failure(check.message)
+
+        await tx.update(category).set({ parentId }).where(eq(category.id, id))
+        if (!check.hadChildren) {
+          await reassignParentMovements(
+            tx,
+            user.id,
+            { id: parentId, kind: current.kind },
+            id,
+            current.name,
+            movementsTo,
+          )
+        }
+      } else {
+        await tx.update(category).set({ parentId: null }).where(eq(category.id, id))
+      }
+      return success()
+    })
+    if (!result.ok) return result
+  } catch (error) {
+    const known = knownDbError(error)
+    logDbError(known ? `moveCategory: ${known.label}` : "moveCategory", error)
+    return failure(known?.message ?? "No pudimos mover la categoría. Probá de nuevo.")
+  }
+
+  revalidatePath("/", "layout")
+  return success()
 }
 
 /**
  * Se archiva en lugar de borrar: los movimientos históricos conservan su
  * categoría.
+ *
+ * Archivar un padre archiva sus hijas (§2.1 del plan): un padre archivado con
+ * hijas activas seguiría ofreciendo opciones al cargar un movimiento bajo un
+ * encabezado que ya no existe.
  */
 export async function archiveCategory(id: string): Promise<ActionResult> {
   const user = await requireUser()
@@ -91,7 +364,19 @@ export async function archiveCategory(id: string): Promise<ActionResult> {
   }
 
   try {
-    if (!(await setArchived(user.id, parsed.data, true))) {
+    const updated = await withUser(user.id, (tx) =>
+      tx
+        .update(category)
+        .set({ archived: true })
+        .where(
+          and(
+            eq(category.userId, user.id),
+            or(eq(category.id, parsed.data), eq(category.parentId, parsed.data)),
+          ),
+        )
+        .returning({ id: category.id }),
+    )
+    if (updated.length === 0) {
       return failure("No encontramos esa categoría.")
     }
   } catch (error) {
@@ -104,10 +389,15 @@ export async function archiveCategory(id: string): Promise<ActionResult> {
 }
 
 /**
- * El camino de vuelta. Puede fallar donde archivar nunca falla: el índice
- * único `category_active_unique` es PARCIAL —sólo mira las activas, que es lo
- * que permite archivar "Ocio" y volver a crearla— así que mientras ésta
- * estuvo archivada se pudo crear otra activa con el mismo nombre y tipo.
+ * El camino de vuelta. Desarchivar una hija desarchiva su padre (§2.1): una
+ * hija activa abajo de un padre archivado no se vería en el selector, que la
+ * agrupa por padre. Las hermanas, en cambio, quedan como estaban: se
+ * archivaron juntas, pero quizás alguna se quiere dejar archivada.
+ *
+ * Puede fallar donde archivar nunca falla: el índice único
+ * `category_active_unique` es PARCIAL —sólo mira las activas, que es lo que
+ * permite archivar "Ocio" y volver a crearla— así que mientras ésta estuvo
+ * archivada se pudo crear otra activa con el mismo nombre en el mismo lugar.
  * Desarchivarla ahora las dejaría a las dos activas y Postgres lo rechaza con
  * 23505.
  *
@@ -125,7 +415,29 @@ export async function unarchiveCategory(id: string): Promise<ActionResult> {
   }
 
   try {
-    if (!(await setArchived(user.id, parsed.data, false))) {
+    const found = await withUser(user.id, async (tx) => {
+      const [updated] = await tx
+        .update(category)
+        .set({ archived: false })
+        .where(and(eq(category.id, parsed.data), eq(category.userId, user.id)))
+        .returning({ parentId: category.parentId })
+      if (!updated) return false
+      if (updated.parentId !== null) {
+        await tx
+          .update(category)
+          .set({ archived: false })
+          .where(
+            and(
+              eq(category.id, updated.parentId),
+              eq(category.userId, user.id),
+              eq(category.archived, true),
+              isNull(category.parentId),
+            ),
+          )
+      }
+      return true
+    })
+    if (!found) {
       return failure("No encontramos esa categoría.")
     }
   } catch (error) {

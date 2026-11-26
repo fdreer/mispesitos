@@ -67,7 +67,13 @@ export async function saveSettings(
       // una por una en vez de tumbar la transacción. NO se llega acá en un
       // guardado desde /ajustes —`existing` corta antes—, así que archivar una
       // categoría y volver a guardar los ajustes no la resucita.
-      await tx
+      //
+      // Dos pasadas porque las subcategorías necesitan el id de su padre. Las
+      // hijas se siembran SÓLO bajo los padres que esta transacción insertó de
+      // verdad (`returning` no trae los que rechazó el índice): si el otro
+      // request ganó la carrera, los ids de acá no existen y colgarles hijas
+      // reventaría la FK de `parent_id` y con ella todo el guardado.
+      const parents = await tx
         .insert(category)
         .values(
           DEFAULT_CATEGORIES.map((c) => ({
@@ -75,9 +81,27 @@ export async function saveSettings(
             userId: user.id,
             name: c.name,
             kind: c.kind,
+            color: c.color ?? null,
+            icon: c.icon ?? null,
           })),
         )
         .onConflictDoNothing()
+        .returning({ id: category.id, name: category.name, kind: category.kind })
+
+      const children = parents.flatMap((p) => {
+        const plantilla = DEFAULT_CATEGORIES.find((c) => c.name === p.name && c.kind === p.kind)
+        return (plantilla?.children ?? []).map((child) => ({
+          id: randomUUID(),
+          userId: user.id,
+          name: child.name,
+          kind: p.kind,
+          parentId: p.id,
+          icon: child.icon ?? null,
+        }))
+      })
+      if (children.length > 0) {
+        await tx.insert(category).values(children).onConflictDoNothing()
+      }
     })
   } catch (error) {
     logDbError("saveSettings", error)

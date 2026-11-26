@@ -196,6 +196,12 @@ no es que midan 0%, es que nada los importó en esta corrida.
 
 ### 3.5 Los colores de categoría son un hash, no una elección
 
+~~Nadie elige el color.~~ Resuelto en la Fase 2 del plan v2 (2026-11-26), ver
+§13: `category.color` guarda una clave de una paleta fija, que se elige en
+`/categorias`. Las que ya existían quedaron con `color` nulo y se siguen
+pintando con el hash, así que se ven igual que antes; la subcategoría sin
+color hereda el del padre. Lo que sigue vale para las que no tienen elección.
+
 Cada categoría tiene su color, y sale de un hash de su NOMBRE
 (`src/lib/category-color.ts`): nadie lo elige y no se guarda en la base. Eso
 tiene dos consecuencias que conviene saber antes de que sorprendan:
@@ -811,3 +817,98 @@ de `.env.local`. El test de `listPaidInstallments` se actualizó para esperar
 Quedó afuera de esta fase, aunque §5.1 del plan lo lista: **"Pagar todos los
 vencidos"** como acción masiva y el **check con `aria-label`** en lugar del botón
 "Marcar pagada".
+
+---
+
+## 13. Fase 2 del plan v2: categorías (2026-11-26)
+
+La fase "Categorías" de `docs/superpowers/specs/2026-11-26-v2-plan.md` (§6), con
+el modelo de §2.1 y las decisiones de §7.4 (un movimiento sólo va a una hoja).
+Resuelve también §3.5 de este archivo.
+
+| Qué | Dónde | Sección |
+|---|---|---|
+| `parent_id`, `color` e `icon` en `category`, FK compuesta al padre y triggers que cuidan el árbol | `drizzle/0011_categorias_en_arbol.sql`, `src/db/schema.ts` | §2.1 |
+| Lógica del árbol: armado, hojas, etiquetas "Padre › Hija", grupos del selector, destinos de "Mover a…", torta por padre | `src/lib/category-tree.ts` | §2.1 |
+| Paleta fija de colores e iconos curados de lucide; la hija sin color hereda el del padre | `src/lib/category-color.ts`, `src/lib/category-icons.tsx` | §2.1 |
+| Precarga del onboarding jerárquica (Hogar, Comida, Transporte con hijas) | `src/lib/default-categories.ts`, `src/server/actions/settings.ts` | §2.1 |
+| Acciones: crear subcategoría, editar, mover, archivar en cascada, desarchivar con el padre | `src/server/actions/categories.ts` | §2.1 |
+| La regla de hoja en la acción de movimientos | `src/server/actions/movements.ts` | §7.4 |
+| `/categorias` como árbol con menú ⋯ por fila y diálogo de alta/edición/mover | `category-manager.tsx`, `category-dialog.tsx`, `src/app/(app)/categorias/page.tsx` | §2.1 |
+| Selector de categoría con búsqueda, agrupado por padre, que recuerda la última | `category-picker.tsx`, `movement-form.tsx` | §2.1 |
+| Filtrar por un padre trae también lo de sus hijas | `listMovements` en `src/server/queries.ts` | — |
+| Torta del dashboard por categoría padre, con desglose desplegable | `dashboard-view.ts`, `dashboard/charts.tsx` | §2.1 |
+
+`tsc --noEmit` y `eslint` limpios (queda el aviso previo de `<img>` en
+`app-sidebar.tsx`). La suite pasó a 496 tests; falla sólo el que ya fallaba
+antes (el tope de 120 filas en `movement-form.test.tsx`).
+
+### 13.1 Qué se decidió
+
+- **Dos niveles, cuidados por la base.** Un trigger `BEFORE` impide el tercer
+  nivel. Otros dos, `CONSTRAINT TRIGGER DEFERRABLE INITIALLY DEFERRED`, impiden
+  que un movimiento quede en una categoría con hijas. Son diferidos porque crear
+  la primera hija de una categoría con movimientos y pasarle esos movimientos
+  ocurre en la misma transacción: chequeados fila por fila, el paso intermedio
+  fallaría. La acción valida lo mismo antes, para devolver un error de campo
+  legible; los triggers son la red.
+- **La FK al padre es compuesta**, `(user_id, kind, parent_id) → category
+  (user_id, kind, id)`, como las de `0003`–`0008`: una hija no puede colgar de
+  una categoría de otro usuario ni de otro tipo. Es **`ON DELETE NO ACTION`** y
+  no `RESTRICT`: `RESTRICT` chequea fila por fila y hacía fallar el borrado en
+  cascada desde `user`, que borra padres e hijas en la misma sentencia.
+- **Los nombres son únicos entre hermanas**, no en todo el usuario: el índice
+  pasó a `(user_id, kind, coalesce(parent_id, ''), name)`. Si no, sólo podría
+  haber una "General" o una "Otros".
+- **La primera subcategoría de una categoría con movimientos pregunta a dónde
+  van.** Por defecto, a una "General" nueva; si no, a la hija que se está
+  creando o moviendo. La pregunta sólo aparece cuando hace falta.
+- **"Agrupar" no es una acción aparte:** se resuelve con "Mover a…" sobre cada
+  categoría. Crear el padre y mover las hijas es lo mismo y no suma un flujo.
+- **Las hijas archivadas cuentan para la regla de hoja.** Un padre con todas sus
+  hijas archivadas sigue sin aceptar movimientos: si no, desarchivar una hija
+  dejaría el árbol inválido.
+- **Archivar un padre archiva sus hijas; desarchivar una hija desarchiva sólo el
+  padre**, no las hermanas: quizás se las quería dejar archivadas.
+- **Color e icono son claves de listas fijas**, no valores libres: la paleta
+  está pensada para el fondo oscuro, y así el contraste no depende de lo que se
+  elija. Sin color, la hija hereda el del padre y el padre cae al hash del
+  nombre, como antes.
+- **El selector despliega el panel en el lugar, no en un Popover**: el Dialog
+  de Radix bloquea el scroll de lo que queda fuera de su contenido, y un Popover
+  se portea al `body`, así que su lista no se podía scrollear con la rueda.
+  Además, con el panel adentro del formulario no hay un portal más que cuidar
+  desde la fila de la tabla (§12.1). Sigue el patrón combobox de ARIA 1.2 con
+  `aria-activedescendant`. Los padres con hijas son encabezados, no opciones.
+- **La última categoría usada se recuerda en `localStorage`, por tipo.** Es una
+  comodidad por dispositivo: si falla o no está, arranca en la primera opción.
+- **En el filtro de la lista los padres sí se pueden elegir**, y traen lo de sus
+  hijas. La multiselección del filtro queda para la Fase 4.
+- **La torta agrupa por nombre del padre**, para que dos categorías archivadas
+  y vueltas a crear con el mismo nombre no aparezcan dos veces.
+- **El alta rápida de una categoría de primer nivel sigue pidiendo sólo el
+  nombre.** Color, icono y padre se eligen en el diálogo de "Editar" o al
+  agregar una subcategoría.
+
+### 13.2 Lo que se verificó y lo que no
+
+Verificado en el navegador, escritorio y móvil (375px), contra la instalación
+Docker local (no contra la base de `.env.local`): la migración aplicada sobre
+datos existentes (todas quedan de primer nivel), crear un padre y meterle una
+categoría con "Mover a…" y volver a sacarla, crear una subcategoría con color e
+icono, la pregunta de los movimientos al agregar la primera hija (pasaron a
+"General"), el selector (encabezados, búsqueda sin tildes, flechas, Enter sin
+mandar el formulario, rueda del mouse, la última usada), el filtro por padre y
+la torta agrupada con su desglose.
+
+Los triggers se probaron a mano con `psql` dentro del contenedor de la base, en
+un `BEGIN … ROLLBACK`: rechazan el tercer nivel, un movimiento en un padre y una
+hija suelta bajo un padre con movimientos; aceptan crear la hija y pasarle los
+movimientos en la misma transacción; dejan dos "General" con padres distintos;
+y borrar padre e hijas en una sola sentencia funciona.
+
+**`pnpm test:db` no se corrió**, por el mismo motivo que §11.3: apunta a la base
+de `.env.local`. Se actualizaron igual: `rls.db.test.ts` (5 casos del árbol),
+`actions.db.test.ts` (la precarga jerárquica y 11 casos del árbol) y
+`queries.db.test.ts` (filtro por padre y `countMovementsByCategory`). Hay que
+correrlos contra una base descartable antes de mergear.

@@ -8,6 +8,12 @@ import { es } from "date-fns/locale"
 
 import type { ActionResult } from "@/server/actions/result"
 
+import {
+  CategoryPicker,
+  initialCategoryId,
+  readLastCategory,
+  rememberCategory,
+} from "@/components/category-picker"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -171,6 +177,15 @@ export function MovementForm({
     movement ? assertCurrency(movement.currency) : "ARS",
   )
   const [date, setDate] = useState(movement?.date ?? today)
+  // Al dar de alta arranca en la última categoría usada en este dispositivo
+  // (§2.3 del plan v2). El formulario vive adentro de un diálogo que se monta
+  // al abrirse, siempre en el navegador, así que leer localStorage acá no
+  // desarma la hidratación.
+  const [categoryId, setCategoryId] = useState(
+    () => movement?.categoryId ?? initialCategoryId(categories, readLastCategory(kind)),
+  )
+  const categoryError =
+    state && !state.ok ? state.fieldErrors?.categoryId?.[0] : undefined
   const [settled, setSettled] = useState(false)
   const [countInput, setCountInput] = useState(String(movement?.installments.length ?? 1))
   const [rows, setRows] = useState<Row[]>(
@@ -267,13 +282,14 @@ export function MovementForm({
       router.refresh()
       if (toastedState.current !== state) {
         toastedState.current = state
+        if (!movement) rememberCategory(kind, categoryId)
         toast.success(
           movement ? "Cambios guardados" : kind === "income" ? "Ingreso cargado" : "Egreso cargado",
         )
       }
       onSaved?.()
     }
-  }, [state, router, onSaved, movement, kind])
+  }, [state, router, onSaved, movement, kind, categoryId])
 
   function updateRow(index: number, patch: Partial<Row>) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)))
@@ -314,25 +330,18 @@ export function MovementForm({
         <div className="space-y-2">
           <Label htmlFor="categoryId">Categoría</Label>
           {/* Editando arranca en la del movimiento, que puede ser una archivada:
-              la lista que llega en ese caso las incluye (ver `MovementList`).
-              Sin eso, abrir el diálogo de un movimiento viejo lo movía de
-              categoría con sólo guardarlo. */}
-          <Select
+              el selector la sigue ofreciendo (`keepId`). Sin eso, abrir el
+              diálogo de un movimiento viejo lo movía de categoría con sólo
+              guardarlo. */}
+          <CategoryPicker
+            id="categoryId"
             name="categoryId"
-            required
-            defaultValue={movement?.categoryId ?? categories[0]?.id}
-          >
-            <SelectTrigger id="categoryId" className="h-11 w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {categories.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            categories={categories}
+            value={categoryId}
+            onChange={setCategoryId}
+            invalid={categoryError !== undefined}
+          />
+          {categoryError && <p className="text-destructive text-xs">{categoryError}</p>}
         </div>
 
         <div className="space-y-2">

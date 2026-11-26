@@ -78,6 +78,13 @@
       "when": 1795709777037,
       "tag": "0010_usuarios_e_invitaciones",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795713939381,
+      "tag": "0011_categorias_en_arbol",
+      "breakpoints": true
     }
   ]
 }

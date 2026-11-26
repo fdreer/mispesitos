@@ -1,6 +1,10 @@
 /**
  * Un color estable por categoría.
  *
+ * Desde la Fase 2 del plan v2 el color se puede ELEGIR (ver `CATEGORY_PALETTE`
+ * y `resolveCategoryHue`, al final del archivo). Lo que sigue explica el
+ * color por defecto, el de las categorías sin elección.
+ *
  * Se deriva del NOMBRE, no del id, por dos motivos. Uno: la torta del
  * dashboard sólo recibe `{ name, arsCents }` (ver `buildDashboardView`), así
  * que hashear el id obligaría a arrastrar ids hasta ahí para que la torta y
@@ -91,12 +95,84 @@ export function categoryHue(name: string): number {
   return hue
 }
 
-/** Color pleno: el texto del badge y la porción de la torta. */
-export function categoryColor(name: string): string {
-  return `oklch(${LIGHTNESS} ${CHROMA} ${categoryHue(name)})`
+/**
+ * La paleta que se puede ELEGIR por categoría (Fase 2 del plan v2, §2.1).
+ *
+ * Una lista fija de tonos y no un selector de color libre, por las mismas dos
+ * razones que sostienen el hash de arriba: con la luminosidad y el croma
+ * fijos, cualquier tono de la lista tiene el mismo contraste contra el fondo;
+ * y ninguno cae adentro de las bandas reservadas para los colores de estado
+ * (lo verifica el test). Un color libre podía ser un verde idéntico al de
+ * "pagado", o un azul oscuro ilegible sobre Void.
+ *
+ * Lo que se guarda en `category.color` es la `key`, no el tono: si un día se
+ * retoca un tono, se retoca para todas las categorías que lo eligieron, sin
+ * migrar datos. Una clave que ya no está en la lista se ignora y la categoría
+ * cae al color heredado o al hash, en vez de romper.
+ *
+ * El amarillo está en 90 y no más arriba a propósito: de ahí en adelante se
+ * acerca al lima ácido de la acción principal (tono ≈ 115).
+ */
+export const CATEGORY_PALETTE = [
+  { key: "amarillo", label: "Amarillo", hue: 90 },
+  { key: "turquesa", label: "Turquesa", hue: 190 },
+  { key: "celeste", label: "Celeste", hue: 220 },
+  { key: "azul", label: "Azul", hue: 250 },
+  { key: "indigo", label: "Índigo", hue: 272 },
+  { key: "violeta", label: "Violeta", hue: 295 },
+  { key: "magenta", label: "Magenta", hue: 320 },
+  { key: "rosa", label: "Rosa", hue: 348 },
+] as const
+
+export type CategoryColorKey = (typeof CATEGORY_PALETTE)[number]["key"]
+
+export const CATEGORY_COLOR_KEYS = CATEGORY_PALETTE.map((c) => c.key) as [
+  CategoryColorKey,
+  ...CategoryColorKey[],
+]
+
+/** El tono de una clave de la paleta, o undefined si no es una clave conocida. */
+export function paletteHue(key: string | null | undefined): number | undefined {
+  return CATEGORY_PALETTE.find((c) => c.key === key)?.hue
 }
 
-/** El mismo color al 16%: el fondo del badge. */
+/** Lo mínimo de una categoría que hace falta para saber su color. */
+export type ColorSource = { name: string; color: string | null }
+
+/**
+ * El tono que se pinta, en este orden (§2.1 del plan: "la subcategoría hereda
+ * el color del padre si no tiene propio"):
+ *
+ * 1. el color elegido para la propia categoría;
+ * 2. si es una subcategoría, el color del padre — el elegido, o si tampoco lo
+ *    tiene, el hash del nombre DEL PADRE: así "Hogar › Alquiler" y
+ *    "Hogar › Expensas" salen del mismo color que "Hogar" en la torta aunque
+ *    nadie haya elegido nada;
+ * 3. el hash del propio nombre, que es como se pintaba todo antes de la 0011.
+ */
+export function resolveCategoryHue(category: ColorSource, parent?: ColorSource | null): number {
+  const own = paletteHue(category.color)
+  if (own !== undefined) return own
+  if (parent) return paletteHue(parent.color) ?? categoryHue(parent.name)
+  return categoryHue(category.name)
+}
+
+/** Color pleno de un tono: el texto del badge y la porción de la torta. */
+export function hueColor(hue: number): string {
+  return `oklch(${LIGHTNESS} ${CHROMA} ${hue})`
+}
+
+/** El mismo tono al 16%: el fondo del badge. */
+export function hueTint(hue: number): string {
+  return `oklch(${LIGHTNESS} ${CHROMA} ${hue} / ${TINT_ALPHA})`
+}
+
+/** Color pleno derivado sólo del nombre, para lo que no tiene categoría guardada. */
+export function categoryColor(name: string): string {
+  return hueColor(categoryHue(name))
+}
+
+/** El fondo derivado sólo del nombre. */
 export function categoryTint(name: string): string {
-  return `oklch(${LIGHTNESS} ${CHROMA} ${categoryHue(name)} / ${TINT_ALPHA})`
+  return hueTint(categoryHue(name))
 }

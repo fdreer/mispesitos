@@ -11,6 +11,7 @@ import {
 } from "@/lib/movement-asserts"
 import { usdPosition } from "@/lib/position"
 import {
+  countMovementsByCategory,
   getSettings,
   listCategories,
   listExchanges,
@@ -632,6 +633,33 @@ describe("listMovements", () => {
     ])
   })
 
+  /*
+   * Fase 2 del plan v2: los movimientos van siempre a una hoja, así que
+   * filtrar por un padre sólo por su id daría una lista vacía. Se arma el
+   * árbol adentro del test (Hogar › Alquiler) y se desarma en el `finally`:
+   * el resto de la suite cuenta las categorías sembradas.
+   */
+  it("filtrar por una categoría padre trae lo de sus subcategorías", async () => {
+    const HOGAR = "q-cat-a-hogar"
+    try {
+      await withUser(USUARIO_A, async (tx) => {
+        await tx.insert(category).values({ id: HOGAR, userId: USUARIO_A, name: "Hogar", kind: "expense" })
+        await tx.update(category).set({ parentId: HOGAR }).where(eq(category.id, CAT.alquiler))
+      })
+
+      expect(ids(await listMovements(USUARIO_A, { categoryId: HOGAR }))).toEqual([MOV.alquiler])
+      // Y la hija sola sigue filtrando como antes.
+      expect(ids(await listMovements(USUARIO_A, { categoryId: CAT.alquiler }))).toEqual([
+        MOV.alquiler,
+      ])
+    } finally {
+      await withUser(USUARIO_A, async (tx) => {
+        await tx.update(category).set({ parentId: null }).where(eq(category.id, CAT.alquiler))
+        await tx.delete(category).where(eq(category.id, HOGAR))
+      })
+    }
+  })
+
   it("filtra por moneda", async () => {
     expect([...ids(await listMovements(USUARIO_A, { currency: "ARS" }))].sort()).toEqual(
       [MOV.comida, MOV.junioTarde, MOV.junioTemprano].sort(),
@@ -1239,5 +1267,16 @@ describe("la posición y el saldo salen del mismo dato por dos rutas distintas",
     // Y no es sólo un número más chico: sin esos dólares, /cambios avisaría de
     // una sobreventa que nunca pasó.
     expect(conGt.oversoldUsdCents).toBeGreaterThan(0)
+  })
+})
+
+describe("countMovementsByCategory", () => {
+  it("cuenta los movimientos de cada categoría del usuario, y nada de otro", async () => {
+    const conteo = await countMovementsByCategory(USUARIO_A)
+
+    expect(conteo.get(CAT.comida)).toBe(3)
+    expect(conteo.get(CAT.alquiler)).toBe(1)
+    // Los cambios de divisa no tienen categoría: no hay clave nula.
+    expect([...conteo.keys()].every((id) => id !== null && id.startsWith("q-cat-a-"))).toBe(true)
   })
 })

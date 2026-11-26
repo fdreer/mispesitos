@@ -68,13 +68,17 @@ async function MovementFormDialogWithRate({
 }
 
 /**
- * El botón "Nuevo" con su diálogo. Dos consultas de categorías a propósito,
- * no una: este desplegable no debe ofrecer una categoría archivada, pero la
- * tabla y el filtro sí las necesitan (ver `ListaConPaginacion`).
+ * El botón "Nuevo" con su diálogo. Con la lista COMPLETA, archivadas
+ * incluidas, aunque el selector no las ofrezca: desde la Fase 2 el selector
+ * tiene que saber si un padre tiene hijas —aunque estén todas archivadas—
+ * para no ofrecerlo como opción, que es la misma pregunta que hace el trigger
+ * de la base (ver `isLeafCategory`). Quien saca las archivadas es el propio
+ * selector (`selectorGroups`). Y es la misma consulta que la tabla y el
+ * filtro: `listCategories` está memoizada por request.
  */
 async function BotonNuevo({ kind }: { kind: Kind }) {
   const { user, settings } = await requireSettings()
-  const categories = await listCategories(user.id, kind)
+  const categories = await listCategories(user.id, kind, true)
   const today = todayInAr()
 
   return (

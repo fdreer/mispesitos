@@ -4,6 +4,7 @@ import { Fragment, useState } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
 
 import { CategoryBadge } from "@/components/category-badge"
+import { categoryLabels, type CategoryLabel } from "@/lib/category-tree"
 import { StatusBadge } from "@/components/status-badge"
 import {
   Table,
@@ -74,14 +75,14 @@ function MovementStatusBadge({
 function MovementCards({
   movements,
   categories,
-  categoryName,
+  categoryLabel,
   today,
   expanded,
   toggle,
 }: {
   movements: MovementWithInstallments[]
   categories: Category[]
-  categoryName: Map<string, string>
+  categoryLabel: Map<string, CategoryLabel>
   today: IsoDate
   expanded: Set<string>
   toggle: (id: string) => void
@@ -93,7 +94,7 @@ function MovementCards({
         const currency = assertCurrency(m.currency)
         const kind = assertInstallmentMovementKind(m.kind)
         const isOpen = expanded.has(m.id)
-        const categoria = m.categoryId ? categoryName.get(m.categoryId) : undefined
+        const categoria = m.categoryId ? categoryLabel.get(m.categoryId) : undefined
         const detailsId = `cuotas-${m.id}`
         const nextText = nextInstallmentText(m, today)
 
@@ -120,7 +121,7 @@ function MovementCards({
             </button>
 
             <div className="mt-2 flex items-center justify-between gap-2">
-              <span>{categoria ? <CategoryBadge name={categoria} /> : "—"}</span>
+              <span>{categoria ? <CategoryBadge {...categoria} /> : "—"}</span>
               <MovementStatusBadge {...summary} />
             </div>
 
@@ -158,7 +159,8 @@ function MovementCards({
 }
 
 export function MovementList({ movements, categories, today, emptyMessage }: Props) {
-  const categoryName = new Map(categories.map((c) => [c.id, c.name]))
+  // Nombre, padre y color de cada categoría, con la herencia ya resuelta.
+  const categoryLabel = categoryLabels(categories)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   function toggle(id: string) {
@@ -187,7 +189,7 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
               const currency = assertCurrency(m.currency)
               const kind = assertInstallmentMovementKind(m.kind)
               const isOpen = expanded.has(m.id)
-              const categoria = m.categoryId ? categoryName.get(m.categoryId) : undefined
+              const categoria = m.categoryId ? categoryLabel.get(m.categoryId) : undefined
               const nextText = nextInstallmentText(m, today)
 
               return (
@@ -234,12 +236,12 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
                       )}
                     </TableCell>
                     <TableCell>
-                      {/* `categoryName.get` puede no encontrar nada aunque el
+                      {/* `categoryLabel.get` puede no encontrar nada aunque el
                           movimiento tenga `categoryId`: la lista que llega por
                           props es la del tipo de esta pantalla. El guión es
                           para los dos casos, sin categoría y sin nombre
                           resoluble. */}
-                      {categoria ? <CategoryBadge name={categoria} /> : "—"}
+                      {categoria ? <CategoryBadge {...categoria} /> : "—"}
                     </TableCell>
                     <TableCell className="tabular-nums">{formatMoney(m.amountCents, currency)}</TableCell>
                     <TableCell>
@@ -284,7 +286,7 @@ export function MovementList({ movements, categories, today, emptyMessage }: Pro
       <MovementCards
         movements={movements}
         categories={categories}
-        categoryName={categoryName}
+        categoryLabel={categoryLabel}
         today={today}
         expanded={expanded}
         toggle={toggle}

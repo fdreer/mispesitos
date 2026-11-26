@@ -5,8 +5,9 @@ import { revalidatePath } from "next/cache"
 import { and, eq, inArray } from "drizzle-orm"
 import { z } from "zod"
 
-import { withUser } from "@/db/client"
-import { installment, movement } from "@/db/schema"
+import { withUser, type Tx } from "@/db/client"
+import { category, installment, movement } from "@/db/schema"
+import { isCheckViolation } from "@/lib/db-errors"
 import { todayInAr, type IsoDate } from "@/lib/dates"
 import { highestPaidNumber, resolvePaidDate } from "@/lib/installments"
 import { logDbError } from "@/lib/log-db-error"
@@ -15,6 +16,28 @@ import { BASE_PATHS } from "@/lib/movement-routes"
 import { exchangeSchema, movementSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { requireUser } from "@/server/session"
+
+/**
+ * Un movimiento sólo puede ir a una categoría HOJA (decisión 7.4 del plan v2):
+ * una subcategoría, o una de primer nivel sin hijas. La base lo hace cumplir
+ * con el trigger `movement_category_is_leaf` (migración 0011); esto es para
+ * que la persona vea el error junto al campo y no un genérico al guardar.
+ *
+ * Desde el formulario no pasa —el selector no ofrece padres como opción—,
+ * pero el borde de confianza es la Server Action.
+ */
+const CATEGORIA_NO_HOJA = "Esa categoría tiene subcategorías: elegí una de ellas."
+
+async function categoryHasChildren(tx: Tx, categoryId: string): Promise<boolean> {
+  const [child] = await tx
+    .select({ id: category.id })
+    .from(category)
+    .where(eq(category.parentId, categoryId))
+    .limit(1)
+  return child !== undefined
+}
+
+const categoryNotLeaf = () => failure(CATEGORIA_NO_HOJA, { categoryId: [CATEGORIA_NO_HOJA] })
 
 /**
  * Las cuotas viajan en el FormData como campos repetidos, en el mismo orden:
@@ -64,7 +87,9 @@ export async function createMovement(
     : input.installments
 
   try {
-    await withUser(user.id, async (tx) => {
+    const resultado = await withUser(user.id, async (tx) => {
+      if (await categoryHasChildren(tx, input.categoryId)) return categoryNotLeaf()
+
       await tx.insert(movement).values({
         id: movementId,
         userId: user.id,
@@ -90,9 +115,14 @@ export async function createMovement(
           paidDate: settled ? cuota.dueDate : null,
         })),
       )
+      return success()
     })
+    if (!resultado.ok) return resultado
   } catch (error) {
     logDbError("createMovement", error)
+    // La carrera: otra pestaña le creó una subcategoría a esta categoría
+    // entre que se abrió el formulario y se guardó.
+    if (isCheckViolation(error, "movement_category_is_leaf")) return categoryNotLeaf()
     return failure("No pudimos guardar el movimiento. Probá de nuevo.")
   }
 
@@ -185,6 +215,8 @@ export async function updateMovement(
         .from(installment)
         .where(and(eq(installment.movementId, id.data), eq(installment.userId, user.id)))
 
+      if (await categoryHasChildren(tx, input.categoryId)) return categoryNotLeaf()
+
       const masAlta = highestPaidNumber(previas)
       if (masAlta > input.installments.length) {
         return failure(
@@ -258,6 +290,7 @@ export async function updateMovement(
     if (!resultado.ok) return resultado
   } catch (error) {
     logDbError("updateMovement", error)
+    if (isCheckViolation(error, "movement_category_is_leaf")) return categoryNotLeaf()
     return failure("No pudimos guardar los cambios. Probá de nuevo.")
   }
 

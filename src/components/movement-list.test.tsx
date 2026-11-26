@@ -35,7 +35,7 @@ afterEach(() => {
 })
 
 const CATEGORIAS = [
-  { id: "cat-1", userId: "u", name: "Freelance", kind: "income" as const, archived: false },
+  { id: "cat-1", userId: "u", name: "Freelance", kind: "income" as const, archived: false, parentId: null, color: null, icon: null },
 ]
 
 /** Las dos marcas de tiempo que trae toda fila de la base y que esta tabla no

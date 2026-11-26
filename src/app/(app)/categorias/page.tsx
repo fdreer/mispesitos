@@ -1,7 +1,7 @@
 import { Suspense } from "react"
 
 import { CategoryManager } from "@/components/category-manager"
-import { listCategories } from "@/server/queries"
+import { countMovementsByCategory, listCategories } from "@/server/queries"
 import { requireSettings } from "@/server/session"
 
 /**
@@ -20,12 +20,29 @@ async function CategoriasBody() {
   // Con las archivadas incluidas: ésta es la pantalla para la que existe el
   // tercer parámetro de listCategories. Sin él, archivar hacía desaparecer la
   // fila y la categoría no volvía a verse desde ningún lado.
-  const categories = await listCategories(user.id, undefined, true)
+  //
+  // El conteo de movimientos es para el caso de §2.1 del plan v2: darle la
+  // primera subcategoría a una categoría que ya tiene movimientos obliga a
+  // decir a dónde pasan. Viaja como objeto y no como Map: lo que cruza al
+  // componente de cliente tiene que ser serializable.
+  const [categories, counts] = await Promise.all([
+    listCategories(user.id, undefined, true),
+    countMovementsByCategory(user.id),
+  ])
+  const movementCounts = Object.fromEntries(counts)
 
   return (
     <>
-      <CategoryManager kind="income" categories={categories.filter((c) => c.kind === "income")} />
-      <CategoryManager kind="expense" categories={categories.filter((c) => c.kind === "expense")} />
+      <CategoryManager
+        kind="income"
+        categories={categories.filter((c) => c.kind === "income")}
+        movementCounts={movementCounts}
+      />
+      <CategoryManager
+        kind="expense"
+        categories={categories.filter((c) => c.kind === "expense")}
+        movementCounts={movementCounts}
+      />
     </>
   )
 }

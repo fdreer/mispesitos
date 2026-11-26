@@ -2,7 +2,7 @@ import "server-only"
 
 import { cache } from "react"
 
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte } from "drizzle-orm"
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm"
 
 import { withUser, type Tx } from "@/db/client"
 import { category, installment, movement, userSettings } from "@/db/schema"
@@ -70,6 +70,25 @@ export const listCategories = cache(async function listCategories(
   })
 })
 
+/**
+ * Cuántos movimientos tiene cada categoría, por id. Lo usa /categorias para
+ * saber si darle la primera subcategoría a una categoría obliga a decidir a
+ * dónde van sus movimientos (§2.1 del plan v2), y para decirle a la persona
+ * cuántos son. Sólo trae las categorías con al menos uno.
+ */
+export const countMovementsByCategory = cache(async function countMovementsByCategory(
+  userId: string,
+): Promise<Map<string, number>> {
+  const rows = await withUser(userId, (tx) =>
+    tx
+      .select({ categoryId: movement.categoryId, total: count() })
+      .from(movement)
+      .where(and(eq(movement.userId, userId), isNotNull(movement.categoryId)))
+      .groupBy(movement.categoryId),
+  )
+  return new Map(rows.map((r) => [r.categoryId!, r.total]))
+})
+
 export type MovementFilters = {
   kind?: "income" | "expense" | "exchange"
   categoryId?: string
@@ -92,7 +111,21 @@ function escapeLike(term: string): string {
 function movementConditions(userId: string, filters: MovementFilters) {
   const conditions = [eq(movement.userId, userId)]
   if (filters.kind) conditions.push(eq(movement.kind, filters.kind))
-  if (filters.categoryId) conditions.push(eq(movement.categoryId, filters.categoryId))
+  if (filters.categoryId) {
+    // Filtrar por un padre trae también lo de sus subcategorías: los
+    // movimientos van siempre a una hoja (decisión 7.4 del plan v2), así que
+    // filtrar sólo por el id del padre daría una lista vacía. La subconsulta
+    // corre bajo la misma RLS que la principal.
+    conditions.push(
+      or(
+        eq(movement.categoryId, filters.categoryId),
+        inArray(
+          movement.categoryId,
+          sql`(SELECT ${category.id} FROM ${category} WHERE ${category.parentId} = ${filters.categoryId})`,
+        ),
+      )!,
+    )
+  }
   if (filters.currency) conditions.push(eq(movement.currency, filters.currency))
   if (filters.from) conditions.push(gte(movement.date, filters.from))
   if (filters.to) conditions.push(lte(movement.date, filters.to))

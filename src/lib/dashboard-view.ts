@@ -3,8 +3,8 @@ import {
   monthlyTotals,
   projectBalance,
   projectionStartArsCents,
-  spendByCategory,
 } from "@/lib/dashboard"
+import { spendByParent, type SpendGroup, type TreeCategory } from "@/lib/category-tree"
 import { addMonthsClamped, isOverdue, monthKey, type IsoDate } from "@/lib/dates"
 import { convertToArs } from "@/lib/money"
 import {
@@ -76,7 +76,8 @@ export type DashboardInput = {
   paid: PaidRow[]
   exchanges: ExchangeRow[]
   pending: PendingRow[]
-  expenseCategories: { id: string; name: string }[]
+  /** Con las archivadas: la torta tiene que poder nombrar un gasto viejo. */
+  expenseCategories: TreeCategory[]
   horizonMonths: number
   historyMonths: number
 }
@@ -109,7 +110,8 @@ type DashboardView = {
   projection: { month: string; arsCents: number }[] | null
   upcomingPayments: UpcomingItem[]
   upcomingReceivables: UpcomingItem[]
-  pie: { name: string; arsCents: number }[]
+  /** Por categoría padre, con el desglose por subcategoría (§2.3 del plan v2). */
+  pie: SpendGroup[]
   bars: { month: string; incomeArsCents: number; expenseArsCents: number }[]
   todayRate: number | null
 }
@@ -223,7 +225,7 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
       status: overdueMovements.has(p.movementId) ? "overdue" : "pending",
     }))
 
-  const pie = spendByCategory(
+  const pie = spendByParent(
     monthPaid
       .filter((p) => p.kind === "expense")
       .map((p) => ({

@@ -1,6 +1,7 @@
 "use client"
 
-import type * as React from "react"
+import { useState, type ComponentProps } from "react"
+import { ChevronRight } from "lucide-react"
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from "recharts"
 
 import {
@@ -11,8 +12,10 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart"
-import { categoryColor } from "@/lib/category-color"
+import { categoryHue, hueColor } from "@/lib/category-color"
+import type { SpendGroup } from "@/lib/category-tree"
 import { formatAxisPesos, formatMoney } from "@/lib/money"
+import { cn } from "@/lib/utils"
 
 /*
  * La paleta del sistema, repetida acá en hexadecimal a propósito: Recharts
@@ -38,7 +41,7 @@ const AXIS_TICK = { fill: FOG, fontSize: 12 } as const
  * toma `item.payload.fill` (las porciones de la torta) o si no `item.color`
  * (la referencia `var(--color-...)` que ya trae la Line/Bar).
  */
-const moneyTooltipFormatter: NonNullable<React.ComponentProps<typeof ChartTooltipContent>["formatter"]> = (
+const moneyTooltipFormatter: NonNullable<ComponentProps<typeof ChartTooltipContent>["formatter"]> = (
   value,
   name,
   item,
@@ -99,7 +102,25 @@ export function ProjectionChart({
   )
 }
 
-export function CategoryPie({ data }: { data: { name: string; arsCents: number }[] }) {
+/** El color de una porción: el tono resuelto, o el hash para "Sin categoría". */
+const groupColor = (g: { name: string; hue: number | null }) =>
+  hueColor(g.hue ?? categoryHue(g.name))
+
+/**
+ * La torta de gastos del mes, por categoría PADRE (§2.3 del plan v2), con el
+ * desglose por subcategoría en la lista de abajo.
+ *
+ * Por padre y no por hoja: con subcategorías, la torta por hoja se partía en
+ * porciones finitas ("Alquiler", "Expensas", "Servicios"…) y lo que se quiere
+ * ver de un vistazo es cuánto se va en Hogar. El detalle está a un clic, en la
+ * lista, sin cambiar de pantalla.
+ *
+ * El color sale de la categoría (el elegido, o el hash del nombre; ver
+ * `resolveCategoryHue`), no de su posición en la lista: la misma categoría no
+ * cambia de color de un mes a otro con sólo gastar más o menos, y coincide con
+ * su badge en la tabla de egresos.
+ */
+export function CategoryPie({ data }: { data: SpendGroup[] }) {
   if (data.length === 0) {
     return (
       <p className="text-muted-foreground py-8 text-center text-sm">
@@ -108,32 +129,107 @@ export function CategoryPie({ data }: { data: { name: string; arsCents: number }
     )
   }
 
-  /*
-   * El color sale del NOMBRE de la categoría, no de su posición en esta
-   * lista. Antes era `COLORS[index % COLORS.length]` sobre una lista ordenada
-   * por importe: la misma categoría cambiaba de color de un mes a otro con
-   * sólo gastar más o menos, y no coincidía con el badge que esa categoría
-   * tiene en la tabla de egresos. Ahora es el mismo `categoryColor` que usa
-   * el badge, así que la porción de la torta y la fila de la tabla se
-   * reconocen entre sí.
-   */
   const chartData = data.map((d) => ({
     name: d.name,
     value: toPesos(d.arsCents),
-    fill: categoryColor(d.name),
+    fill: groupColor(d),
   }))
+  const total = data.reduce((acc, d) => acc + d.arsCents, 0)
 
   return (
-    <ChartContainer config={PIE_CONFIG} className="aspect-auto h-[220px] w-full">
-      <PieChart>
-        <Pie data={chartData} dataKey="value" nameKey="name" outerRadius={80} stroke="var(--card)">
-          {chartData.map((d) => (
-            <Cell key={d.name} fill={d.fill} />
-          ))}
-        </Pie>
-        <ChartTooltip content={<ChartTooltipContent formatter={moneyTooltipFormatter} />} />
-      </PieChart>
-    </ChartContainer>
+    <div className="space-y-3">
+      <ChartContainer config={PIE_CONFIG} className="aspect-auto h-[200px] w-full">
+        <PieChart>
+          <Pie data={chartData} dataKey="value" nameKey="name" outerRadius={80} stroke="var(--card)">
+            {chartData.map((d) => (
+              <Cell key={d.name} fill={d.fill} />
+            ))}
+          </Pie>
+          <ChartTooltip content={<ChartTooltipContent formatter={moneyTooltipFormatter} />} />
+        </PieChart>
+      </ChartContainer>
+      <CategoryBreakdown data={data} total={total} />
+    </div>
+  )
+}
+
+/**
+ * La leyenda de la torta, que es además el desglose: cada padre con su
+ * importe y su porcentaje, y los que tienen subcategorías se despliegan.
+ * Sin esta lista, el importe de cada porción sólo se veía pasando el mouse,
+ * que en un teléfono no existe.
+ */
+function CategoryBreakdown({ data, total }: { data: SpendGroup[]; total: number }) {
+  const [open, setOpen] = useState<Set<string>>(new Set())
+  const toggle = (name: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  const percent = (cents: number) => (total > 0 ? Math.round((cents / total) * 100) : 0)
+
+  return (
+    <ul aria-label="Gastos por categoría" className="divide-y divide-border text-sm">
+      {data.map((group, index) => {
+        const expandable = group.children.length > 0
+        const isOpen = open.has(group.name)
+        // Por posición y no por nombre: un nombre con espacios no es un id.
+        const detailsId = `desglose-${index}`
+        const row = (
+          <>
+            <span
+              aria-hidden
+              className="size-2.5 shrink-0 rounded-[2px]"
+              style={{ backgroundColor: groupColor(group) }}
+            />
+            <span className="min-w-0 flex-1 truncate text-left">{group.name}</span>
+            <span className="text-muted-foreground tabular-nums">{percent(group.arsCents)}%</span>
+            <span className="w-28 text-right font-mono tabular-nums">
+              {formatMoney(group.arsCents, "ARS")}
+            </span>
+          </>
+        )
+        return (
+          <li key={group.name}>
+            {expandable ? (
+              <button
+                type="button"
+                aria-expanded={isOpen}
+                aria-controls={detailsId}
+                onClick={() => toggle(group.name)}
+                className="flex min-h-10 w-full items-center gap-2 rounded-sm hover:bg-accent/50"
+              >
+                <ChevronRight
+                  aria-hidden
+                  className={cn("size-4 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90")}
+                />
+                {row}
+              </button>
+            ) : (
+              <div className="flex min-h-10 items-center gap-2">
+                <span aria-hidden className="size-4 shrink-0" />
+                {row}
+              </div>
+            )}
+            {expandable && isOpen && (
+              <ul id={detailsId} className="pb-2 pl-10">
+                {group.children.map((child) => (
+                  <li key={child.name} className="flex min-h-8 items-center gap-2 text-muted-foreground">
+                    <span className="min-w-0 flex-1 truncate">{child.name}</span>
+                    <span className="tabular-nums">{percent(child.arsCents)}%</span>
+                    <span className="w-28 text-right font-mono tabular-nums">
+                      {formatMoney(child.arsCents, "ARS")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

@@ -7,6 +7,7 @@ import { es } from "date-fns/locale"
 import type { DateRange } from "react-day-picker"
 
 import { CategoryBadge } from "@/components/category-badge"
+import { buildCategoryTree, categoryLabels } from "@/lib/category-tree"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
@@ -77,8 +78,32 @@ const CURRENCY_OPTIONS: (QueryCurrency | "all")[] = ["all", ...CURRENCY_VALUES]
  */
 function categoriaValue(categoryId: string, categories: Category[]): ReactNode | undefined {
   if (categoryId === "all") return TODAS
-  const name = categories.find((c) => c.id === categoryId)?.name
-  return name === undefined ? undefined : <CategoryBadge name={name} />
+  const label = categoryLabels(categories).get(categoryId)
+  return label === undefined ? undefined : <CategoryBadge {...label} />
+}
+
+/**
+ * Las opciones de categoría en orden de árbol: cada padre y, debajo y con
+ * sangría, sus subcategorías (Fase 2 del plan v2). A diferencia del selector
+ * del formulario, acá un padre SÍ es una opción: filtrar por "Hogar" trae lo
+ * de todas sus subcategorías (ver `movementConditions` en @/server/queries).
+ *
+ * El multiselect y el resto de la barra nueva son de la Fase 4; esto es lo
+ * mínimo para que el filtro de hoy no muestre una lista plana donde "General"
+ * aparece dos veces sin decir de qué.
+ */
+function categoriaItems(categories: Category[]): ReactNode {
+  const labels = categoryLabels(categories)
+  return buildCategoryTree(categories).flatMap((node) => [
+    <SelectItem key={node.id} value={node.id}>
+      <CategoryBadge name={node.name} hue={labels.get(node.id)?.hue} />
+    </SelectItem>,
+    ...node.children.map((child) => (
+      <SelectItem key={child.id} value={child.id} className="pl-6">
+        <CategoryBadge name={child.name} hue={labels.get(child.id)?.hue} />
+      </SelectItem>
+    )),
+  ])
 }
 
 /**
@@ -547,11 +572,7 @@ export function MovementFilters({ basePath, query, categories }: Props) {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">{TODAS}</SelectItem>
-                    {categories.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        <CategoryBadge name={c.name} />
-                      </SelectItem>
-                    ))}
+                    {categoriaItems(categories)}
                   </SelectContent>
                 </Select>
               </div>
@@ -685,11 +706,7 @@ export function MovementFilters({ basePath, query, categories }: Props) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{TODAS}</SelectItem>
-              {categories.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  <CategoryBadge name={c.name} />
-                </SelectItem>
-              ))}
+              {categoriaItems(categories)}
             </SelectContent>
           </Select>
         </div>

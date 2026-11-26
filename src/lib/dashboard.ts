@@ -71,23 +71,6 @@ export function projectBalance(
   })
 }
 
-export function spendByCategory(
-  expenses: { categoryId: string | null; arsCents: number }[],
-  categories: { id: string; name: string }[],
-): { name: string; arsCents: number }[] {
-  const names = new Map(categories.map((c) => [c.id, c.name]))
-  const totals = new Map<string, number>()
-
-  for (const expense of expenses) {
-    const name = (expense.categoryId && names.get(expense.categoryId)) || "Sin categoría"
-    totals.set(name, (totals.get(name) ?? 0) + expense.arsCents)
-  }
-
-  return [...totals.entries()]
-    .map(([name, arsCents]) => ({ name, arsCents }))
-    .sort((a, b) => b.arsCents - a.arsCents)
-}
-
 export function monthlyTotals(
   movements: { date: IsoDate; kind: "income" | "expense"; arsCents: number }[],
   months: number,

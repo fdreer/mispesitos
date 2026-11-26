@@ -647,3 +647,157 @@ describe("RLS", () => {
     expect(fila.rolsuper).toBe(false)
   })
 })
+
+/**
+ * Las reglas del árbol de categorías (migración 0011, Fase 2 del plan v2).
+ * Las cuatro viven en la base y no sólo en las Server Actions, con el mismo
+ * criterio que las FK compuestas de la 0006 y la 0008: si alguna se pone en
+ * rojo, el arreglo es devolverle la regla a la base, nunca bajar la
+ * expectativa.
+ *
+ * Cada caso siembra sus propias filas con ids `arbol-*` y las borra en su
+ * `finally`: la suite de arriba cuenta exactamente una fila por tabla, y una
+ * fila colgada de acá la pondría en rojo.
+ */
+describe("categorías en árbol", () => {
+  const ARBOL = ["arbol-padre", "arbol-hija", "arbol-nieta", "arbol-ajena"]
+  const MOV = "arbol-mov"
+
+  const cat = (id: string, parentId: string | null = null, name = id) => ({
+    id,
+    userId: USER_A,
+    name,
+    kind: "expense",
+    parentId,
+  })
+  const mov = (categoryId: string) => ({
+    id: MOV,
+    userId: USER_A,
+    kind: "expense",
+    description: "Prueba del árbol",
+    categoryId,
+    date: "2026-01-09",
+    currency: "ARS",
+    amountCents: 100_00,
+    rate: "1",
+  })
+
+  /** Una sola sentencia para las categorías: la FK al padre es NO ACTION. */
+  async function limpiarArbol() {
+    await withUser(USER_A, async (tx) => {
+      await tx.delete(movement).where(eq(movement.id, MOV))
+      await tx.delete(category).where(inArray(category.id, ARBOL))
+    })
+  }
+
+  it("una subcategoría no puede colgar de la categoría de otro usuario", async () => {
+    try {
+      const motivo = await motivoDelRechazo(
+        withUser(USER_A, (tx) => tx.insert(category).values(cat("arbol-ajena", `cat-${USER_B}`))),
+      )
+      expect(motivo).toMatch(
+        /violates foreign key constraint "category_user_id_kind_parent_id_category_user_id_kind_id_fk"/,
+      )
+    } finally {
+      await limpiarArbol()
+    }
+  })
+
+  it("no hay tercer nivel", async () => {
+    try {
+      await withUser(USER_A, async (tx) => {
+        await tx.insert(category).values(cat("arbol-padre"))
+        await tx.insert(category).values(cat("arbol-hija", "arbol-padre"))
+      })
+
+      const motivo = await motivoDelRechazo(
+        withUser(USER_A, (tx) => tx.insert(category).values(cat("arbol-nieta", "arbol-hija"))),
+      )
+      expect(motivo).toMatch(/Una subcategoría no puede tener subcategorías/)
+
+      // La otra punta: una categoría con hijas no puede pasar a ser hija.
+      await withUser(USER_A, (tx) => tx.insert(category).values(cat("arbol-nieta")))
+      const motivoAlReves = await motivoDelRechazo(
+        withUser(USER_A, (tx) =>
+          tx.update(category).set({ parentId: "arbol-nieta" }).where(eq(category.id, "arbol-padre")),
+        ),
+      )
+      expect(motivoAlReves).toMatch(/Una categoría con subcategorías no puede ser subcategoría/)
+    } finally {
+      await limpiarArbol()
+    }
+  })
+
+  it("un movimiento no puede ir a una categoría que tiene subcategorías", async () => {
+    try {
+      await withUser(USER_A, async (tx) => {
+        await tx.insert(category).values(cat("arbol-padre"))
+        await tx.insert(category).values(cat("arbol-hija", "arbol-padre"))
+      })
+
+      // El trigger es diferido: el rechazo llega en el COMMIT.
+      const motivo = await motivoDelRechazo(
+        withUser(USER_A, (tx) => tx.insert(movement).values(mov("arbol-padre"))),
+      )
+      expect(motivo).toMatch(/Un movimiento no puede ir a una categoría que tiene subcategorías/)
+
+      // La contracara: en la hija entra.
+      await withUser(USER_A, (tx) => tx.insert(movement).values(mov("arbol-hija")))
+    } finally {
+      await limpiarArbol()
+    }
+  })
+
+  /*
+   * §2.1 del plan: crear la primera subcategoría de una categoría con
+   * movimientos obliga a pasarlos. Suelta, la hija no entra; en la misma
+   * transacción que mueve los movimientos, sí — para eso los dos triggers de
+   * "sólo hojas" son diferidos.
+   */
+  it("la primera hija de una categoría con movimientos sólo entra si se los pasa en la misma transacción", async () => {
+    try {
+      await withUser(USER_A, async (tx) => {
+        await tx.insert(category).values(cat("arbol-padre"))
+        await tx.insert(movement).values(mov("arbol-padre"))
+      })
+
+      const motivo = await motivoDelRechazo(
+        withUser(USER_A, (tx) => tx.insert(category).values(cat("arbol-hija", "arbol-padre"))),
+      )
+      expect(motivo).toMatch(/La categoría padre todavía tiene movimientos/)
+
+      await withUser(USER_A, async (tx) => {
+        await tx.insert(category).values(cat("arbol-hija", "arbol-padre"))
+        await tx.update(movement).set({ categoryId: "arbol-hija" }).where(eq(movement.id, MOV))
+      })
+
+      const [fila] = await withUser(USER_A, (tx) =>
+        tx.select({ categoryId: movement.categoryId }).from(movement).where(eq(movement.id, MOV)),
+      )
+      expect(fila.categoryId).toBe("arbol-hija")
+    } finally {
+      await limpiarArbol()
+    }
+  })
+
+  it("dos hermanas no se llaman igual, pero dos primas sí", async () => {
+    try {
+      await withUser(USER_A, async (tx) => {
+        await tx.insert(category).values(cat("arbol-padre"))
+        await tx.insert(category).values(cat("arbol-nieta"))
+        await tx.insert(category).values(cat("arbol-hija", "arbol-padre", "General"))
+        // Prima: mismo nombre, otro padre.
+        await tx.insert(category).values(cat("arbol-ajena", "arbol-nieta", "General"))
+      })
+
+      const motivo = await motivoDelRechazo(
+        withUser(USER_A, (tx) =>
+          tx.update(category).set({ parentId: "arbol-padre" }).where(eq(category.id, "arbol-ajena")),
+        ),
+      )
+      expect(motivo).toMatch(/category_active_unique/)
+    } finally {
+      await limpiarArbol()
+    }
+  })
+})

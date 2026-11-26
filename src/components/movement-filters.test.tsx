@@ -82,8 +82,8 @@ function getPeriodoTrigger(): HTMLElement {
 }
 
 const CATEGORIAS = [
-  { id: "cat-1", userId: "u", name: "Supermercado", kind: "expense" as const, archived: false },
-  { id: "cat-2", userId: "u", name: "Ocio", kind: "expense" as const, archived: true },
+  { id: "cat-1", userId: "u", name: "Supermercado", kind: "expense" as const, archived: false, parentId: null, color: null, icon: null },
+  { id: "cat-2", userId: "u", name: "Ocio", kind: "expense" as const, archived: true, parentId: null, color: null, icon: null },
 ]
 
 function montar(raw: Record<string, string> = {}) {

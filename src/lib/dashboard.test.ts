@@ -3,7 +3,6 @@ import {
   monthlyTotals,
   projectBalance,
   projectionStartArsCents,
-  spendByCategory,
 } from "@/lib/dashboard"
 
 /**
@@ -202,84 +201,6 @@ describe("projectBalance", () => {
       { month: "2026-08", arsCents: 10_000_00 },
       { month: "2026-09", arsCents: 9_000_00 },
     ])
-  })
-})
-
-describe("spendByCategory", () => {
-  it("suma los egresos por categoría y los ordena de mayor a menor", () => {
-    const result = spendByCategory(
-      [
-        { categoryId: "a", arsCents: 1_000 },
-        { categoryId: "b", arsCents: 5_000 },
-        { categoryId: "a", arsCents: 2_000 },
-      ],
-      [
-        { id: "a", name: "Comida" },
-        { id: "b", name: "Alquiler" },
-      ],
-    )
-
-    expect(result).toEqual([
-      { name: "Alquiler", arsCents: 5_000 },
-      { name: "Comida", arsCents: 3_000 },
-    ])
-  })
-
-  it("agrupa como Sin categoría lo que no tiene", () => {
-    const result = spendByCategory([{ categoryId: null, arsCents: 700 }], [])
-    expect(result).toEqual([{ name: "Sin categoría", arsCents: 700 }])
-  })
-
-  it("con la lista vacía, devuelve una lista vacía", () => {
-    expect(spendByCategory([], [])).toEqual([])
-  })
-
-  it("un gasto de una categoría que no está en la lista cae en Sin categoría", () => {
-    // Pasa cuando la lista viene sólo con las categorías activas y el gasto es
-    // de una archivada: sin esto el gráfico mostraría "undefined" como nombre.
-    const result = spendByCategory(
-      [
-        { categoryId: "archivada-1", arsCents: 2_000 },
-        { categoryId: "activa-1", arsCents: 1_000 },
-      ],
-      [{ id: "activa-1", name: "Comida" }],
-    )
-
-    expect(result).toEqual([
-      { name: "Sin categoría", arsCents: 2_000 },
-      { name: "Comida", arsCents: 1_000 },
-    ])
-  })
-
-  it("los gastos sin categoría se suman junto con los de categoría desconocida", () => {
-    const result = spendByCategory(
-      [
-        { categoryId: null, arsCents: 700 },
-        { categoryId: "fantasma", arsCents: 300 },
-      ],
-      [],
-    )
-
-    expect(result).toEqual([{ name: "Sin categoría", arsCents: 1_000 }])
-  })
-
-  it("suma junto lo de dos categorías con ids distintos que comparten nombre", () => {
-    // Puede pasar de verdad: el índice único de `category` es por
-    // (userId, name, kind) y sólo entre las activas (Task 16), así que una
-    // categoría archivada y una activa nueva pueden compartir nombre con ids
-    // distintos. El gráfico agrupa por nombre, así que tienen que sumarse juntas.
-    const result = spendByCategory(
-      [
-        { categoryId: "activa-1", arsCents: 1_000 },
-        { categoryId: "archivada-1", arsCents: 2_000 },
-      ],
-      [
-        { id: "activa-1", name: "Comida" },
-        { id: "archivada-1", name: "Comida" },
-      ],
-    )
-
-    expect(result).toEqual([{ name: "Comida", arsCents: 3_000 }])
   })
 })
 

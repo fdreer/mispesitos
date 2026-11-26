@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { isUniqueViolation } from "@/lib/db-errors"
+import { isCheckViolation, isUniqueViolation } from "@/lib/db-errors"
 
 /**
  * Reproduce la forma real que arma Drizzle: un `DrizzleQueryError` cuyo
@@ -56,5 +56,26 @@ describe("isUniqueViolation", () => {
     })
 
     expect(isUniqueViolation(error, "category_active_unique")).toBe(true)
+  })
+})
+
+describe("isCheckViolation", () => {
+  it("reconoce la regla de un trigger, envuelta como la envuelve Drizzle", () => {
+    const error = drizzleQueryError({ code: "23514", constraint_name: "category_two_levels" })
+    expect(isCheckViolation(error, "category_two_levels")).toBe(true)
+  })
+
+  // Un trigger diferido falla en el COMMIT, que no pasa por Drizzle.
+  it("reconoce el error pelado de postgres.js, sin `cause`", () => {
+    const error = Object.assign(new Error("Un movimiento no puede…"), {
+      code: "23514",
+      constraint_name: "movement_category_is_leaf",
+    })
+    expect(isCheckViolation(error, "movement_category_is_leaf")).toBe(true)
+  })
+
+  it("no confunde una violación de unicidad con una CHECK del mismo nombre", () => {
+    const error = drizzleQueryError({ code: "23505", constraint_name: "category_two_levels" })
+    expect(isCheckViolation(error, "category_two_levels")).toBe(false)
   })
 })

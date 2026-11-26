@@ -12,9 +12,14 @@ import { MovementForm } from "@/components/movement-form"
  * apenas se lo importa; y `useRouter` necesita el router de Next.
  */
 const updateMovement = vi.fn(async () => ({ ok: true }))
+const createMovement = vi.fn(
+  async (): Promise<
+    { ok: true } | { ok: false; message: string; fieldErrors?: Record<string, string[]> }
+  > => ({ ok: true }),
+)
 
 vi.mock("@/server/actions/movements", () => ({
-  createMovement: async () => ({ ok: true }),
+  createMovement: (...args: unknown[]) => createMovement(...(args as [])),
   updateMovement: (...args: unknown[]) => updateMovement(...(args as [])),
 }))
 
@@ -35,7 +40,7 @@ global.ResizeObserver ??= class {
 }
 
 const CATEGORIAS = [
-  { id: "cat-1", userId: "u", name: "Supermercado", kind: "expense", archived: false },
+  { id: "cat-1", userId: "u", name: "Supermercado", kind: "expense", archived: false, parentId: null, color: null, icon: null },
 ]
 
 afterEach(cleanup)
@@ -277,5 +282,42 @@ describe("MovementForm editando", () => {
     editar()
 
     expect(screen.getByRole("button", { name: "Guardar cambios" })).toBeTruthy()
+  })
+
+  describe("la categoría", () => {
+    const CON_SUBCATEGORIAS = [
+      { id: "a", userId: "u", name: "Alquiler", kind: "expense", archived: false, parentId: "h", color: null, icon: null },
+      { id: "h", userId: "u", name: "Hogar", kind: "expense", archived: false, parentId: null, color: null, icon: null },
+    ]
+
+    it("al dar de alta, nunca arranca en un padre: arranca en su primera subcategoría", () => {
+      const { container } = render(
+        <MovementForm kind="expense" categories={CON_SUBCATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+      )
+      const campo = container.querySelector<HTMLInputElement>('input[name="categoryId"]')
+      expect(campo?.value).toBe("a")
+    })
+
+    it("el error de categoría de la acción se muestra junto al campo", async () => {
+      const mensaje = "Esa categoría tiene subcategorías: elegí una de ellas."
+      createMovement.mockResolvedValueOnce({
+        ok: false,
+        message: mensaje,
+        fieldErrors: { categoryId: [mensaje] },
+      })
+      const { container } = render(
+        <MovementForm kind="expense" categories={CON_SUBCATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+      )
+
+      await act(async () => {
+        fireEvent.submit(container.querySelector("form")!)
+      })
+
+      // Una vez junto al campo y otra como error general del formulario.
+      expect(screen.getAllByText(mensaje).length).toBeGreaterThanOrEqual(1)
+      expect(
+        screen.getByRole("button", { name: /Alquiler/ }).getAttribute("data-invalid"),
+      ).toBe("true")
+    })
   })
 })

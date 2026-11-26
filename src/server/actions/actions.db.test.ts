@@ -10,7 +10,9 @@ import { DEFAULT_CATEGORIES } from "@/lib/default-categories"
 import {
   archiveCategory,
   createCategory,
+  moveCategory,
   unarchiveCategory,
+  updateCategory,
 } from "@/server/actions/categories"
 import {
   createExchange,
@@ -113,6 +115,15 @@ const CAT_A_SUELDO = "act-cat-a-sueldo"
 const CAT_B = randomUUID()
 const MOV_B = randomUUID()
 const INS_B = randomUUID()
+
+/**
+ * La precarga del onboarding, aplanada: desde la Fase 2 cada categoría por
+ * default puede traer subcategorías, y las dos cosas son filas de `category`.
+ */
+const PRECARGA = DEFAULT_CATEGORIES.flatMap((c) => [
+  { name: c.name, kind: c.kind, parentName: null as string | null },
+  ...(c.children ?? []).map((h) => ({ name: h.name, kind: c.kind, parentName: c.name })),
+])
 
 /** Los ids que generan las acciones son `randomUUID()`: v4, variante RFC. */
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -1742,10 +1753,22 @@ describe("saveSettings", () => {
     })
 
     const categorias = await categoriasDe(USUARIO_NUEVO)
-    expect(categorias).toHaveLength(DEFAULT_CATEGORIES.length)
-    expect(categorias.map((c) => `${c.kind}:${c.name}`).sort()).toEqual(
-      DEFAULT_CATEGORIES.map((c) => `${c.kind}:${c.name}`).sort(),
-    )
+    expect(categorias).toHaveLength(PRECARGA.length)
+    // Con su lugar en el árbol: cada subcategoría colgada de su padre.
+    const nombrePorId = new Map(categorias.map((c) => [c.id, c.name]))
+    const conPadre = (c: { kind: string; name: string; parentName: string | null }) =>
+      `${c.kind}:${c.parentName ?? "-"}:${c.name}`
+    expect(
+      categorias
+        .map((c) =>
+          conPadre({
+            kind: c.kind,
+            name: c.name,
+            parentName: c.parentId ? (nombrePorId.get(c.parentId) ?? "?") : null,
+          }),
+        )
+        .sort(),
+    ).toEqual(PRECARGA.map(conPadre).sort())
     expect(categorias.every((c) => !c.archived)).toBe(true)
     expect(rutasRevalidadas()).toEqual([["/", "layout"]])
   })
@@ -1762,7 +1785,7 @@ describe("saveSettings", () => {
     comoUsuario(USUARIO_NUEVO)
 
     expect(await saveSettings(null, formulario(AJUSTES_VALIDOS))).toEqual({ ok: true })
-    expect(await categoriasDe(USUARIO_NUEVO)).toHaveLength(DEFAULT_CATEGORIES.length)
+    expect(await categoriasDe(USUARIO_NUEVO)).toHaveLength(PRECARGA.length)
 
     // Sin dólares en el saldo inicial, el TC puede ser cero: la validación
     // cruzada sólo exige un TC mayor a cero cuando hay dólares.
@@ -1789,10 +1812,10 @@ describe("saveSettings", () => {
       preferredRate: "oficial",
     })
 
-    // Una sola fila de ajustes y las mismas 15 categorías: la segunda pasada va
+    // Una sola fila de ajustes y las mismas categorías: la segunda pasada va
     // por el UPDATE y se saltea la precarga.
     expect(await ajustesDe(USUARIO_NUEVO)).toHaveLength(1)
-    expect(await categoriasDe(USUARIO_NUEVO)).toHaveLength(DEFAULT_CATEGORIES.length)
+    expect(await categoriasDe(USUARIO_NUEVO)).toHaveLength(PRECARGA.length)
   })
 
   /**
@@ -1826,7 +1849,7 @@ describe("saveSettings", () => {
     expect(b).toEqual({ ok: true })
 
     // Y las categorías por default quedaron sembradas UNA sola vez.
-    expect(await categoriasDe(USUARIO_CARRERA)).toHaveLength(DEFAULT_CATEGORIES.length)
+    expect(await categoriasDe(USUARIO_CARRERA)).toHaveLength(PRECARGA.length)
   })
 
   it("guardar los ajustes de uno no toca los del otro", async () => {
@@ -1943,5 +1966,203 @@ describe("saveSettings", () => {
       cantidadDeCategorias: 0,
     })
     expect(rutasRevalidadas()).toEqual([])
+  })
+})
+
+// --------------------------------------------------------------------------
+// Categorías en árbol (Fase 2 del plan v2)
+// --------------------------------------------------------------------------
+
+/** Crea una categoría de egresos por la acción y devuelve su fila. */
+async function crearCategoria(nombre: string, campos: Record<string, CampoDeFormulario> = {}) {
+  expect(
+    await createCategory(null, formulario({ name: nombre, kind: "expense", ...campos })),
+  ).toEqual({ ok: true })
+  const filas = await categoriaLlamada(USUARIO_A, nombre)
+  // La última creada, si el nombre se repite abajo de otros padres.
+  return filas.at(-1)!
+}
+
+/** Un egreso de una cuota en esa categoría, por la acción. */
+async function cargarEgreso(descripcion: string, categoryId: string) {
+  return createMovement(
+    null,
+    formulario({ ...ALTA_VALIDA, description: descripcion, categoryId }),
+  )
+}
+
+describe("categorías en árbol", () => {
+  it("crea una subcategoría con su padre, su color y su icono", async () => {
+    comoUsuario(USUARIO_A)
+    const padre = await crearCategoria("Árbol hogar")
+
+    const hija = await crearCategoria("Árbol alquiler", {
+      parentId: padre.id,
+      color: "violeta",
+      icon: "hogar",
+    })
+
+    expect(hija).toMatchObject({ parentId: padre.id, color: "violeta", icon: "hogar" })
+  })
+
+  it("un color o un icono que no están en las listas se rechazan", async () => {
+    comoUsuario(USUARIO_A)
+    const resultado = await createCategory(
+      null,
+      formulario({ name: "Árbol color raro", kind: "expense", color: "#ff0000" }),
+    )
+    expect(rechazo(resultado).fieldErrors?.color).toBeDefined()
+    expect(await categoriaLlamada(USUARIO_A, "Árbol color raro")).toEqual([])
+  })
+
+  it("no deja crear un tercer nivel", async () => {
+    comoUsuario(USUARIO_A)
+    const padre = await crearCategoria("Árbol nivel 1")
+    const hija = await crearCategoria("Árbol nivel 2", { parentId: padre.id })
+
+    const resultado = await createCategory(
+      null,
+      formulario({ name: "Árbol nivel 3", kind: "expense", parentId: hija.id }),
+    )
+
+    expect(rechazo(resultado).message).toBe("Una subcategoría no puede tener subcategorías.")
+    expect(await categoriaLlamada(USUARIO_A, "Árbol nivel 3")).toEqual([])
+  })
+
+  /*
+   * §2.1 del plan: la primera subcategoría de una categoría con movimientos
+   * pide a dónde pasan, por defecto a una "General" nueva. Sin eso, el padre
+   * quedaría con hijas Y con movimientos, que es justo lo que la base prohíbe.
+   */
+  it("la primera subcategoría de una categoría con movimientos los pasa a una General", async () => {
+    comoUsuario(USUARIO_A)
+    const padre = await crearCategoria("Árbol con movimientos")
+    expect(await cargarEgreso("Árbol gasto viejo", padre.id)).toEqual({ ok: true })
+
+    await crearCategoria("Árbol nueva hija", { parentId: padre.id })
+
+    const general = (await categoriaLlamada(USUARIO_A, "General")).find(
+      (c) => c.parentId === padre.id,
+    )
+    expect(general).toBeDefined()
+    const [movido] = await movimientosPorDescripcion(USUARIO_A, "Árbol gasto viejo")
+    expect(movido.categoryId).toBe(general!.id)
+  })
+
+  it("…o a la subcategoría que se está creando, si se elige así", async () => {
+    comoUsuario(USUARIO_A)
+    const padre = await crearCategoria("Árbol con movimientos 2")
+    expect(await cargarEgreso("Árbol gasto viejo 2", padre.id)).toEqual({ ok: true })
+
+    const hija = await crearCategoria("Árbol destino", {
+      parentId: padre.id,
+      movementsTo: "child",
+    })
+
+    const [movido] = await movimientosPorDescripcion(USUARIO_A, "Árbol gasto viejo 2")
+    expect(movido.categoryId).toBe(hija.id)
+    expect(
+      (await categoriaLlamada(USUARIO_A, "General")).some((c) => c.parentId === padre.id),
+    ).toBe(false)
+  })
+
+  it("un movimiento no se puede cargar en una categoría con subcategorías", async () => {
+    comoUsuario(USUARIO_A)
+    const padre = await crearCategoria("Árbol padre lleno")
+    await crearCategoria("Árbol hija de lleno", { parentId: padre.id })
+
+    const resultado = await cargarEgreso("Árbol en el padre", padre.id)
+
+    expect(rechazo(resultado).fieldErrors?.categoryId).toEqual([
+      "Esa categoría tiene subcategorías: elegí una de ellas.",
+    ])
+    expect(await movimientosPorDescripcion(USUARIO_A, "Árbol en el padre")).toEqual([])
+  })
+
+  it("archivar un padre archiva sus hijas, y desarchivar una hija desarchiva el padre", async () => {
+    comoUsuario(USUARIO_A)
+    const padre = await crearCategoria("Árbol para archivar")
+    const hija = await crearCategoria("Árbol hija 1", { parentId: padre.id })
+    const hermana = await crearCategoria("Árbol hija 2", { parentId: padre.id })
+
+    expect(await archiveCategory(padre.id)).toEqual({ ok: true })
+    const archivadas = (await categoriasDe(USUARIO_A)).filter((c) =>
+      [padre.id, hija.id, hermana.id].includes(c.id),
+    )
+    expect(archivadas.every((c) => c.archived)).toBe(true)
+
+    expect(await unarchiveCategory(hija.id)).toEqual({ ok: true })
+    const despues = new Map((await categoriasDe(USUARIO_A)).map((c) => [c.id, c.archived]))
+    expect(despues.get(hija.id)).toBe(false)
+    expect(despues.get(padre.id)).toBe(false)
+    // La hermana queda como estaba: se archivó junto, pero quizás se quiere
+    // dejar archivada.
+    expect(despues.get(hermana.id)).toBe(true)
+  })
+
+  it("mover a… cuelga una categoría de un padre y la vuelve a subir", async () => {
+    comoUsuario(USUARIO_A)
+    const padre = await crearCategoria("Árbol grupo")
+    await crearCategoria("Árbol ya adentro", { parentId: padre.id })
+    const suelta = await crearCategoria("Árbol suelta")
+    expect(await cargarEgreso("Árbol gasto de la suelta", suelta.id)).toEqual({ ok: true })
+
+    expect(
+      await moveCategory(null, formulario({ id: suelta.id, parentId: padre.id })),
+    ).toEqual({ ok: true })
+    let [fila] = await categoriaLlamada(USUARIO_A, "Árbol suelta")
+    expect(fila.parentId).toBe(padre.id)
+    // Sus movimientos no cambian de categoría: ahora la categoría tiene padre.
+    const [gasto] = await movimientosPorDescripcion(USUARIO_A, "Árbol gasto de la suelta")
+    expect(gasto.categoryId).toBe(suelta.id)
+
+    expect(await moveCategory(null, formulario({ id: suelta.id, parentId: "" }))).toEqual({
+      ok: true,
+    })
+    ;[fila] = await categoriaLlamada(USUARIO_A, "Árbol suelta")
+    expect(fila.parentId).toBeNull()
+  })
+
+  it("una categoría con subcategorías no se puede mover abajo de otra", async () => {
+    comoUsuario(USUARIO_A)
+    const padre = await crearCategoria("Árbol padre que no baja")
+    await crearCategoria("Árbol su hija", { parentId: padre.id })
+    const otro = await crearCategoria("Árbol otro padre")
+
+    const resultado = await moveCategory(null, formulario({ id: padre.id, parentId: otro.id }))
+
+    expect(rechazo(resultado).message).toMatch(/Tiene subcategorías/)
+  })
+
+  it("editar cambia nombre, color e icono, y vaciarlos vuelve a lo automático", async () => {
+    comoUsuario(USUARIO_A)
+    const categoria = await crearCategoria("Árbol para editar")
+
+    expect(
+      await updateCategory(
+        null,
+        formulario({ id: categoria.id, name: "Árbol editada", color: "azul", icon: "ocio" }),
+      ),
+    ).toEqual({ ok: true })
+    let [fila] = await categoriaLlamada(USUARIO_A, "Árbol editada")
+    expect(fila).toMatchObject({ color: "azul", icon: "ocio" })
+
+    expect(
+      await updateCategory(
+        null,
+        formulario({ id: categoria.id, name: "Árbol editada", color: "", icon: "" }),
+      ),
+    ).toEqual({ ok: true })
+    ;[fila] = await categoriaLlamada(USUARIO_A, "Árbol editada")
+    expect(fila).toMatchObject({ color: null, icon: null })
+  })
+
+  it("no se puede colgar una subcategoría de la categoría de otro usuario", async () => {
+    comoUsuario(USUARIO_A)
+    const resultado = await createCategory(
+      null,
+      formulario({ name: "Árbol colgada de B", kind: "expense", parentId: CAT_B }),
+    )
+    expect(rechazo(resultado).message).toBe("No encontramos esa categoría padre.")
   })
 })

@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest"
 
 import { buildDashboardView, type DashboardInput } from "@/lib/dashboard-view"
 
+/** Una categoría de egresos, de primer nivel salvo que se diga otra cosa. */
+function cat(id: string, name: string, parentId: string | null = null) {
+  return { id, name, parentId, archived: false, color: null }
+}
+
+/** La torta sin ids, tonos ni desglose: lo que se compara en la mayoría de los casos. */
+function torta(view: ReturnType<typeof buildDashboardView>) {
+  return view.pie.map(({ name, arsCents }) => ({ name, arsCents }))
+}
+
 const BASE: DashboardInput = {
   today: "2026-08-10",
   settings: {
@@ -195,7 +205,7 @@ describe("buildDashboardView", () => {
       // este valor en vez del rate del movimiento, el resultado sería
       // 15.000.000 en vez de 12.000.000.
       todayRate: 1_500,
-      expenseCategories: [{ id: "cat-1", name: "Compras" }],
+      expenseCategories: [cat("cat-1", "Compras")],
       paid: [
         {
           paidDate: "2026-08-07",
@@ -215,7 +225,7 @@ describe("buildDashboardView", () => {
     const expectedArsCents = 12_000_000
 
     expect(view.monthExpenseArsCents).toBe(expectedArsCents)
-    expect(view.pie).toEqual([{ name: "Compras", arsCents: expectedArsCents }])
+    expect(torta(view)).toEqual([{ name: "Compras", arsCents: expectedArsCents }])
     expect(view.bars.find((b) => b.month === "2026-08")?.expenseArsCents).toBe(expectedArsCents)
   })
 
@@ -242,7 +252,7 @@ describe("buildDashboardView", () => {
     const view = buildDashboardView({
       ...BASE,
       today: "2026-09-10",
-      expenseCategories: [{ id: "cat-1", name: "Electro" }],
+      expenseCategories: [cat("cat-1", "Electro")],
       paid: [
         // Televisor en 12 cuotas cargado en agosto: sólo cuentan las dos
         // cuotas pagadas, cada una en su mes de pago, y no el $1.200.000.
@@ -269,7 +279,7 @@ describe("buildDashboardView", () => {
       ],
     })
 
-    expect(view.pie).toEqual([
+    expect(torta(view)).toEqual([
       { name: "Electro", arsCents: 100_000 },
       { name: "Sin categoría", arsCents: 7_000 },
     ])
@@ -288,7 +298,7 @@ describe("buildDashboardView", () => {
   it("la torta y la barra del mes suman lo mismo que la tarjeta, con el corte del saldo inicial", () => {
     const view = buildDashboardView({
       ...BASE,
-      expenseCategories: [{ id: "cat-1", name: "Comida" }],
+      expenseCategories: [cat("cat-1", "Comida")],
       paid: [
         // Antes del saldo inicial (2026-08-05): ya está adentro del saldo.
         { paidDate: "2026-08-01", amountCents: 30_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
@@ -299,7 +309,7 @@ describe("buildDashboardView", () => {
     })
 
     expect(view.monthExpenseArsCents).toBe(10_000)
-    expect(view.pie).toEqual([{ name: "Comida", arsCents: 10_000 }])
+    expect(torta(view)).toEqual([{ name: "Comida", arsCents: 10_000 }])
     expect(view.bars.find((b) => b.month === "2026-08")?.expenseArsCents).toBe(10_000)
     expect(view.bars.find((b) => b.month === "2026-07")?.expenseArsCents).toBe(0)
   })
@@ -420,5 +430,32 @@ describe("buildDashboardView", () => {
         buildDashboardView({ ...BASE, exchanges: [{ ...COMPRA, direction: "compra" }] }),
       ).toThrow(/direction inesperada/)
     })
+  })
+
+  it("la torta agrupa por categoría padre, con el desglose por subcategoría", () => {
+    const view = buildDashboardView({
+      ...BASE,
+      expenseCategories: [
+        cat("hogar", "Hogar"),
+        cat("alquiler", "Alquiler", "hogar"),
+        cat("expensas", "Expensas", "hogar"),
+        cat("ocio", "Ocio"),
+      ],
+      paid: [
+        { paidDate: "2026-08-06", amountCents: 3_000, currency: "ARS", kind: "expense", categoryId: "expensas", rate: "1" },
+        { paidDate: "2026-08-07", amountCents: 50_000, currency: "ARS", kind: "expense", categoryId: "alquiler", rate: "1" },
+        { paidDate: "2026-08-08", amountCents: 20_000, currency: "ARS", kind: "expense", categoryId: "ocio", rate: "1" },
+      ],
+    })
+
+    expect(torta(view)).toEqual([
+      { name: "Hogar", arsCents: 53_000 },
+      { name: "Ocio", arsCents: 20_000 },
+    ])
+    expect(view.pie[0].children.map(({ name, arsCents }) => ({ name, arsCents }))).toEqual([
+      { name: "Alquiler", arsCents: 50_000 },
+      { name: "Expensas", arsCents: 3_000 },
+    ])
+    expect(view.pie[1].children).toEqual([])
   })
 })

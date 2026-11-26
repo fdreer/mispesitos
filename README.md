@@ -45,11 +45,11 @@ falta para señalar estado.
 | `/` | Sin landing: con sesión va al dashboard, sin sesión a `/login` |
 | `/login`, `/registro` | Correo y contraseña, más "Continuar con Google". En una instalación vacía, `/registro` crea la cuenta de administrador; después, sólo con invitación |
 | `/invitacion/<token>` | El link que comparte el admin: guarda la invitación y manda a `/registro` |
-| `/onboarding` | Saldo inicial en pesos y en dólares, el TC al que se compraron esos dólares, la fecha desde la que se cuenta, y qué dólar usar de referencia. Precarga 15 categorías |
-| `/dashboard` | Saldos por moneda, total consolidado, vencimientos del próximo mes, proyección a 6 meses, gastos del mes por categoría y lo cobrado y pagado en los últimos 12 meses. Todo lo que habla de "el mes" cuenta lo percibido: cuotas pagadas, por su fecha de pago |
-| `/ingresos`, `/egresos` | Alta con plan de cuotas editable, lista con filtros. Cada fila muestra la próxima cuota ("Cuota 3/12 · vence 15/12") y la paga en un toque, con "Deshacer"; cada cuota se puede marcar con otra fecha de pago (nunca futura). Editar y Borrar en el menú ⋯ de la fila |
+| `/onboarding` | Saldo inicial en pesos y en dólares, el TC al que se compraron esos dólares, la fecha desde la que se cuenta, y qué dólar usar de referencia. Precarga las categorías por default, ya agrupadas (Hogar › Alquiler, Comida › Supermercado…) y con color e icono |
+| `/dashboard` | Saldos por moneda, total consolidado, vencimientos del próximo mes, proyección a 6 meses, gastos del mes por categoría padre (con el desglose por subcategoría a un clic) y lo cobrado y pagado en los últimos 12 meses. Todo lo que habla de "el mes" cuenta lo percibido: cuotas pagadas, por su fecha de pago |
+| `/ingresos`, `/egresos` | Alta con plan de cuotas editable y un selector de categoría con búsqueda, agrupado por padre, que recuerda la última usada; lista con filtros (filtrar por un padre trae lo de sus subcategorías). Cada fila muestra la próxima cuota ("Cuota 3/12 · vence 15/12") y la paga en un toque, con "Deshacer"; cada cuota se puede marcar con otra fecha de pago (nunca futura). Editar y Borrar en el menú ⋯ de la fila |
 | `/cambios` | Compra y venta de dólares, tenencia, TC promedio ponderado y diferencia de cambio realizada |
-| `/categorias` | ABM con archivado. Las archivadas dejan de ofrecerse en la carga pero siguen mostrándose en los movimientos viejos |
+| `/categorias` | Árbol de dos niveles: cada categoría con sus subcategorías, plegables, con color (de una paleta fija) e icono. Desde el menú ⋯ de cada fila: agregar subcategoría, editar, "Mover a…" (para agrupar las que ya existían) y archivar. Archivar un padre archiva sus hijas; las archivadas dejan de ofrecerse en la carga pero siguen mostrándose en los movimientos viejos |
 | `/ajustes` | Editar el saldo inicial y la preferencia de dólar |
 | `/ajustes/usuarios` | Sólo admin: generar y revocar invitaciones, quitar o devolver el acceso |
 
@@ -249,3 +249,14 @@ corras contra producción, ni dos veces en paralelo.**
   el `user_id` y el `kind`, así que un movimiento no puede referenciar la categoría de
   otro usuario ni una de un tipo que no le corresponde, aunque el código se olvide de
   chequearlo. Una cuota marcada como pagada no puede quedar sin fecha de pago.
+- **Las categorías son un árbol de dos niveles** (`category.parent_id`, migración 0011).
+  La base hace cumplir las reglas: el padre es del mismo usuario y tipo (FK compuesta),
+  no hay tercer nivel, y un movimiento sólo apunta a una categoría hoja (triggers; los de
+  "sólo hojas" son diferidos para que crear la primera subcategoría y pasarle los
+  movimientos del padre entre en una sola transacción). La lógica del árbol —armado,
+  opciones del selector, colores heredados, la torta por padre— vive en
+  `src/lib/category-tree.ts`.
+- **El color de una categoría** es una clave de una paleta fija (`CATEGORY_PALETTE` en
+  `src/lib/category-color.ts`), no un color libre: así ninguno se confunde con los de
+  estado. Sin color elegido, la subcategoría hereda el del padre, y el padre sale del
+  hash de su nombre, como antes.

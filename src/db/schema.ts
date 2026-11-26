@@ -53,12 +53,59 @@ export const category = pgTable(
     /** "income" | "expense" */
     kind: text("kind").notNull(),
     archived: boolean("archived").notNull().default(false),
+    /**
+     * La categoría padre, o null si es de primer nivel (§2.1 del plan v2).
+     * Dos niveles y no más: lo hace cumplir el trigger
+     * `category_two_levels` (migración 0011), no el formulario. La FK no es
+     * sobre esta columna sola: es compuesta con `user_id` y `kind`, ver
+     * abajo.
+     */
+    parentId: text("parent_id"),
+    /**
+     * Clave de la paleta fija de `@/lib/category-color` ("azul", "violeta"…),
+     * no un color CSS libre: la paleta es la que garantiza el contraste y que
+     * ningún tono se confunda con los de estado. Null = sin elección: la
+     * subcategoría hereda el del padre y la de primer nivel cae al hash del
+     * nombre, que es lo que todas tenían antes de la 0011.
+     */
+    color: text("color"),
+    /** Nombre de un icono de la lista curada de `@/lib/category-icons`. */
+    icon: text("icon"),
   },
   (t) => [
-    // Único sólo entre las activas: permite archivar "Ocio" y volver a crearla.
+    /*
+     * Único sólo entre las activas (permite archivar "Ocio" y volver a
+     * crearla) y, desde la 0011, sólo entre HERMANAS: "Hogar › General" y
+     * "Comida › General" conviven. El `coalesce` es para que las de primer
+     * nivel, con `parent_id` nulo, choquen entre sí: en un índice único dos
+     * NULL nunca son iguales.
+     */
     uniqueIndex("category_active_unique")
-      .on(t.userId, t.name, t.kind)
+      .on(t.userId, t.kind, sql`coalesce(${t.parentId}, '')`, t.name)
       .where(sql`archived = false`),
+    index("category_parent_idx").on(t.parentId),
+    /**
+     * El padre tiene que ser del mismo usuario y del mismo tipo. Mismo patrón
+     * que la FK de `movement` (migraciones 0006 y 0008): la FK la evalúa el
+     * dueño de la tabla, que ve TODAS las filas, así que una FK sobre
+     * `parent_id` sola dejaría colgar una categoría de la de otro usuario.
+     * MATCH SIMPLE: con `parent_id` nulo no exige nada.
+     *
+     * NO ACTION, ni CASCADE ni RESTRICT. No CASCADE: las categorías no se
+     * borran (se archivan), y si algún día se borra una, que no se lleve a
+     * sus hijas en silencio. No RESTRICT: RESTRICT se chequea fila por fila,
+     * en el momento, y un DELETE que se lleva al padre y a sus hijas en la
+     * MISMA sentencia —la cascada desde `user` al borrar una cuenta, o la
+     * limpieza de los tests— podía fallar según el orden en que Postgres
+     * recorriera las filas. NO ACTION protege lo mismo pero mira al final de
+     * la sentencia, cuando las hijas ya no están.
+     */
+    foreignKey({
+      columns: [t.userId, t.kind, t.parentId],
+      foreignColumns: [t.userId, t.kind, t.id],
+      name: "category_user_id_kind_parent_id_category_user_id_kind_id_fk",
+    }).onDelete("no action"),
+    check("category_not_own_parent", sql`"parent_id" IS NULL OR "parent_id" <> "id"`),
     index("category_user_idx").on(t.userId),
     // Redundante como unicidad (id ya es PK), pero es el destino obligatorio de
     // la FK compuesta de `movement`: Postgres exige que las columnas
@@ -105,6 +152,9 @@ export const movement = pgTable(
   },
   (t) => [
     index("movement_user_date_idx").on(t.userId, t.date),
+    // Lo consultan los triggers de categoría hoja (migración 0011) y el
+    // filtro por categoría de los listados.
+    index("movement_category_idx").on(t.categoryId),
     // Destino de la FK compuesta de `installment`. Ver migración 0006.
     unique("movement_user_id_id_unique").on(t.userId, t.id),
     /**
