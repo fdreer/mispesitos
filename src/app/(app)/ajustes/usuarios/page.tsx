@@ -56,7 +56,7 @@ export default async function UsuariosPage() {
 
       <Card size="sm">
         <CardHeader>
-          <CardTitle className="text-base">Con acceso</CardTitle>
+          <CardTitle className="text-base">Cuentas</CardTitle>
           <CardDescription>{users.length === 1 ? "1 persona" : `${users.length} personas`}</CardDescription>
         </CardHeader>
         <CardContent>

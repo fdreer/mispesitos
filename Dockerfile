@@ -13,7 +13,11 @@ RUN corepack enable
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+# node_modules plano (como npm) y no el de symlinks de pnpm: con el layout
+# de pnpm, el trazado de la build standalone deja afuera dependencias que Next
+# resuelve en runtime (p. ej. @swc/helpers) y server.js no arranca. Fuera de
+# Docker el proyecto sigue usando el layout normal de pnpm.
+RUN pnpm install --frozen-lockfile --node-linker=hoisted
 
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
@@ -23,9 +27,14 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
 # Valores de mentira SOLO para compilar: src/db/client.ts y better-auth los
 # exigen al cargar los módulos, pero ninguna página se prerenderiza contra la
 # base. Los de verdad llegan en runtime por variables de entorno.
+#
+# `next build` directo y no `pnpm build`: antes de correr un script, pnpm
+# verifica las dependencias y, como el proyecto no declara node-linker
+# hoisted, reinstala node_modules con symlinks y vuelve el problema de arriba.
 RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" \
     BETTER_AUTH_SECRET="build-only-secret-not-used-at-runtime-0000" \
-    pnpm build
+    BETTER_AUTH_URL="http://localhost:3000" \
+    ./node_modules/.bin/next build
 
 FROM base AS migrator
 ENV NODE_ENV=production
