@@ -3,12 +3,12 @@
 App web de finanzas personales: ingresos, egresos en cuotas, compra y venta de
 dólares, y un dashboard con saldo, deudas y flujo proyectado.
 
-**Es privada y se instala donde quieras** (tu servidor con Docker, o Vercel +
-Supabase). No es un servicio abierto: quien la instala crea la primera cuenta,
-que queda como administradora, y el resto entra sólo por invitación. Cada
-persona lleva sus propias finanzas y nadie ve las de otro, tampoco el admin.
-Ver [Acceso privado e invitaciones](#acceso-privado-e-invitaciones) e
-[Instalación propia](#instalación-propia-docker).
+**Es privada y self-hosted por defecto** (corre en tu máquina o servidor con
+Docker Compose y Postgres propio). No es un servicio abierto: quien la instala
+crea la primera cuenta, que queda como administradora, y el resto entra sólo por
+invitación. Cada persona lleva sus propias finanzas y nadie ve las de otro,
+tampoco el admin. Ver [Instalación rápida (Docker)](#instalación-rápida-docker)
+y [Acceso privado e invitaciones](#acceso-privado-e-invitaciones).
 
 - Diseño: `docs/superpowers/specs/2026-08-09-mis-pesitos-design.md`
 - Sistema visual: `docs/superpowers/specs/2026-08-10-linear-design-system-design.md`
@@ -17,8 +17,9 @@ Ver [Acceso privado e invitaciones](#acceso-privado-e-invitaciones) e
 
 ## Stack
 
-Next.js 16 · React 19 · TypeScript · Tailwind 4 · shadcn/ui · Drizzle · Postgres
-(propio o Supabase) · better-auth · Recharts · Vitest. Gestor de paquetes: **pnpm**.
+Next.js 16 · React 19 · TypeScript · Tailwind 4 · shadcn/ui · Drizzle ·
+Postgres 17 · Docker · better-auth · Recharts · Vitest. Gestor de paquetes:
+**pnpm**.
 
 ## El sistema visual
 
@@ -56,70 +57,59 @@ falta para señalar estado.
 | `/ajustes` | Editar el saldo inicial y la preferencia de dólar |
 | `/ajustes/usuarios` | Sólo admin: generar y revocar invitaciones, quitar o devolver el acceso |
 
-## Puesta en marcha
+## Instalación rápida (Docker)
 
-1. `pnpm install`
-2. Copiar `.env.example` a `.env.local` y completarlo:
-   - `DATABASE_URL` y `MIGRATION_DATABASE_URL` — ver la sección de abajo, son dos
-     cadenas distintas y ninguna reemplaza a la otra.
-   - `BETTER_AUTH_SECRET` — `openssl rand -base64 32`
-   - `BETTER_AUTH_URL` — `http://localhost:3100`. Tiene que coincidir **exacto** con
-     el puerto en el que corre el servidor (`pnpm dev` levanta en el **3100**, no en
-     el 3000): si no coincide, better-auth rechaza todo con `INVALID_ORIGIN`.
-3. `pnpm db:setup` — crea los roles que falten, aplica las migraciones y, si
-   definiste `APP_USER_PASSWORD`, le pone esa contraseña a `app_user`. Es
-   idempotente. (`pnpm db:migrate` sigue existiendo y sólo migra.)
-4. Si no usaste `APP_USER_PASSWORD`, poner la contraseña de `app_user` a mano
-   (ver más abajo).
-5. `pnpm dev` y abrir `http://localhost:3100`. La primera cuenta que crees es
-   la de administrador.
+Necesitás Docker con Compose (Windows, macOS o Linux). Levanta Postgres 17,
+prepara la base y arranca la app **sin crear ningún `.env`**:
 
-### Dos cadenas de conexión, no una
+1. Descargá `docker-compose.yml` y corré:
+   ```bash
+   docker compose up -d
+   ```
+2. Abrí `http://localhost:3000` y creá la cuenta de administrador.
 
-`DATABASE_URL` y `MIGRATION_DATABASE_URL` apuntan a roles distintos a propósito.
-No unificarlas: de esa separación depende la segunda capa de autorización de la app.
+Si lo publicás con un dominio propio (detrás de Caddy, Nginx o Traefik), creá un
+`.env` a partir de `.env.example` al menos con `BETTER_AUTH_URL` (ej.
+`https://pesitos.midominio.com`): con ella se arman los links de invitación y se
+valida el origen. Si no definís `BETTER_AUTH_SECRET`, se genera automáticamente
+en el volumen `appdata` en el primer arranque.
 
-- **`DATABASE_URL`** — el rol de aplicación **`app_user`**, que **no** tiene
-  `BYPASSRLS`. Es la que usa la app (`src/db/client.ts`) para todo, siempre.
-- **`MIGRATION_DATABASE_URL`** — el rol dueño de las tablas (`postgres`), sólo para
-  DDL. Es la que usan los scripts `db:*` (drizzle-kit).
+Para actualizar a la última versión:
 
-**Por qué importa:** en Supabase el rol `postgres` tiene el atributo `BYPASSRLS`,
-que le gana incluso a `FORCE ROW LEVEL SECURITY`. Si al desplegar `DATABASE_URL`
-queda apuntando al rol dueño en vez de a `app_user`, el aislamiento entre usuarios
-desaparece: cualquier consulta que se olvide de pasar por `withUser()` devuelve
-filas de todos los usuarios en vez de cero, y nada falla a la vista.
-
-Contra eso hay un guard **en la app, no en los tests**: `src/db/client.ts` consulta
-`pg_roles` y `src/lib/rls-guard.ts` decide, y si el rol conecta con `BYPASSRLS` (o
-como superusuario) tira una excepción. Corre una vez por proceso, en el primer
-`withUser()`, y a partir de ahí no pasa ninguna consulta: la app no arranca a
-medias, deja de funcionar. O sea que no vas a desplegar en silencio con la cadena
-equivocada — pero te vas a enterar recién con el primer request, así que verificá
-la variable antes.
-
-Aparte, y por otro camino, `pnpm test:db` corre `src/db/rls.db.test.ts`, que es el
-test de integración del aislamiento en sí: verifica contra la base real que un
-usuario no ve las filas de otro.
-
-### Contraseña de `app_user` (una sola vez)
-
-Lo más simple: definí `APP_USER_PASSWORD` y corré `pnpm db:setup`, que la aplica
-sola. Si preferís hacerlo a mano, seguí leyendo.
-
-La migración 0004 crea el rol `app_user` **sin contraseña y sin LOGIN**, a
-propósito: una contraseña adentro de una migración queda commiteada en git para
-siempre. Después de `pnpm db:migrate`, conectate como `postgres`
-(`MIGRATION_DATABASE_URL`) y aplicale una contraseña a mano:
-
-```sql
--- generar la contraseña (hex, no base64, para no tener que escapar nada en la URL):
--- openssl rand -hex 24
-ALTER ROLE app_user LOGIN PASSWORD '<la-generada>';
+```bash
+docker compose pull && docker compose up -d
 ```
 
-Ese valor va solamente en `DATABASE_URL`, dentro de `.env.local` (ignorado por
-git) y en las variables de entorno del hosting. En ningún archivo versionado.
+Qué corre:
+
+- **`db`**: Postgres 17 con los datos en el volumen `pgdata`.
+- **`migrate`**: corre `scripts/db-setup.mjs` y termina. Crea los roles de RLS
+  (`anon` y `authenticated`), aplica las migraciones de `./drizzle` y fija la
+  contraseña de `app_user`. Es idempotente y corre en cada `up`, así que
+  actualizar es simplemente `docker compose pull && docker compose up -d`.
+- **`app`**: la build `standalone` de Next, conectada como `app_user` (nunca
+  como `postgres`), en el puerto `APP_PORT` (3000 por defecto) y con healthcheck
+  en `/api/health`.
+
+Para HTTPS poné adelante el reverse proxy que uses (Caddy, Nginx, Traefik). Si
+es Nginx, desactivá el buffering de respuestas para que el streaming de Next
+funcione.
+
+**Backups.** Un volcado de la base:
+
+```bash
+docker compose exec db pg_dump -U postgres -Fc mispesitos > mispesitos-$(date +%F).dump
+```
+
+y para restaurarlo en una base vacía:
+
+```bash
+docker compose exec -T db pg_restore -U postgres -d mispesitos --clean --if-exists < archivo.dump
+```
+
+*(Si preferís desplegarlo con un Postgres externo o en otra plataforma de Node,
+`pnpm db:setup` funciona contra cualquier Postgres 15+ y la app corre en
+cualquier hosting Node 24+ con las variables de `.env.example`.)*
 
 ## Acceso privado e invitaciones
 
@@ -138,58 +128,64 @@ git) y en las variables de entorno del hosting. En ningún archivo versionado.
 - **El admin no ve finanzas ajenas.** La pantalla de usuarios sólo lee las tablas
   de auth; los datos de cada uno siguen detrás de RLS.
 
-## Instalación propia (Docker)
+## Desarrollo local
 
-Necesitás Docker con Compose (Windows, macOS o Linux). Levanta Postgres, prepara
-la base y arranca la app **sin crear ningún `.env`**:
+Para correr la app fuera de Docker contra un Postgres local:
 
-1. Descargá `docker-compose.yml` y corré:
-   ```bash
-   docker compose up -d
-   ```
-2. Abrí `http://localhost:3000` y creá la cuenta de administrador.
+1. `pnpm install`
+2. Copiar `.env.example` a `.env.local` y descomentar/completar la sección de
+   desarrollo local:
+   - `DATABASE_URL` y `MIGRATION_DATABASE_URL` — ver la sección de abajo, son dos
+     cadenas distintas y ninguna reemplaza a la otra.
+   - `APP_USER_PASSWORD` — `openssl rand -hex 24`
+   - `BETTER_AUTH_SECRET` — `openssl rand -base64 32`
+   - `BETTER_AUTH_URL` — `http://localhost:3100`. Tiene que coincidir **exacto** con
+     el puerto en el que corre el servidor (`pnpm dev` levanta en el **3100**, no en
+     el 3000): si no coincide, better-auth rechaza todo con `INVALID_ORIGIN`.
+3. `pnpm db:setup` — crea los roles que falten, aplica las migraciones y le pone
+   `APP_USER_PASSWORD` a `app_user`. Es idempotente. (`pnpm db:migrate` sigue
+   existiendo y sólo migra.)
+4. `pnpm dev` y abrir `http://localhost:3100`. La primera cuenta que crees es
+   la de administrador.
 
-Si lo publicás con un dominio propio (detrás de Caddy, Nginx o Traefik), creá un
-`.env` a partir de `.env.selfhost.example` al menos con `BETTER_AUTH_URL` (ej.
-`https://pesitos.midominio.com`): con ella se arman los links de invitación y se
-valida el origen. Si no definís `BETTER_AUTH_SECRET`, se genera automáticamente
-en el volumen `appdata` en el primer arranque.
+### Dos cadenas de conexión, no una
 
-Para actualizar a la última versión:
+`DATABASE_URL` y `MIGRATION_DATABASE_URL` apuntan a roles distintos a propósito.
+No unificarlas: de esa separación depende la segunda capa de autorización de la app.
 
-```bash
-docker compose pull && docker compose up -d
+- **`DATABASE_URL`** — el rol de aplicación **`app_user`**, que **no** tiene
+  `BYPASSRLS` ni `SUPERUSER`. Es la que usa la app (`src/db/client.ts`) para todo, siempre.
+- **`MIGRATION_DATABASE_URL`** — el rol dueño de las tablas (`postgres`), sólo para
+  DDL. Es la que usan los scripts `db:*` (drizzle-kit y `scripts/db-setup.mjs`).
+
+**Por qué importa:** en Postgres el rol `postgres` es superusuario (y/o tiene
+`BYPASSRLS`), lo que le gana incluso a `FORCE ROW LEVEL SECURITY`. Si al desplegar
+`DATABASE_URL` queda apuntando al rol dueño en vez de a `app_user`, el aislamiento
+entre usuarios desaparece: cualquier consulta que se olvide de pasar por `withUser()`
+devuelve filas de todos los usuarios en vez de cero, y nada falla a la vista.
+
+Contra eso hay un guard **en la app, no en los tests**: `src/db/client.ts` consulta
+`pg_roles` y `src/lib/rls-guard.ts` decide, y si el rol conecta con `BYPASSRLS` o
+como superusuario tira una excepción. Corre una vez por proceso, en el primer
+`withUser()`, y a partir de ahí no pasa ninguna consulta: la app no arranca a
+medias, deja de funcionar.
+
+Aparte, y por otro camino, `pnpm test:db` corre `src/db/rls.db.test.ts`, que es el
+test de integración del aislamiento en sí: verifica contra la base real que un
+usuario no ve las filas de otro.
+
+### Contraseña de `app_user`
+
+Lo más simple: definí `APP_USER_PASSWORD` y corré `pnpm db:setup` (en Docker
+Compose lo hace el servicio `migrate` automáticamente). Si preferís hacerlo a
+mano, la migración 0004 crea `app_user` sin contraseña ni `LOGIN` para no dejar
+secretos en git; después de `pnpm db:migrate` conectate como `postgres` y corré:
+
+```sql
+-- generar la contraseña (hex, no base64, para no tener que escapar nada en la URL):
+-- openssl rand -hex 24
+ALTER ROLE app_user LOGIN PASSWORD '<la-generada>';
 ```
-
-Qué corre:
-
-- **`db`**: Postgres 17 con los datos en el volumen `pgdata`.
-- **`migrate`**: corre `scripts/db-setup.mjs` y termina. En un Postgres común
-  no existen los roles `anon` y `authenticated` que Supabase trae de fábrica y
-  que usan las migraciones de RLS: el script los crea. Corre en cada `up`, así
-  que actualizar es `git pull && docker compose up -d --build`.
-- **`app`**: la build `standalone` de Next, conectada como `app_user` (nunca
-  como `postgres`), en el puerto `APP_PORT` (3000 por defecto).
-
-Para HTTPS poné adelante el proxy que uses (Caddy, nginx, Traefik). Si es nginx,
-desactivá el buffering de respuestas para que el streaming de Next funcione.
-
-**Backups.** Un volcado de la base:
-
-```bash
-docker compose exec db pg_dump -U postgres -Fc mispesitos > mispesitos-$(date +%F).dump
-```
-
-y para restaurarlo en una base vacía:
-
-```bash
-docker compose exec -T db pg_restore -U postgres -d mispesitos --clean --if-exists < archivo.dump
-```
-
-**Postgres externo o Supabase.** Sin Docker para la base: `pnpm db:setup` con
-`MIGRATION_DATABASE_URL` (y `APP_USER_PASSWORD`) prepara cualquier Postgres 15+,
-y la app corre en cualquier hosting de Node (o en Vercel) con `DATABASE_URL`
-apuntando a `app_user`.
 
 ## Comandos
 

@@ -6,14 +6,11 @@ import { findUsableInvitation } from "@/server/access"
 /**
  * El link que comparte el admin: /invitacion/<token>.
  *
- * Guarda el token en una cookie y manda a /registro. Va en cookie, y no como
- * parámetro del formulario, porque el alta con Google crea el usuario en el
- * callback de OAuth, a donde no llega ningún campo nuestro: lo único que viaja
- * con el navegador hasta ahí son las cookies. El hook de src/auth.ts la lee en
- * los dos caminos.
+ * Guarda el token en una cookie HttpOnly y manda a /registro. El hook de
+ * src/auth.ts lee esa cookie al crear el usuario y consume la invitación.
  *
  * Los redirects se arman sobre BETTER_AUTH_URL y no sobre `request.url`:
- * detrás de un proxy (el caso normal en self-hosted) `request.url` puede ser la
+ * detrás de un reverse proxy (Caddy, Nginx, Traefik) `request.url` puede ser la
  * dirección interna del contenedor.
  */
 export async function GET(
@@ -33,8 +30,6 @@ export async function GET(
   const response = NextResponse.redirect(new URL("/registro", base))
   response.cookies.set(INVITE_COOKIE, token, {
     httpOnly: true,
-    // Lax y no Strict: la cookie tiene que viajar en la vuelta desde Google,
-    // que es una navegación de nivel superior iniciada por otro sitio.
     sameSite: "lax",
     secure: base.startsWith("https://"),
     path: "/",

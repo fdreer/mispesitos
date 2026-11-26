@@ -26,9 +26,6 @@
 # env files
 .env*.local
 
-# vercel
-.vercel
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
@@ -43,5 +40,5 @@ next-env.d.ts
 /.superpowers/
 skills-lock.json
 
-# Variables de la instalación propia con Docker Compose (ver .env.selfhost.example)
+# Variables de entorno para Docker Compose (ver .env.example)
 /.env

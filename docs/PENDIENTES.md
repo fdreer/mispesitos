@@ -88,15 +88,17 @@ una categoría borrada.
 Mientras tanto, para borrar un usuario a mano: primero las cuotas, después los
 movimientos, después el resto.
 
-### 3.2 Las migraciones no son portables fuera de Supabase
+### 3.2 ~~Las migraciones no son portables fuera de Supabase~~
 
-La `0001` revoca privilegios a `anon` y `authenticated`, y la `0004` hace
-`GRANT authenticated TO app_user`: los tres roles tienen que preexistir. Contra un
-Postgres que no sea Supabase, `pnpm db:migrate` muere en la primera.
+**Resuelto.** El proyecto es self-hosted por defecto: `scripts/db-setup.mjs`
+(`pnpm db:setup` y el servicio `migrate` de `docker-compose.yml`) crea los roles
+`anon` y `authenticated` si no existen antes de correr las migraciones de
+`./drizzle` y configura `app_user`.
 
-Además ni la `0006` ni la `0008` son idempotentes (`ADD CONSTRAINT` y
-`DROP CONSTRAINT` sin `IF EXISTS`). No molesta porque drizzle-kit no reaplica lo
-que ya registró, pero no se pueden correr dos veces a mano.
+Sigue vigente que ni la `0006` ni la `0008` son idempotentes (`ADD CONSTRAINT` y
+`DROP CONSTRAINT` sin `IF EXISTS`). No molesta porque drizzle-kit /
+`db-setup.mjs` no reaplican lo que ya registraron, pero no se pueden correr dos
+veces a mano.
 
 ### 3.3 Detalles de interfaz
 
@@ -233,11 +235,10 @@ Cuatro cosas que fallan en producción y no en desarrollo:
    paso manual: la migración crea el rol sin contraseña a propósito, para no dejar
    un secreto commiteado. Sin ese paso la app no conecta, y el error no se
    distingue de "la base está caída".
-3. **`BETTER_AUTH_URL` con el dominio real**, y la URI de redirección de
-   producción agregada en Google Cloud
-   (`https://<dominio>/api/auth/callback/google`). Si no coinciden exacto,
-   better-auth rechaza todo con `INVALID_ORIGIN` y Google con
-   `redirect_uri_mismatch`.
+3. **`BETTER_AUTH_URL` con el dominio real** cuando se publica detrás de un
+   reverse proxy. Si no coincide exacto con el esquema y dominio desde el que
+   entra el navegador, better-auth rechaza los requests con `INVALID_ORIGIN` y
+   los links de invitación salen con la URL equivocada.
 4. **No correr `pnpm test:db` contra producción.** Siembra y borra filas con ids
    fijos sobre una base real.
 

@@ -8,12 +8,10 @@ export default defineConfig({
     // Las pruebas comparten filas en una base real: no pueden correr en paralelo.
     fileParallelism: false,
     /**
-     * La base es remota (Supabase) y cada withUser() es una transacción con
-     * varios viajes de ida y vuelta: sembrar y limpiar un caso completo no
-     * entra en los 10s de default y el hook se corta por tiempo. Los defaults
-     * de Vitest están pensados para tests en memoria; acá cada aserción cuesta
-     * red. Sólo aplica a los *.db.test.ts: la suite unitaria (vitest.config.ts)
-     * conserva los suyos.
+     * Cada withUser() es una transacción real contra Postgres: sembrar y
+     * limpiar un caso completo puede exceder los 10s de default de Vitest en
+     * máquinas lentas o contra una base remota. Sólo aplica a los *.db.test.ts:
+     * la suite unitaria (vitest.config.ts) conserva los suyos.
      */
     hookTimeout: 60_000,
     testTimeout: 30_000,

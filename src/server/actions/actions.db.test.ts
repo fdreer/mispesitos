@@ -1847,8 +1847,8 @@ describe("saveSettings", () => {
    * otro request. El mensaje miente.
    *
    * `Promise.all` no fuerza el orden por sí solo: lo que abre la ventana es que
-   * cada llamada hace un viaje de red real a Supabase antes de decidir qué
-   * rama tomar, y ese viaje de red tarda muchísimo más que lo que tarda el
+   * cada llamada hace una consulta real a Postgres antes de decidir qué
+   * rama tomar, y ese viaje de I/O tarda muchísimo más que lo que tarda el
    * event loop en arrancar la segunda llamada. Las dos SELECT quedan pedidas
    * antes de que cualquiera de las dos INSERT haya viajado.
    */

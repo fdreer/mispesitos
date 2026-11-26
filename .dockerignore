@@ -3,7 +3,7 @@ node_modules
 .git
 .env
 .env.*
-!.env.selfhost.example
+!.env.example
 coverage
 .claude
 .agents

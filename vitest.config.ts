@@ -23,8 +23,8 @@ export default defineConfig({
      * ocupada.
      *
      * 20 s es holgura de sobra para los dos y sigue siendo bien menos que los
-     * 30 s de `vitest.db.config.ts`, donde cada aserción cuesta un viaje de red
-     * a Supabase. Acá no hay red: si un test unitario tarda 20 s, está colgado
+     * 30 s de `vitest.db.config.ts`, donde cada aserción pega contra Postgres
+     * real. Acá no hay red: si un test unitario tarda 20 s, está colgado
      * de verdad y el rojo por tiempo es la respuesta correcta.
      */
     testTimeout: 20_000,

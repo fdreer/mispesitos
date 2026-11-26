@@ -23,8 +23,8 @@ if (!connectionString) {
 }
 
 /**
- * `prepare: false` es obligatorio contra el transaction pooler de Supabase:
- * pgbouncer en modo transacción no soporta prepared statements con nombre.
+ * `prepare: false` mantiene compatibilidad si se usa un pooler en modo
+ * transacción (como PgBouncer); contra Postgres directo no tiene impacto.
  */
 export const sqlClient = postgres(connectionString, { prepare: false })
 
@@ -33,13 +33,12 @@ export const db = drizzle(sqlClient, { schema })
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 /**
- * Si el rol de conexión tiene BYPASSRLS, las policies no se evalúan y el
- * aislamiento entre usuarios desaparece SIN UN SOLO ERROR: la app anda igual de
- * bien y una consulta que se olvidó de filtrar devuelve datos de todos. Ese modo
- * de falla silencioso es la razón de esta verificación. También cubre el rol
- * superusuario (rolsuper): en Supabase no muerde porque su `postgres` no lo es,
- * pero contra un Postgres local o self-hosted un superusuario saltea RLS igual
- * que BYPASSRLS.
+ * Si el rol de conexión tiene BYPASSRLS o es superusuario (rolsuper), las
+ * policies de RLS no se evalúan y el aislamiento entre usuarios desaparece SIN
+ * UN SOLO ERROR: la app anda igual de bien y una consulta que se olvidó de
+ * filtrar devuelve datos de todos. Ese modo de falla silencioso es la razón de
+ * esta verificación. En un Postgres propio `postgres` es superusuario, así que
+ * conectar la app con él saltearía RLS por completo.
  *
  * La consulta en sí vive acá, que es quien tiene `db`. Qué hacer con lo que
  * devuelve —rechazar por BYPASSRLS, por rolsuper, o porque no vino ninguna
