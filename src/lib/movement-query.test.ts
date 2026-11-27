@@ -7,6 +7,7 @@ import {
   defaultSortForKind,
   hayFiltrosActivos,
   movementFiltersFromQuery,
+  nextHeaderSort,
   paginate,
   parseMovementQuery,
 } from "@/lib/movement-query"
@@ -25,6 +26,7 @@ describe("parseMovementQuery", () => {
       minCents: null,
       maxCents: null,
       sort: "date",
+      dir: "desc",
       page: 1,
     })
   })
@@ -61,6 +63,7 @@ describe("parseMovementQuery", () => {
       minCents: 100_000,
       maxCents: 250_050,
       sort: "amount",
+      dir: "desc",
       page: 3,
     })
   })
@@ -279,5 +282,45 @@ describe("buildMovementHref", () => {
         { tab: "flujo", moneda: "USD" },
       ),
     ).toBe("/informes?tab=flujo&moneda=USD&from=2026-11-01&to=2026-11-30")
+  })
+})
+
+describe("orden por encabezado (dir)", () => {
+  it("lee sort y dir nuevos, y un dir inventado cae en el natural del orden", () => {
+    expect(parseMovementQuery({ sort: "description" })).toMatchObject({ sort: "description", dir: "asc" })
+    expect(parseMovementQuery({ sort: "category", dir: "desc" })).toMatchObject({
+      sort: "category",
+      dir: "desc",
+    })
+    expect(parseMovementQuery({ sort: "amount", dir: "arriba" }).dir).toBe("desc")
+    expect(parseMovementQuery({}, "due").dir).toBe("asc")
+  })
+
+  it("escribe dir sólo cuando no es el natural, y cambiar el orden vuelve a la página 1", () => {
+    const enPagina3 = parseMovementQuery({ page: "3" }, "due")
+    expect(buildMovementHref("/egresos", enPagina3, { sort: "amount", dir: "asc" }, "due")).toBe(
+      "/egresos?sort=amount&dir=asc",
+    )
+    expect(buildMovementHref("/egresos", enPagina3, { sort: "amount", dir: "desc" }, "due")).toBe(
+      "/egresos?sort=amount",
+    )
+    expect(buildMovementHref("/egresos", enPagina3, { dir: "desc" }, "due")).toBe("/egresos?dir=desc")
+  })
+
+  it("cambiar de orden sin decir el sentido arranca en el natural", () => {
+    const fechaAsc = parseMovementQuery({ sort: "date", dir: "asc" }, "due")
+    expect(buildMovementHref("/egresos", fechaAsc, { sort: "description" }, "due")).toBe(
+      "/egresos?sort=description",
+    )
+  })
+
+  it("el ciclo de clicks: natural → invertido → default", () => {
+    const q = parseMovementQuery({}, "due")
+    const uno = nextHeaderSort(q, "amount", "due")
+    expect(uno).toEqual({ sort: "amount", dir: "desc" })
+    const dos = nextHeaderSort(uno, "amount", "due")
+    expect(dos).toEqual({ sort: "amount", dir: "asc" })
+    expect(nextHeaderSort(dos, "amount", "due")).toEqual({ sort: "due", dir: "asc" })
+    expect(nextHeaderSort(q, "description", "due")).toEqual({ sort: "description", dir: "asc" })
   })
 })

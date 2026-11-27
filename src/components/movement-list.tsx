@@ -1,18 +1,19 @@
 "use client"
 
-import { Fragment, useState, useTransition } from "react"
+import { useState, useTransition } from "react"
 import Link from "next/link"
-import { ChevronDown, ChevronRight, CreditCard } from "lucide-react"
+import { CreditCard } from "lucide-react"
 
 import { CategoryBadge } from "@/components/category-badge"
-import { InstallmentRows, InstallmentTableRows } from "@/components/installment-rows"
+import { InstallmentRows } from "@/components/installment-rows"
 import { MovementFormDialog } from "@/components/movement-form-dialog"
 import {
   MovementRowActions,
   nextInstallmentText,
   PayNextButton,
 } from "@/components/movement-row-actions"
-import { StatusBadge } from "@/components/status-badge"
+import { MovementStatusBadge } from "@/components/movement-cells"
+import { MovementTable } from "@/components/movement-table"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -28,8 +29,8 @@ import { formatMoney } from "@/lib/money"
 import { assertCurrency, assertInstallmentMovementKind } from "@/lib/movement-asserts"
 import {
   groupMovements,
-  pluralize,
   type MovementGroupMode,
+  type MovementSort,
 } from "@/lib/movement-list-view"
 import type { MovementQuery } from "@/lib/movement-query"
 import { summarizeMovementStatus } from "@/lib/movement-status"
@@ -48,20 +49,24 @@ type Props = {
   kind?: "income" | "expense"
   groupBy?: MovementGroupMode
   query?: MovementQuery
+  /** Orden por defecto de la pantalla: el tercer click en un encabezado vuelve acá. */
+  defaultSort?: MovementSort
   page?: number
   totalPages?: number
   totalCount?: number
 }
 
-const COLUMNS = ["Fecha", "Descripción", "Categoría", "Importe", "Estado"] as const
+const SKELETON_COLUMNS = ["Fecha", "Descripción", "Categoría", "Importe", "Estado"] as const
 
-function MovementTableHeader() {
+function SkeletonTableHeader() {
   return (
     <TableHeader>
       <TableRow>
         <TableHead className="w-8" />
-        {COLUMNS.map((c) => (
-          <TableHead key={c}>{c}</TableHead>
+        {SKELETON_COLUMNS.map((c) => (
+          <TableHead key={c} className="text-xs text-muted-foreground">
+            {c}
+          </TableHead>
         ))}
         <TableHead>
           <span className="sr-only">Acciones</span>
@@ -69,28 +74,6 @@ function MovementTableHeader() {
       </TableRow>
     </TableHeader>
   )
-}
-
-function MovementStatusBadge({
-  status,
-  pendingCount,
-  overdueCount,
-}: ReturnType<typeof summarizeMovementStatus>) {
-  if (status === "overdue") {
-    return (
-      <StatusBadge status="overdue">
-        {pluralize(overdueCount, "vencida", "vencidas")}
-      </StatusBadge>
-    )
-  }
-  if (status === "pending") {
-    return (
-      <StatusBadge status="pending">
-        {pluralize(pendingCount, "pendiente", "pendientes")}
-      </StatusBadge>
-    )
-  }
-  return <StatusBadge status="paid">Pagado</StatusBadge>
 }
 
 function CardName({ name }: { name: string }) {
@@ -226,6 +209,7 @@ export function MovementList({
   kind,
   groupBy = "none",
   query,
+  defaultSort,
   page = 1,
   totalPages = 1,
   totalCount,
@@ -295,124 +279,26 @@ export function MovementList({
 
   const paidGroupLabel = kind === "income" ? "Cobrados" : "Pagados"
   const desktopGroups = groupMovements(movements, groupBy, today, paidGroupLabel)
+  const tableKind = kind ?? assertInstallmentMovementKind(movements[0].kind)
   const mobileMovements = [...movements, ...extraMovements]
   const canLoadMore = Boolean(kind && query && loadedPage < totalPages)
 
   return (
     <>
       <div className="hidden md:block">
-        <Table>
-          <MovementTableHeader />
-          <TableBody>
-            {desktopGroups.map((group) => (
-              <Fragment key={group.key}>
-                {group.label && (
-                  <TableRow className="bg-muted/30 hover:bg-muted/30">
-                    <TableCell
-                      colSpan={7}
-                      className="py-1.5 text-xs font-medium text-muted-foreground"
-                    >
-                      {group.label} · {group.items.length}
-                    </TableCell>
-                  </TableRow>
-                )}
-                {group.items.map((m) => {
-                  const summary = summarizeMovementStatus(m.installments, today)
-                  const currency = assertCurrency(m.currency)
-                  const itemKind = assertInstallmentMovementKind(m.kind)
-                  const isOpen = expanded.has(m.id)
-                  const categoria = m.categoryId ? categoryLabel.get(m.categoryId) : undefined
-                  const nextText = nextInstallmentText(m, today)
-                  const cardName = m.creditCardId
-                    ? cards.find((c) => c.id === m.creditCardId)?.name
-                    : undefined
-
-                  return (
-                    <Fragment key={m.id}>
-                      <TableRow
-                        className="cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
-                        tabIndex={0}
-                        aria-expanded={isOpen}
-                        onClick={() => toggle(m.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault()
-                            toggle(m.id)
-                          }
-                        }}
-                      >
-                        <TableCell>
-                          {isOpen ? (
-                            <ChevronDown className="text-muted-foreground size-4" />
-                          ) : (
-                            <ChevronRight className="text-muted-foreground size-4" />
-                          )}
-                          <span className="sr-only">
-                            {isOpen ? "Ocultar cuotas de" : "Ver cuotas de"} {m.description}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground tabular-nums">
-                          {formatIsoForDisplay(m.date)}
-                        </TableCell>
-                        <TableCell className="max-w-64 truncate whitespace-normal">
-                          {m.description}
-                          {m.installments.length > 1 && (
-                            <span className="text-muted-foreground">
-                              {" "}
-                              · {m.installments.length} cuotas
-                            </span>
-                          )}
-                          {nextText && (
-                            <span className="block text-xs text-muted-foreground">{nextText}</span>
-                          )}
-                          {cardName && (
-                            <span className="block">
-                              <CardName name={cardName} />
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {categoria ? <CategoryBadge {...categoria} /> : "—"}
-                        </TableCell>
-                        <TableCell className="tabular-nums">
-                          {formatMoney(m.amountCents, currency)}
-                        </TableCell>
-                        <TableCell>
-                          <MovementStatusBadge {...summary} />
-                        </TableCell>
-                        <TableCell
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => e.stopPropagation()}
-                        >
-                          <div className="flex items-center justify-end gap-1">
-                            <PayNextButton movement={m} kind={itemKind} />
-                            <MovementRowActions
-                              movement={m}
-                              kind={itemKind}
-                              categories={categories}
-                              cards={cards}
-                              today={today}
-                            />
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                      {isOpen && (
-                        <InstallmentTableRows
-                          rows={m.installments}
-                          currency={currency}
-                          today={today}
-                          description={m.description}
-                          kind={itemKind}
-                          cardId={m.creditCardId}
-                        />
-                      )}
-                    </Fragment>
-                  )
-                })}
-              </Fragment>
-            ))}
-          </TableBody>
-        </Table>
+        <MovementTable
+          kind={tableKind}
+          groups={desktopGroups}
+          categories={categories}
+          categoryLabel={categoryLabel}
+          cards={cards}
+          today={today}
+          expanded={expanded}
+          toggle={toggle}
+          basePath={basePath}
+          query={query}
+          defaultSort={defaultSort}
+        />
       </div>
 
       <MovementCards
@@ -454,12 +340,12 @@ export function MovementListSkeleton({ rows = 5 }: { rows?: number }) {
     <>
       <div className="hidden md:block">
         <Table>
-          <MovementTableHeader />
+          <SkeletonTableHeader />
           <TableBody>
             {Array.from({ length: rows }, (_, i) => (
               <TableRow key={i} className="hover:bg-transparent">
                 <TableCell />
-                {COLUMNS.map((c) => (
+                {SKELETON_COLUMNS.map((c) => (
                   <TableCell key={c}>
                     <div className="h-4 animate-pulse rounded bg-graphite" />
                   </TableCell>

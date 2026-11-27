@@ -9,6 +9,7 @@ import {
   FILTER_DEFAULTS,
   type MovementQuery,
 } from "@/lib/movement-query"
+import { naturalDir } from "@/lib/movement-list-view"
 import { BASE_PATHS } from "@/lib/movement-routes"
 import type { ReportCurrency } from "@/lib/report-query"
 
@@ -420,6 +421,7 @@ export function buildPnlCellHref(params: {
     minCents: filters.minCents,
     maxCents: filters.maxCents,
     sort: defaultSort,
+    dir: naturalDir(defaultSort),
     page: 1,
   }
 

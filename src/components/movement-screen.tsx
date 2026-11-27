@@ -1,6 +1,7 @@
 import { Suspense } from "react"
 import { Plus } from "lucide-react"
 
+import { MovementColumnsMenu } from "@/components/movement-columns-menu"
 import { MovementFilters, MovementFiltersSkeleton } from "@/components/movement-filters"
 import { MovementFormDialog } from "@/components/movement-form-dialog"
 import { MovementList, MovementListSkeleton } from "@/components/movement-list"
@@ -177,7 +178,12 @@ async function ListaConPaginacion({
           defaultSort={defaultSort}
           counts={statusCounts}
         />
-        <MovementTotalsBar totals={totals} />
+        <div className="flex items-center gap-2">
+          <MovementTotalsBar totals={totals} />
+          <div className="hidden md:block">
+            <MovementColumnsMenu kind={kind} />
+          </div>
+        </div>
       </div>
 
       <MovementList
@@ -189,8 +195,9 @@ async function ListaConPaginacion({
         hasActiveFilters={filtered}
         basePath={BASE_PATHS[kind]}
         kind={kind}
-        groupBy={groupModeFor(kind, query.sort)}
+        groupBy={groupModeFor(kind, query.sort, query.dir)}
         query={query}
+        defaultSort={defaultSort}
         page={page}
         totalPages={totalPages}
         totalCount={totalCount}

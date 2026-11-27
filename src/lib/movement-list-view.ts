@@ -89,7 +89,18 @@ export function earliestUnpaidDueDate(installments: readonly InstallmentLike[]):
   return min
 }
 
-export type MovementSort = "due" | "date" | "amount"
+export type MovementSort = "due" | "date" | "description" | "category" | "amount"
+
+export type SortDir = "asc" | "desc"
+
+/**
+ * Sentido "natural" de cada orden: el que aplica el primer click en el
+ * encabezado y el que se asume cuando la URL no trae `dir`. Fechas e importes
+ * van de mayor a menor; texto y vencimientos, de menor a mayor.
+ */
+export function naturalDir(sort: MovementSort): SortDir {
+  return sort === "date" || sort === "amount" ? "desc" : "asc"
+}
 
 function createdAtMs(value: Date | number | string): number {
   if (value instanceof Date) return value.getTime()
@@ -110,12 +121,20 @@ function amountInArs(m: MovementForList): number {
   return currency === "ARS" ? m.amountCents : convertToArs(m.amountCents, Number(m.rate))
 }
 
-export function sortMovements<T extends MovementForList>(
+export function sortMovements<T extends MovementForList & { description?: string }>(
   movements: readonly T[],
   sort: MovementSort,
 ): T[] {
   const copy = [...movements]
-  if (sort === "date") return copy.sort(compareDateDesc)
+  if (sort === "date" || sort === "category") return copy.sort(compareDateDesc)
+  if (sort === "description") {
+    return copy.sort((a, b) => {
+      const diff = (a.description ?? "").localeCompare(b.description ?? "", "es", {
+        sensitivity: "base",
+      })
+      return diff !== 0 ? diff : compareDateDesc(a, b)
+    })
+  }
   if (sort === "amount") {
     return copy.sort((a, b) => {
       const diff = amountInArs(b) - amountInArs(a)
@@ -143,10 +162,14 @@ export type MovementGroup<T> = {
   items: T[]
 }
 
-export function groupModeFor(kind: "income" | "expense", sort: MovementSort): MovementGroupMode {
-  if (sort === "amount") return "none"
-  if (sort === "due") return "due"
-  return kind === "income" || sort === "date" ? "month" : "none"
+export function groupModeFor(
+  kind: "income" | "expense",
+  sort: MovementSort,
+  dir: SortDir = naturalDir(sort),
+): MovementGroupMode {
+  if (sort === "due") return dir === "asc" ? "due" : "none"
+  if (sort === "date") return "month"
+  return "none"
 }
 
 export function groupMovements<T extends MovementForList>(

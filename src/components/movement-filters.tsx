@@ -80,6 +80,8 @@ const STATUS_LABELS: Record<MovementStatus, string> = {
 const SORT_LABELS: Record<MovementSort, string> = {
   due: "Vencimiento",
   date: "Fecha",
+  description: "Descripción",
+  category: "Categoría",
   amount: "Importe",
 }
 

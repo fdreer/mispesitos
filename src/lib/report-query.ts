@@ -54,6 +54,7 @@ export function parseReportQuery(raw: RawParams): ReportQuery {
           from: baseFilters.from,
           to: baseFilters.to,
           sort: "date",
+          dir: "desc",
           page: 1,
         }
       : {
@@ -62,6 +63,7 @@ export function parseReportQuery(raw: RawParams): ReportQuery {
           status: "all",
           dateField: "date",
           sort: "date",
+          dir: "desc",
           page: 1,
         }
 
@@ -98,6 +100,7 @@ export function buildReportHref(
           from: query.filters.from,
           to: query.filters.to,
           sort: "date" as const,
+          dir: "desc" as const,
           page: 1,
         }
       : query.filters

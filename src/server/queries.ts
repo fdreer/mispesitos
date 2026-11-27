@@ -3,6 +3,7 @@ import "server-only"
 import { cache } from "react"
 
 import {
+  aliasedTable,
   and,
   asc,
   count,
@@ -16,6 +17,7 @@ import {
   lte,
   or,
   sql,
+  type SQL,
 } from "drizzle-orm"
 
 import { withUser, type Tx } from "@/db/client"
@@ -193,6 +195,41 @@ function movementConditions(userId: string, filters: MovementFilters) {
  * en cada consulta — o sea, la misma fila en dos páginas y otra en ninguna.
  */
 const MOVEMENT_ORDER = [desc(movement.date), desc(movement.createdAt), desc(movement.id)]
+
+/**
+ * `ORDER BY` de la lista según `sort` y `dir`. Siempre termina en
+ * `MOVEMENT_ORDER` como desempate, para que LIMIT/OFFSET sea determinista.
+ */
+function movementOrderBy(
+  query: Pick<MovementQuery, "sort" | "dir">,
+  earliestUnpaidDue: SQL.Aliased<string | null>,
+  parentCategory: typeof category,
+): SQL[] {
+  const tieBreak = MOVEMENT_ORDER
+  const dir = query.dir === "asc" ? sql`asc` : sql`desc`
+  switch (query.sort) {
+    case "date":
+      return query.dir === "asc"
+        ? [asc(movement.date), asc(movement.createdAt), asc(movement.id)]
+        : tieBreak
+    case "amount":
+      return [
+        sql`case when ${movement.currency} = 'ARS' then ${movement.amountCents}::numeric else round(${movement.amountCents}::numeric * ${movement.rate}) end ${dir}`,
+        ...tieBreak,
+      ]
+    case "description":
+      return [sql`lower(${movement.description}) ${dir}`, ...tieBreak]
+    case "category":
+      // "Padre › Hija" como se ve en la tabla; sin categoría va al final.
+      return [
+        sql`lower(case when ${parentCategory.name} is null then ${category.name} else ${parentCategory.name} || ' › ' || ${category.name} end) ${dir} nulls last`,
+        ...tieBreak,
+      ]
+    case "due":
+    default:
+      return [sql`${earliestUnpaidDue} ${dir} nulls last`, ...tieBreak]
+  }
+}
 
 /** Le cuelga a cada movimiento sus cuotas, ordenadas por número. */
 async function conCuotas(
@@ -373,21 +410,25 @@ export async function queryMovementsView(
       },
     }
 
-    const orderBy =
-      query.sort === "date"
-        ? MOVEMENT_ORDER
-        : query.sort === "amount"
-          ? [
-              sql`case when ${movement.currency} = 'ARS' then ${movement.amountCents}::numeric else round(${movement.amountCents}::numeric * ${movement.rate}) end desc`,
-              ...MOVEMENT_ORDER,
-            ]
-          : [sql`${instStats.earliestUnpaidDue} asc nulls last`, ...MOVEMENT_ORDER]
+    const parentCategory = aliasedTable(category, "parent_category")
+    const orderBy = movementOrderBy(query, instStats.earliestUnpaidDue, parentCategory)
 
     const movementRows = await tx
       .with(instStats)
       .select({ movement })
       .from(movement)
       .leftJoin(instStats, eq(instStats.movementId, movement.id))
+      .leftJoin(
+        category,
+        and(eq(category.id, movement.categoryId), eq(category.userId, movement.userId)),
+      )
+      .leftJoin(
+        parentCategory,
+        and(
+          eq(parentCategory.id, category.parentId),
+          eq(parentCategory.userId, movement.userId),
+        ),
+      )
       .where(filteredWhere)
       .orderBy(...orderBy)
       .limit(PAGE_SIZE)

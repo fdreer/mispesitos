@@ -8,6 +8,7 @@ import { parseMovementQuery } from "@/lib/movement-query"
 import type { MovementWithInstallments } from "@/server/queries"
 
 const mocks = vi.hoisted(() => ({
+  push: vi.fn(),
   setInstallmentPaid: vi.fn(async () => ({ ok: true })),
   fetchMovementListPage: vi.fn(async () => ({
     items: [] as MovementWithInstallments[],
@@ -34,7 +35,7 @@ vi.mock("next/link", () => ({
 }))
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: () => {}, push: () => {} }),
+  useRouter: () => ({ refresh: () => {}, push: mocks.push }),
 }))
 
 Element.prototype.hasPointerCapture ??= () => false
@@ -42,6 +43,8 @@ Element.prototype.scrollIntoView ??= () => {}
 
 afterEach(() => {
   cleanup()
+  window.localStorage.clear()
+  mocks.push.mockClear()
   mocks.setInstallmentPaid.mockClear()
   mocks.fetchMovementListPage.mockClear()
 })
@@ -409,5 +412,83 @@ describe("MovementList", () => {
     expect(mocks.fetchMovementListPage).toHaveBeenCalledWith("income", parseMovementQuery({}), 2)
     expect(screen.getByRole("article", { name: "Segundo cobro" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Cargar más" })).toBeNull()
+  })
+
+  it("las columnas ocultas en las preferencias no se dibujan y las filas ajustan su ancho", () => {
+    window.localStorage.setItem(
+      "mispesitos.table.income.v1",
+      JSON.stringify({ hidden: ["category", "installments", "nextDue"] }),
+    )
+    const { container } = render(
+      <MovementList
+        movements={[MOVIMIENTO]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="vacío"
+        kind="income"
+        groupBy="month"
+      />,
+    )
+    const tabla = container.querySelector("table")!
+    expect(within(tabla).queryByRole("columnheader", { name: /Categoría/ })).toBeNull()
+
+    fireEvent.click(within(tabla).getByText("Proyecto"))
+    for (const fila of tabla.querySelectorAll("tbody tr")) {
+      const ancho = [...fila.children].reduce(
+        (acc, c) => acc + Number((c as HTMLTableCellElement).colSpan || 1),
+        0,
+      )
+      expect(ancho).toBe(6)
+    }
+  })
+
+  it("las columnas visibles 'Cuotas' y 'Próx. vencimiento' sacan el subtítulo de la descripción", () => {
+    window.localStorage.setItem("mispesitos.table.income.v1", JSON.stringify({ hidden: [] }))
+    const { container } = render(
+      <MovementList movements={[MOVIMIENTO]} categories={CATEGORIAS} today="2026-08-11" emptyMessage="vacío" kind="income" />,
+    )
+    const fila = container.querySelector("tbody tr")!
+    const desc = fila.querySelector('[data-col="description"]')!
+    expect(desc.textContent).toBe("Proyecto")
+    expect(fila.querySelector('[data-col="installments"]')!.textContent).toBe("1/2")
+    expect(fila.querySelector('[data-col="nextDue"]')!.textContent).toBe("Cuota 1/2 · vence hoy")
+  })
+
+  it("clickear un encabezado ordena por esa columna y el segundo click invierte", () => {
+    const query = parseMovementQuery({}, "date")
+    const { container, rerender } = render(
+      <MovementList
+        movements={[MOVIMIENTO]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="vacío"
+        kind="income"
+        basePath="/ingresos"
+        query={query}
+        defaultSort="date"
+      />,
+    )
+    const tabla = within(container.querySelector("table")!)
+    expect(tabla.getByRole("columnheader", { name: /Fecha/ }).getAttribute("aria-sort")).toBe(
+      "descending",
+    )
+
+    fireEvent.click(tabla.getByRole("button", { name: "Importe" }))
+    expect(mocks.push).toHaveBeenLastCalledWith("/ingresos?sort=amount")
+
+    rerender(
+      <MovementList
+        movements={[MOVIMIENTO]}
+        categories={CATEGORIAS}
+        today="2026-08-11"
+        emptyMessage="vacío"
+        kind="income"
+        basePath="/ingresos"
+        query={parseMovementQuery({ sort: "amount" }, "date")}
+        defaultSort="date"
+      />,
+    )
+    fireEvent.click(tabla.getByRole("button", { name: "Importe" }))
+    expect(mocks.push).toHaveBeenLastCalledWith("/ingresos?sort=amount&dir=asc")
   })
 })

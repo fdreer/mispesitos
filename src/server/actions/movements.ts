@@ -13,6 +13,7 @@ import { highestPaidNumber, resolvePaidDate } from "@/lib/installments"
 import { logDbError } from "@/lib/log-db-error"
 import {
   CURRENCY_VALUES,
+  DIR_VALUES,
   SEARCH_MAX,
   SORT_VALUES,
   STATUS_VALUES,
@@ -563,6 +564,7 @@ const fetchMovementListPageSchema = z.object({
     minCents: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
     maxCents: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
     sort: z.enum(SORT_VALUES),
+    dir: z.enum(DIR_VALUES),
     page: z.number().int().min(1).max(10_000),
   }),
 })

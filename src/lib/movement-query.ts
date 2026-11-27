@@ -1,6 +1,6 @@
 import { isValidIsoDate } from "@/lib/dates"
 import { parseAmountToCents, roundCents } from "@/lib/money"
-import type { MovementSort } from "@/lib/movement-list-view"
+import { naturalDir, type MovementSort, type SortDir } from "@/lib/movement-list-view"
 import type { MovementStatus } from "@/lib/movement-status"
 
 export const PAGE_SIZE = 20
@@ -11,7 +11,9 @@ export const CURRENCY_VALUES = ["ARS", "USD"] as const
 
 export type QueryCurrency = (typeof CURRENCY_VALUES)[number]
 
-export const SORT_VALUES: readonly MovementSort[] = ["due", "date", "amount"]
+export const SORT_VALUES = ["due", "date", "description", "category", "amount"] as const satisfies readonly MovementSort[]
+
+export const DIR_VALUES = ["asc", "desc"] as const satisfies readonly SortDir[]
 
 export const SEARCH_MAX = 200
 
@@ -31,6 +33,8 @@ export type MovementQuery = {
   minCents: number | null
   maxCents: number | null
   sort: MovementSort
+  /** Sentido del orden. Si coincide con `naturalDir(sort)` no va a la URL. */
+  dir: SortDir
   page: number
 }
 
@@ -96,11 +100,15 @@ export function parseMovementQuery(
   const from = one(raw.from)
   const to = one(raw.to)
   const por = one(raw.por)
-  const sort = one(raw.sort)
+  const sortRaw = one(raw.sort)
+  const dirRaw = one(raw.dir)
   const cardId = one(raw.cardId).trim()
   const page = Number.parseInt(one(raw.page), 10)
   const validFrom = isValidIsoDate(from) ? from : FILTER_DEFAULTS.from
   const validTo = isValidIsoDate(to) ? to : FILTER_DEFAULTS.to
+  const sort = (SORT_VALUES as readonly string[]).includes(sortRaw)
+    ? (sortRaw as MovementSort)
+    : defaultSort
 
   return {
     search: one(raw.search).trim().slice(0, SEARCH_MAX),
@@ -117,7 +125,8 @@ export function parseMovementQuery(
     dateField: por === "pago" && (validFrom || validTo) ? "paid" : FILTER_DEFAULTS.dateField,
     minCents: parseAmountParam(one(raw.min)),
     maxCents: parseAmountParam(one(raw.max)),
-    sort: (SORT_VALUES as readonly string[]).includes(sort) ? (sort as MovementSort) : defaultSort,
+    sort,
+    dir: (DIR_VALUES as readonly string[]).includes(dirRaw) ? (dirRaw as SortDir) : naturalDir(sort),
     page: Number.isInteger(page) && page > 0 ? page : 1,
   }
 }
@@ -210,6 +219,11 @@ export function buildMovementHref(
     ...patch,
     page: cambiaFiltroUOrden ? 1 : (patch.page ?? query.page),
   }
+  // Cambiar el orden sin decir el sentido arranca en el natural de ese orden.
+  if (patch.sort !== undefined && patch.dir === undefined && patch.sort !== query.sort) {
+    next.dir = naturalDir(patch.sort)
+  }
+  const dir = next.dir ?? naturalDir(next.sort)
 
   const params = new URLSearchParams()
   if (extraParams) {
@@ -228,8 +242,25 @@ export function buildMovementHref(
   if (next.minCents !== null) params.set("min", formatAmountParam(next.minCents))
   if (next.maxCents !== null) params.set("max", formatAmountParam(next.maxCents))
   if (next.sort !== defaultSort) params.set("sort", next.sort)
+  if (dir !== naturalDir(next.sort)) params.set("dir", dir)
   if (next.page > 1) params.set("page", String(next.page))
 
   const qs = params.toString()
   return qs ? `${basePath}?${qs}` : basePath
+}
+
+/**
+ * El ciclo del encabezado estilo ClickUp: primer click ordena por la columna en
+ * su sentido natural, el segundo lo invierte y el tercero vuelve al orden por
+ * defecto de la pantalla.
+ */
+export function nextHeaderSort(
+  query: Pick<MovementQuery, "sort" | "dir">,
+  column: MovementSort,
+  defaultSort: MovementSort,
+): Pick<MovementQuery, "sort" | "dir"> {
+  const natural = naturalDir(column)
+  if (query.sort !== column) return { sort: column, dir: natural }
+  if (query.dir === natural) return { sort: column, dir: natural === "asc" ? "desc" : "asc" }
+  return { sort: defaultSort, dir: naturalDir(defaultSort) }
 }

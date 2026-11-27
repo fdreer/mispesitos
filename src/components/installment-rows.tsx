@@ -75,6 +75,8 @@ function PaymentControl({
   )
 }
 
+const DEFAULT_TABLE_COLUMNS = ["date", "description", "category", "amount", "status"] as const
+
 /** "Cuota 3", más la marca de vencida cuando corresponde. */
 function CuotaLabel({ row, today }: { row: Row; today: IsoDate }) {
   return (
@@ -98,28 +100,43 @@ function CuotaLabel({ row, today }: { row: Row; today: IsoDate }) {
  * relación con la columna Importe, y había que releer cada renglón en vez de
  * bajar la vista por una columna.
  *
- * `colSpan` no se usa en ninguna celda: cada una cae en su columna sola. La
+ * `colSpan` no se usa en ninguna celda: cada una cae en su columna sola,
+ * siguiendo el orden de `columns` (el que eligió la persona en la tabla). La
  * primera va vacía porque es la del chevron, que es del movimiento y no de la
  * cuota.
  */
-export function InstallmentTableRows({ rows, currency, today, description, kind, cardId }: Props) {
-  return (
-    <>
-      {rows.map((row) => (
-        // Fondo propio y sin cambio en hover: estas filas cuelgan de la de
-        // arriba y no son clickeables, así que no pueden ofrecer el mismo
-        // resalte que una fila de movimiento que sí abre algo.
-        <TableRow key={row.id} className="bg-muted/30 hover:bg-muted/30">
-          <TableCell />
-          <TableCell className="text-muted-foreground tabular-nums">
+export function InstallmentTableRows({
+  rows,
+  currency,
+  today,
+  description,
+  kind,
+  cardId,
+  columns = DEFAULT_TABLE_COLUMNS,
+}: Props & { columns?: readonly string[] }) {
+  function cell(col: string, row: Row) {
+    switch (col) {
+      case "date":
+        return (
+          <TableCell key={col} className="text-muted-foreground tabular-nums">
             {formatIsoForDisplay(row.dueDate)}
           </TableCell>
-          <TableCell className="text-muted-foreground pl-6">
+        )
+      case "description":
+        return (
+          <TableCell key={col} className="text-muted-foreground pl-6">
             <CuotaLabel row={row} today={today} />
           </TableCell>
-          <TableCell />
-          <TableCell className="tabular-nums">{formatMoney(row.amountCents, currency)}</TableCell>
-          <TableCell>
+        )
+      case "amount":
+        return (
+          <TableCell key={col} className="tabular-nums text-right">
+            {formatMoney(row.amountCents, currency)}
+          </TableCell>
+        )
+      case "status":
+        return (
+          <TableCell key={col} className="overflow-visible">
             <PaymentControl
               row={row}
               today={today}
@@ -129,6 +146,21 @@ export function InstallmentTableRows({ rows, currency, today, description, kind,
               align="start"
             />
           </TableCell>
+        )
+      default:
+        return <TableCell key={col} />
+    }
+  }
+
+  return (
+    <>
+      {rows.map((row) => (
+        // Fondo propio y sin cambio en hover: estas filas cuelgan de la de
+        // arriba y no son clickeables, así que no pueden ofrecer el mismo
+        // resalte que una fila de movimiento que sí abre algo.
+        <TableRow key={row.id} className="bg-muted/30 hover:bg-muted/30">
+          <TableCell />
+          {columns.map((col) => cell(col, row))}
           <TableCell />
         </TableRow>
       ))}
