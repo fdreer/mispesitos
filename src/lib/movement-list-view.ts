@@ -222,6 +222,4 @@ export function groupMovements<T extends MovementForList>(
   return Object.values(buckets).filter((g) => g.items.length > 0)
 }
 
-export function pluralize(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`
-}
+export { pluralize } from "@/lib/utils"

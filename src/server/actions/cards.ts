@@ -17,17 +17,20 @@ import { CATEGORY_COLOR_KEYS } from "@/lib/category-color"
 import { todayInAr } from "@/lib/dates"
 import { isCheckViolation, isUniqueViolation } from "@/lib/db-errors"
 import { logDbError } from "@/lib/log-db-error"
-import { amountCents, cardSchema, positiveRate, statementDatesSchema } from "@/lib/schemas"
+import {
+  amountCents,
+  cardSchema,
+  optionalField,
+  positiveRate,
+  statementDatesSchema,
+} from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { requireUser } from "@/server/session"
 
 const cardIdSchema = z.uuid("Esa tarjeta no existe.")
 const statementIdSchema = z.uuid("Ese resumen no existe.")
 
-const colorSchema = z.preprocess(
-  (v) => (v === "" || v === null ? undefined : v),
-  z.enum(CATEGORY_COLOR_KEYS, "Ese color no existe.").optional(),
-)
+const colorSchema = optionalField(z.enum(CATEGORY_COLOR_KEYS, "Ese color no existe."))
 
 const NOMBRE_REPETIDO = "Ya tenés una tarjeta activa con ese nombre."
 

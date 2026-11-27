@@ -23,7 +23,7 @@ import { assignStatements, formatPeriod, type StatementDates } from "@/lib/cards
 import { isLeafCategory } from "@/lib/category-tree"
 import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
 import { buildInstallments, formatShortDate, MAX_INSTALLMENTS } from "@/lib/installments"
-import { formatAmountInput, formatMoney, parseAmountToCents } from "@/lib/money"
+import { centsToAmountInput, formatAmountInput, formatMoney, parseAmountToCents } from "@/lib/money"
 import { assertCurrency } from "@/lib/movement-asserts"
 import { cn } from "@/lib/utils"
 import { createMovement, updateMovement } from "@/server/actions/movements"
@@ -42,9 +42,7 @@ type Props = {
 
 type Row = { amount: string; dueDate: string }
 
-function centsToInput(cents: number): string {
-  return formatAmountInput((cents / 100).toFixed(2).replace(".", ","))
-}
+const centsToInput = centsToAmountInput
 
 function planKeyOf(totalCents: number, count: number, date: IsoDate, cardId: string): string {
   return `${totalCents}|${count}|${date}|${cardId}`

@@ -9,7 +9,7 @@ import type { CommittedFunds, NextCardDue } from "@/lib/dashboard-view"
 import { diffDaysIso, formatRelativeDue, type IsoDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
 import { formatOfficialRateLabel, type OfficialRateSnapshot } from "@/lib/rate"
-import { cn } from "@/lib/utils"
+import { cn, pluralize } from "@/lib/utils"
 
 export function BalanceHeader({ title, hint }: { title: string; hint?: React.ReactNode }) {
   return (
@@ -45,10 +45,6 @@ export function BalanceNote({
   className?: string
 }) {
   return <p className={cn("text-muted-foreground text-xs", className)}>{children}</p>
-}
-
-function pluralize(n: number, one: string, many: string) {
-  return `${n} ${n === 1 ? one : many}`
 }
 
 type Props = {

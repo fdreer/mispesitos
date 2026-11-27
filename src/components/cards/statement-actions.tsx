@@ -1,6 +1,6 @@
 "use client"
 
-import { useActionState, useEffect, useRef, useState, useTransition } from "react"
+import { useActionState, useState, useTransition } from "react"
 import { toast } from "sonner"
 import { AlertTriangle, CalendarCog, Check } from "lucide-react"
 
@@ -29,9 +29,11 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useActionSuccess } from "@/hooks/use-action-success"
 import { effectiveStatementRate, formatPeriod, type StatementPaymentMode } from "@/lib/cards"
 import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
 import {
+  centsToAmountInput,
   convertToArs,
   formatAmountInput,
   formatMoney,
@@ -54,19 +56,13 @@ export type StatementForActions = {
   count: number
 }
 
-function centsToInput(cents: number): string {
-  return formatAmountInput((cents / 100).toFixed(2).replace(".", ","))
-}
+const centsToInput = centsToAmountInput
 
 function useOnSuccess(state: ActionResult | null, message: string, then: () => void) {
-  const handled = useRef<ActionResult | null>(null)
-  useEffect(() => {
-    if (state?.ok && handled.current !== state) {
-      handled.current = state
-      toast.success(message)
-      then()
-    }
-  }, [state, message, then])
+  useActionSuccess(state, () => {
+    toast.success(message)
+    then()
+  })
 }
 
 export function PayStatementButton({

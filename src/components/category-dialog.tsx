@@ -1,8 +1,9 @@
 "use client"
 
-import { useActionState, useEffect, useRef, useState } from "react"
+import { useActionState, useState } from "react"
 import { toast } from "sonner"
 
+import { ColorSwatchField } from "@/components/color-swatch-field"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -14,10 +15,10 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { CATEGORY_PALETTE, hueColor, resolveCategoryHue } from "@/lib/category-color"
+import { useActionSuccess } from "@/hooks/use-action-success"
+import { resolveCategoryHue } from "@/lib/category-color"
 import { CATEGORY_ICONS, type CategoryIconKey } from "@/lib/category-icons"
 import { isLeafCategory, moveTargets } from "@/lib/category-tree"
-import { cn } from "@/lib/utils"
 import { createCategory, moveCategory, updateCategory } from "@/server/actions/categories"
 import type { ActionResult } from "@/server/actions/result"
 import type { Category } from "@/server/queries"
@@ -70,20 +71,16 @@ function CategoryDialogForm({
     mode.type === "move" ? (mode.category.parentId ?? "") : "",
   )
 
-  const handled = useRef<ActionResult | null>(null)
-  useEffect(() => {
-    if (state?.ok && handled.current !== state) {
-      handled.current = state
-      toast.success(
-        mode.type === "create-child"
-          ? "Subcategoría creada"
-          : mode.type === "edit"
-            ? "Categoría guardada"
-            : "Categoría movida",
-      )
-      onClose()
-    }
-  }, [state, mode.type, onClose])
+  useActionSuccess(state, () => {
+    toast.success(
+      mode.type === "create-child"
+        ? "Subcategoría creada"
+        : mode.type === "edit"
+          ? "Categoría guardada"
+          : "Categoría movida",
+    )
+    onClose()
+  })
 
   const receivingParent =
     mode.type === "create-child"
@@ -132,15 +129,22 @@ function CategoryDialogForm({
               className="h-10"
             />
           </div>
-          <ColorField
+          <ColorSwatchField
             defaultValue={mode.type === "edit" ? mode.category.color : null}
             // Lo que se ve con "Automático": lo heredado del padre, o el hash.
             automaticHue={
               mode.type === "create-child"
                 ? resolveCategoryHue(mode.parent, null)
-                : resolveCategoryHue({ name: mode.category.name, color: null }, parentOf(mode.category))
+                : resolveCategoryHue(
+                    { name: mode.category.name, color: null },
+                    parentOf(mode.category),
+                  )
             }
-            inherits={mode.type === "create-child" || mode.category.parentId !== null}
+            automaticLabel={
+              mode.type === "create-child" || mode.category.parentId !== null
+                ? "Automático (el del padre)"
+                : "Automático"
+            }
           />
           <IconField defaultValue={mode.type === "edit" ? mode.category.icon : null} />
         </>
@@ -207,57 +211,6 @@ function CategoryDialogForm({
         </Button>
       </DialogFooter>
     </form>
-  )
-}
-
-/**
- * Los colores como radios nativos con forma de muestra: sin JavaScript de por
- * medio el valor viaja en el FormData, y el teclado (flechas) y el lector de
- * pantalla funcionan solos. El nombre del color va en el `aria-label` porque
- * la muestra sola no dice nada a quien no la ve.
- */
-function ColorField({
-  defaultValue,
-  automaticHue,
-  inherits,
-}: {
-  defaultValue: string | null
-  automaticHue: number
-  inherits: boolean
-}) {
-  const options = [
-    { key: "", label: inherits ? "Automático (el del padre)" : "Automático", hue: automaticHue },
-    ...CATEGORY_PALETTE,
-  ]
-  const current = CATEGORY_PALETTE.some((c) => c.key === defaultValue) ? defaultValue : ""
-  return (
-    <fieldset className="space-y-2">
-      <legend className="text-xs text-muted-foreground">Color</legend>
-      <div className="flex flex-wrap gap-2">
-        {options.map((o) => (
-          <label key={o.key || "auto"} className="relative cursor-pointer" title={o.label}>
-            <input
-              type="radio"
-              name="color"
-              value={o.key}
-              defaultChecked={o.key === current}
-              aria-label={o.label}
-              className="peer sr-only"
-            />
-            <span
-              aria-hidden
-              className={cn(
-                "flex size-9 items-center justify-center rounded-full border-2 border-transparent text-[10px] font-semibold",
-                "peer-checked:border-foreground peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50",
-              )}
-              style={{ backgroundColor: hueColor(o.hue) }}
-            >
-              {o.key === "" && <span className="text-background">A</span>}
-            </span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
   )
 }
 

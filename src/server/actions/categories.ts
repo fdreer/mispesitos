@@ -11,25 +11,23 @@ import { CATEGORY_COLOR_KEYS } from "@/lib/category-color"
 import { CATEGORY_ICON_KEYS } from "@/lib/category-icons"
 import { isCheckViolation, isUniqueViolation } from "@/lib/db-errors"
 import { logDbError } from "@/lib/log-db-error"
+import { optionalField } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { requireUser } from "@/server/session"
 
 const categoryIdSchema = z.uuid("Esa categoría no existe.")
 
-const optional = <T extends z.ZodType>(schema: T) =>
-  z.preprocess((v) => (v === "" || v === null ? undefined : v), schema.optional())
-
 const appearanceSchema = z.object({
   name: z.string().trim().min(1, "Poné un nombre.").max(60),
-  color: optional(z.enum(CATEGORY_COLOR_KEYS, "Ese color no existe.")),
-  icon: optional(z.enum(CATEGORY_ICON_KEYS, "Ese icono no existe.")),
+  color: optionalField(z.enum(CATEGORY_COLOR_KEYS, "Ese color no existe.")),
+  icon: optionalField(z.enum(CATEGORY_ICON_KEYS, "Ese icono no existe.")),
 })
 
 const movementsToSchema = z.enum(["general", "child"]).catch("general")
 
 const createSchema = appearanceSchema.extend({
   kind: z.enum(["income", "expense"]),
-  parentId: optional(categoryIdSchema),
+  parentId: optionalField(categoryIdSchema),
   movementsTo: movementsToSchema,
 })
 
@@ -205,7 +203,7 @@ export async function updateCategory(
 const moveSchema = z.object({
   id: categoryIdSchema,
   // Vacío = pasa a primer nivel.
-  parentId: optional(categoryIdSchema),
+  parentId: optionalField(categoryIdSchema),
   movementsTo: movementsToSchema,
 })
 

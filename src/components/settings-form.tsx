@@ -1,16 +1,12 @@
 "use client"
 
-import { useActionState, useState } from "react"
+import { useActionState, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { useEffect } from "react"
-import { CalendarIcon } from "lucide-react"
-import { es } from "date-fns/locale"
 
+import { DateField } from "@/components/date-field"
 import { Button } from "@/components/ui/button"
-import { Calendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -18,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { dateToIso, formatIsoForDisplay, isoToDate, type IsoDate } from "@/lib/dates"
+import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
 import type { ActionResult } from "@/server/actions/result"
 import { saveSettings } from "@/server/actions/settings"
 
@@ -39,7 +35,6 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
   const [initialBalanceDate, setInitialBalanceDate] = useState<IsoDate>(
     defaults.initialBalanceDate,
   )
-  const [dateOpen, setDateOpen] = useState(false)
 
   const [saved, setSaved] = useState(false)
   const [handledState, setHandledState] = useState<ActionResult | null>(null)
@@ -84,35 +79,17 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
 
       <div className="space-y-1.5">
         <Label htmlFor="initialBalanceDate">¿Desde qué fecha?</Label>
-        <input type="hidden" name="initialBalanceDate" value={initialBalanceDate} />
-        <Popover open={dateOpen} onOpenChange={setDateOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              id="initialBalanceDate"
-              type="button"
-              variant="outline"
-              aria-label={`Desde qué fecha: ${formatIsoForDisplay(initialBalanceDate)}`}
-              className="w-full justify-start font-normal"
-            >
-              <CalendarIcon />
-              {formatIsoForDisplay(initialBalanceDate)}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar
-              mode="single"
-              locale={es}
-              required
-              selected={isoToDate(initialBalanceDate)}
-              defaultMonth={isoToDate(initialBalanceDate)}
-              onSelect={(d) => {
-                setInitialBalanceDate(dateToIso(d))
-                setDateOpen(false)
-                markDirty()
-              }}
-            />
-          </PopoverContent>
-        </Popover>
+        <DateField
+          id="initialBalanceDate"
+          hiddenName="initialBalanceDate"
+          value={initialBalanceDate}
+          onChange={(next) => {
+            setInitialBalanceDate(next)
+            markDirty()
+          }}
+          ariaLabel={`Desde qué fecha: ${formatIsoForDisplay(initialBalanceDate)}`}
+          className="w-full justify-start font-normal"
+        />
         <p className="text-muted-foreground text-xs">
           Los movimientos anteriores a esta fecha no afectan tu saldo.
         </p>

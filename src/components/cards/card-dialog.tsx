@@ -1,9 +1,10 @@
 "use client"
 
-import { useActionState, useEffect, useRef, useState } from "react"
+import { useActionState, useState } from "react"
 import { toast } from "sonner"
 import { Pencil, Plus } from "lucide-react"
 
+import { ColorSwatchField } from "@/components/color-swatch-field"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -15,9 +16,8 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { CATEGORY_PALETTE, hueColor } from "@/lib/category-color"
-import { formatAmountInput } from "@/lib/money"
-import { cn } from "@/lib/utils"
+import { useActionSuccess } from "@/hooks/use-action-success"
+import { centsToAmountInput, formatAmountInput } from "@/lib/money"
 import { createCard, updateCard } from "@/server/actions/cards"
 import type { ActionResult } from "@/server/actions/result"
 
@@ -28,11 +28,6 @@ export type EditableCard = {
   dueDay: number
   creditLimitCents: number | null
   color: string | null
-}
-
-function centsToInput(cents: number | null): string {
-  if (cents === null) return ""
-  return formatAmountInput((cents / 100).toFixed(2).replace(".", ","))
 }
 
 export function CardDialog({ card }: { card?: EditableCard }) {
@@ -64,19 +59,13 @@ function CardForm({ card, onClose }: { card?: EditableCard; onClose: () => void 
     card ? updateCard : createCard,
     null,
   )
-  const [limit, setLimit] = useState(centsToInput(card?.creditLimitCents ?? null))
+  const [limit, setLimit] = useState(centsToAmountInput(card?.creditLimitCents ?? null))
   const errors = state && !state.ok ? (state.fieldErrors ?? {}) : {}
 
-  const handled = useRef<ActionResult | null>(null)
-  useEffect(() => {
-    if (state?.ok && handled.current !== state) {
-      handled.current = state
-      toast.success(card ? "Tarjeta guardada" : "Tarjeta creada")
-      onClose()
-    }
-  }, [state, card, onClose])
-
-  const currentColor = CATEGORY_PALETTE.some((c) => c.key === card?.color) ? card!.color : ""
+  useActionSuccess(state, () => {
+    toast.success(card ? "Tarjeta guardada" : "Tarjeta creada")
+    onClose()
+  })
 
   return (
     <form action={action} className="space-y-5">
@@ -165,34 +154,7 @@ function CardForm({ card, onClose }: { card?: EditableCard; onClose: () => void 
         )}
       </div>
 
-      <fieldset className="space-y-2">
-        <legend className="text-xs text-muted-foreground">Color</legend>
-        <div className="flex flex-wrap gap-2">
-          {[{ key: "", label: "Automático", hue: null }, ...CATEGORY_PALETTE].map((o) => (
-            <label key={o.key || "auto"} className="cursor-pointer" title={o.label}>
-              <input
-                type="radio"
-                name="color"
-                value={o.key}
-                defaultChecked={o.key === currentColor}
-                aria-label={o.label}
-                className="peer sr-only"
-              />
-              <span
-                aria-hidden
-                className={cn(
-                  "flex size-9 items-center justify-center rounded-full border-2 border-transparent text-[10px] font-semibold",
-                  "peer-checked:border-foreground peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50",
-                  o.hue === null && "border-border bg-muted",
-                )}
-                style={o.hue === null ? undefined : { backgroundColor: hueColor(o.hue) }}
-              >
-                {o.hue === null && "A"}
-              </span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
+      <ColorSwatchField defaultValue={card?.color ?? null} />
 
       <DialogFooter>
         <Button type="button" variant="ghost" onClick={onClose}>

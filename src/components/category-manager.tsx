@@ -1,6 +1,6 @@
 "use client"
 
-import { useActionState, useCallback, useEffect, useMemo, useState, useTransition } from "react"
+import { useActionState, useCallback, useMemo, useState, useTransition } from "react"
 import { toast } from "sonner"
 import { Archive, ChevronRight, FolderInput, MoreHorizontal, Pencil, Plus } from "lucide-react"
 
@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { useActionSuccess } from "@/hooks/use-action-success"
 import { categoryIcon } from "@/lib/category-icons"
 import { buildCategoryTree, categoryLabels } from "@/lib/category-tree"
 import { cn } from "@/lib/utils"
@@ -43,11 +44,9 @@ export function CategoryManager({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const closeDialog = useCallback(() => setDialog(null), [])
 
-  useEffect(() => {
-    if (state?.ok) {
-      toast.success("Categoría creada")
-    }
-  }, [state])
+  useActionSuccess(state, () => {
+    toast.success("Categoría creada")
+  })
 
   const labels = useMemo(() => categoryLabels(categories), [categories])
   const tree = useMemo(() => buildCategoryTree(categories.filter((c) => !c.archived)), [categories])

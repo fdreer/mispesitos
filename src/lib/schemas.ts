@@ -108,7 +108,7 @@ const dayOfMonth = z.coerce
   .max(31, "Elegí un día entre 1 y 31.")
 
 /** Un campo opcional de formulario: vacío o ausente es "sin valor". */
-const optionalField = <T extends z.ZodType>(schema: T) =>
+export const optionalField = <T extends z.ZodType>(schema: T) =>
   z.preprocess((v) => (v === "" || v === null ? undefined : v), schema.optional())
 
 /**

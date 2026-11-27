@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest"
 
 import {
-  PAGE_SIZE,
   activeFilterCount,
   buildMovementHref,
   defaultSortForKind,
   hayFiltrosActivos,
   movementFiltersFromQuery,
   nextHeaderSort,
-  paginate,
   parseMovementQuery,
 } from "@/lib/movement-query"
 
@@ -109,31 +107,6 @@ describe("parseMovementQuery", () => {
 
   it("con el parámetro repetido se queda con el primero (salvo categoryId)", () => {
     expect(parseMovementQuery({ status: ["paid", "overdue"] }).status).toBe("paid")
-  })
-})
-
-describe("paginate", () => {
-  const items = Array.from({ length: 45 }, (_, i) => i)
-
-  it("corta la página pedida y devuelve totalCount", () => {
-    expect(paginate(items, 1)).toMatchObject({ items: items.slice(0, 20), totalCount: 45 })
-    expect(paginate(items, 2)).toMatchObject({ items: items.slice(20, 40), totalCount: 45 })
-    expect(paginate(items, 3)).toMatchObject({ items: items.slice(40, 45), totalCount: 45 })
-  })
-
-  it("cuenta las páginas contando la última incompleta", () => {
-    expect(paginate(items, 1).totalPages).toBe(3)
-    expect(paginate(Array.from({ length: PAGE_SIZE }, (_, i) => i), 1).totalPages).toBe(1)
-    expect(paginate(Array.from({ length: PAGE_SIZE + 1 }, (_, i) => i), 1).totalPages).toBe(2)
-  })
-
-  it("una lista vacía es una página vacía con totalCount 0", () => {
-    expect(paginate([], 1)).toEqual({ items: [], page: 1, totalPages: 1, totalCount: 0 })
-  })
-
-  it("una página que ya no existe muestra la última, no una tabla en blanco", () => {
-    expect(paginate(items, 99)).toMatchObject({ page: 3 })
-    expect(paginate(items, 99).items).toEqual(items.slice(40, 45))
   })
 })
 

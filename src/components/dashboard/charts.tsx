@@ -1,9 +1,17 @@
 "use client"
 
-import { useId, useMemo, useState, type ComponentProps } from "react"
+import { useId, useMemo, useState } from "react"
 import { ChevronRight } from "lucide-react"
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, XAxis, YAxis } from "recharts"
 
+import {
+  AXIS_TICK,
+  CORAL_RED,
+  PULSE_GREEN,
+  TOOLTIP_FORMATTER_ARS,
+  TOOLTIP_FORMATTER_USD,
+  toUnits,
+} from "@/components/charts/chart-helpers"
 import { Segmented } from "@/components/segmented"
 import {
   ChartConfig,
@@ -18,36 +26,6 @@ import type { SpendGroup } from "@/lib/category-tree"
 import type { MonthlyBarPoint } from "@/lib/dashboard-view"
 import { formatAxisPesos, formatMoney, type Currency } from "@/lib/money"
 import { cn } from "@/lib/utils"
-
-const FOG = "#8a8f98"
-const PULSE_GREEN = "#27a644"
-const CORAL_RED = "#eb5757"
-
-const toUnits = (cents: number) => cents / 100
-
-const AXIS_TICK = { fill: FOG, fontSize: 12 } as const
-
-type TooltipFormatter = NonNullable<ComponentProps<typeof ChartTooltipContent>["formatter"]>
-
-function makeMoneyTooltipFormatter(currency: Currency): TooltipFormatter {
-  return function MoneyTooltip(value, name, item) {
-    const color = (item.payload as { fill?: string } | undefined)?.fill ?? item.color
-    return (
-      <>
-        <div className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ backgroundColor: color }} />
-        <div className="flex flex-1 items-center justify-between leading-none">
-          <span className="text-muted-foreground">{name}</span>
-          <span className="font-mono font-medium text-foreground tabular-nums">
-            {formatMoney(Math.round(Number(value) * 100), currency)}
-          </span>
-        </div>
-      </>
-    )
-  }
-}
-
-const TOOLTIP_FORMATTER_ARS = makeMoneyTooltipFormatter("ARS")
-const TOOLTIP_FORMATTER_USD = makeMoneyTooltipFormatter("USD")
 
 const MONTHLY_CONFIG = {
   Ingresos: { label: "Ingresos", color: PULSE_GREEN },

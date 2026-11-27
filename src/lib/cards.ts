@@ -348,13 +348,13 @@ export function perceivedPayments<
   }
 
   return rows.map((row, index) => {
-    const cleaned = Object.fromEntries(
-      Object.entries(row).filter(([k]) => k !== "usdPaidArsCents" && k !== "statementUsdCents"),
-    ) as Omit<T, "usdPaidArsCents" | "statementUsdCents">
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { usdPaidArsCents, statementUsdCents, ...cleaned } = row
+    const base = cleaned as Omit<T, "usdPaidArsCents" | "statementUsdCents">
     const converted = convertedByIndex.get(index)
-    if (converted === undefined) return cleaned
+    if (converted === undefined) return base
     return {
-      ...cleaned,
+      ...base,
       currency: "ARS" satisfies Currency,
       amountCents: converted,
     }

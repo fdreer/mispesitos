@@ -187,18 +187,6 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
   const firstDayNextMonth = `${nextMonth}-01`
   const firstDayAfterNextMonth = `${monthKey(addMonthsClamped(today, 2))}-01`
 
-  const paidSinceStart = input.paid.filter((p) => p.paidDate >= settings.initialBalanceDate)
-  const monthPaid = paidSinceStart.filter((p) => monthKey(p.paidDate) === thisMonth)
-
-  const conceptos = (rows: PendingRow[]) =>
-    new Set(rows.map((p) => p.statementId ?? `cuota:${p.id}`))
-  const paymentsThisMonth = input.pending.filter(
-    (p) => p.kind === "expense" && p.dueDate < firstDayNextMonth,
-  )
-  const paymentsNextMonth = input.pending.filter(
-    (p) => p.kind === "expense" && monthKey(p.dueDate) === nextMonth,
-  )
-
   const horizonEnd = monthRange(
     monthKey(addMonthsClamped(`${thisMonth}-01`, Math.max(0, input.horizonMonths - 1))),
   ).to
@@ -212,17 +200,102 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
     officialRate,
   })
 
-  const unconvertedUsdCents =
-    officialRate === null
-      ? input.pending
-          .filter(
-            (p) =>
-              p.kind === "expense" &&
-              p.dueDate <= horizonEnd &&
-              assertCurrency(p.currency) === "USD",
-          )
-          .reduce((acc, p) => acc + p.amountCents, 0)
-      : 0
+  // Pasada única sobre `input.paid` desde `initialBalanceDate`: totales del mes, pie y barras.
+  let monthIncomeArsCents = 0
+  let monthIncomeUsdCents = 0
+  let monthExpenseArsCents = 0
+  let monthExpenseUsdCents = 0
+  const pieArsInput: { categoryId: string | null; arsCents: number }[] = []
+  const pieUsdInput: { categoryId: string | null; arsCents: number }[] = []
+  const barsArsInput: { date: IsoDate; kind: "income" | "expense"; arsCents: number }[] = []
+  const barsUsdInput: { date: IsoDate; kind: "income" | "expense"; arsCents: number }[] = []
+
+  for (const p of input.paid) {
+    if (p.paidDate < settings.initialBalanceDate) continue
+    const currency = assertCurrency(p.currency)
+    const kind = assertInstallmentMovementKind(p.kind)
+    const barRow = { date: p.paidDate, kind, arsCents: p.amountCents }
+    if (currency === "USD") barsUsdInput.push(barRow)
+    else barsArsInput.push(barRow)
+
+    if (monthKey(p.paidDate) !== thisMonth) continue
+    if (kind === "income") {
+      if (currency === "USD") monthIncomeUsdCents += p.amountCents
+      else monthIncomeArsCents += p.amountCents
+    } else {
+      if (currency === "USD") {
+        monthExpenseUsdCents += p.amountCents
+        pieUsdInput.push({ categoryId: p.categoryId, arsCents: p.amountCents })
+      } else {
+        monthExpenseArsCents += p.amountCents
+        pieArsInput.push({ categoryId: p.categoryId, arsCents: p.amountCents })
+      }
+    }
+  }
+
+  // Pasada única sobre `input.pending`: pagos este/próximo mes, vencidos, resúmenes y USD sin cotización.
+  const closingById = new Map((input.statements ?? []).map((st) => [st.id, st.closingDate]))
+  const statementsMap = new Map<string, UpcomingStatement>()
+  const overdueMovements = new Set<string>()
+  const thisMonthConcepts = new Set<string>()
+  const thisMonthOverdueConcepts = new Set<string>()
+  const nextMonthConcepts = new Set<string>()
+  let thisMonthArsCents = 0
+  let thisMonthUsdCents = 0
+  let nextMonthArsCents = 0
+  let nextMonthUsdCents = 0
+  let unconvertedUsdCents = 0
+  const inWindowNonStatement: PendingRow[] = []
+
+  for (const p of input.pending) {
+    const currency = assertCurrency(p.currency)
+    const overdue = isOverdue(p.dueDate, today)
+    if (overdue) overdueMovements.add(p.movementId)
+
+    if (p.kind === "expense") {
+      if (officialRate === null && p.dueDate <= horizonEnd && currency === "USD") {
+        unconvertedUsdCents += p.amountCents
+      }
+      if (p.dueDate < firstDayNextMonth) {
+        const concept = p.statementId ?? `cuota:${p.id}`
+        thisMonthConcepts.add(concept)
+        if (overdue) thisMonthOverdueConcepts.add(concept)
+        if (currency === "USD") thisMonthUsdCents += p.amountCents
+        else thisMonthArsCents += p.amountCents
+      } else if (monthKey(p.dueDate) === nextMonth) {
+        nextMonthConcepts.add(p.statementId ?? `cuota:${p.id}`)
+        if (currency === "USD") nextMonthUsdCents += p.amountCents
+        else nextMonthArsCents += p.amountCents
+      }
+    }
+
+    if (p.statementId && p.cardId) {
+      let item = statementsMap.get(p.statementId)
+      if (!item) {
+        item = {
+          type: "statement" as const,
+          id: p.statementId,
+          cardId: p.cardId,
+          cardName: p.cardName ?? "Tarjeta",
+          period: p.statementPeriod ?? monthKey(p.dueDate),
+          dueDate: p.dueDate,
+          closingDate: closingById.get(p.statementId) ?? null,
+          arsCents: 0,
+          usdCents: 0,
+          count: 0,
+          kind: "expense" as const,
+          status: overdue ? ("overdue" as const) : ("pending" as const),
+        }
+        statementsMap.set(p.statementId, item)
+      }
+      if (currency === "USD") item.usdCents += p.amountCents
+      else item.arsCents += p.amountCents
+      item.count += 1
+    } else if (p.dueDate < firstDayAfterNextMonth) {
+      inWindowNonStatement.push(p)
+    }
+  }
+
   const committed: CommittedFunds = {
     totalCents:
       cashflow.rows.reduce((acc, r) => acc + r.outflowsCents, 0) + cashflow.overdue.expenseCents,
@@ -233,40 +306,8 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
     untilLabel: cashflow.rows.at(-1)?.label ?? null,
   }
 
-  const overdueMovements = new Set(
-    input.pending.filter((p) => isOverdue(p.dueDate, today)).map((p) => p.movementId),
-  )
-
-  const inWindow = input.pending.filter((p) => p.dueDate < firstDayAfterNextMonth)
-
-  const closingById = new Map((input.statements ?? []).map((st) => [st.id, st.closingDate]))
-  const groupStatements = (rows: readonly PendingRow[]) => {
-    const statements = new Map<string, UpcomingStatement>()
-    for (const p of rows) {
-      if (!p.statementId || !p.cardId) continue
-      const item = statements.get(p.statementId) ?? {
-        type: "statement" as const,
-        id: p.statementId,
-        cardId: p.cardId,
-        cardName: p.cardName ?? "Tarjeta",
-        period: p.statementPeriod ?? monthKey(p.dueDate),
-        dueDate: p.dueDate,
-        closingDate: closingById.get(p.statementId) ?? null,
-        arsCents: 0,
-        usdCents: 0,
-        count: 0,
-        kind: "expense" as const,
-        status: isOverdue(p.dueDate, today) ? ("overdue" as const) : ("pending" as const),
-      }
-      if (assertCurrency(p.currency) === "USD") item.usdCents += p.amountCents
-      else item.arsCents += p.amountCents
-      item.count += 1
-      statements.set(p.statementId, item)
-    }
-    return [...statements.values()].sort(byDueDate)
-  }
-  const statements = groupStatements(inWindow)
-  const allStatements = groupStatements(input.pending)
+  const allStatements = [...statementsMap.values()].sort(byDueDate)
+  const statements = allStatements.filter((s) => s.dueDate < firstDayAfterNextMonth)
   const nextStatement = allStatements[0]
   const nextCardDue: NextCardDue | null = nextStatement
     ? {
@@ -279,90 +320,50 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
       }
     : null
 
-  const upcoming: UpcomingItem[] = inWindow
-    .filter((p) => !p.statementId)
-    .map((p) => ({
-      id: p.id,
-      number: p.number,
-      dueDate: p.dueDate,
-      amountCents: p.amountCents,
-      description: p.description,
-      currency: assertCurrency(p.currency),
-      kind: assertInstallmentMovementKind(p.kind),
-      status: overdueMovements.has(p.movementId) ? "overdue" : "pending",
-    }))
+  const upcoming: UpcomingItem[] = inWindowNonStatement.map((p) => ({
+    id: p.id,
+    number: p.number,
+    dueDate: p.dueDate,
+    amountCents: p.amountCents,
+    description: p.description,
+    currency: assertCurrency(p.currency),
+    kind: assertInstallmentMovementKind(p.kind),
+    status: overdueMovements.has(p.movementId) ? "overdue" : "pending",
+  }))
 
-  const pieArs = spendByParent(
-    monthPaid
-      .filter((p) => p.kind === "expense" && assertCurrency(p.currency) === "ARS")
-      .map((p) => ({ categoryId: p.categoryId, arsCents: p.amountCents })),
-    input.expenseCategories,
-  )
-  const pieUsd = spendByParent(
-    monthPaid
-      .filter((p) => p.kind === "expense" && assertCurrency(p.currency) === "USD")
-      .map((p) => ({ categoryId: p.categoryId, arsCents: p.amountCents })),
-    input.expenseCategories,
-  )
+  const pieArs = spendByParent(pieArsInput, input.expenseCategories)
+  const pieUsd = spendByParent(pieUsdInput, input.expenseCategories)
 
-  const barsArs = monthlyTotals(
-    paidSinceStart
-      .filter((p) => assertCurrency(p.currency) === "ARS")
-      .map((p) => ({
-        date: p.paidDate,
-        kind: assertInstallmentMovementKind(p.kind),
-        arsCents: p.amountCents,
-      })),
-    input.historyMonths,
-    today,
-  ).map((b) => ({ month: b.month, incomeCents: b.incomeArsCents, expenseCents: b.expenseArsCents }))
+  const barsArs = monthlyTotals(barsArsInput, input.historyMonths, today).map((b) => ({
+    month: b.month,
+    incomeCents: b.incomeArsCents,
+    expenseCents: b.expenseArsCents,
+  }))
 
-  const barsUsd = monthlyTotals(
-    paidSinceStart
-      .filter((p) => assertCurrency(p.currency) === "USD")
-      .map((p) => ({
-        date: p.paidDate,
-        kind: assertInstallmentMovementKind(p.kind),
-        arsCents: p.amountCents,
-      })),
-    input.historyMonths,
-    today,
-  ).map((b) => ({ month: b.month, incomeCents: b.incomeArsCents, expenseCents: b.expenseArsCents }))
-
-  const sumByCurrency = (rows: readonly { amountCents: number; currency: string }[]) => {
-    let arsCents = 0
-    let usdCents = 0
-    for (const r of rows) {
-      if (assertCurrency(r.currency) === "USD") usdCents += r.amountCents
-      else arsCents += r.amountCents
-    }
-    return { arsCents, usdCents }
-  }
-
-  const monthIncome = sumByCurrency(monthPaid.filter((p) => p.kind === "income"))
-  const monthExpense = sumByCurrency(monthPaid.filter((p) => p.kind === "expense"))
-  const thisMonthSum = sumByCurrency(paymentsThisMonth)
-  const nextMonthSum = sumByCurrency(paymentsNextMonth)
+  const barsUsd = monthlyTotals(barsUsdInput, input.historyMonths, today).map((b) => ({
+    month: b.month,
+    incomeCents: b.incomeArsCents,
+    expenseCents: b.expenseArsCents,
+  }))
 
   return {
     arsCents: balances.arsCents,
     usdCents: balances.usdCents,
     consolidatedArsCents,
-    monthIncomeArsCents: monthIncome.arsCents,
-    monthIncomeUsdCents: monthIncome.usdCents,
-    monthExpenseArsCents: monthExpense.arsCents,
-    monthExpenseUsdCents: monthExpense.usdCents,
+    monthIncomeArsCents,
+    monthIncomeUsdCents,
+    monthExpenseArsCents,
+    monthExpenseUsdCents,
     paymentsThisMonth: {
-      arsCents: thisMonthSum.arsCents,
-      usdCents: thisMonthSum.usdCents,
-      count: conceptos(paymentsThisMonth).size,
-      overdueCount: conceptos(paymentsThisMonth.filter((payment) => isOverdue(payment.dueDate, today)))
-        .size,
+      arsCents: thisMonthArsCents,
+      usdCents: thisMonthUsdCents,
+      count: thisMonthConcepts.size,
+      overdueCount: thisMonthOverdueConcepts.size,
     },
     paymentsNextMonth: {
-      arsCents: nextMonthSum.arsCents,
-      usdCents: nextMonthSum.usdCents,
-      count: conceptos(paymentsNextMonth).size,
+      arsCents: nextMonthArsCents,
+      usdCents: nextMonthUsdCents,
+      count: nextMonthConcepts.size,
     },
     cashflow,
     committed,

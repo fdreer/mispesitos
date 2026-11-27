@@ -43,16 +43,18 @@ export type CategoryLabel = { name: string; parentName: string | null; hue: numb
 
 export function categoryLabels(categories: TreeCategory[]): Map<string, CategoryLabel> {
   const byId = new Map(categories.map((c) => [c.id, c]))
-  const hues = categoryHues(categories)
   return new Map(
-    categories.map((c) => [
-      c.id,
-      {
-        name: c.name,
-        parentName: c.parentId === null ? null : (byId.get(c.parentId)?.name ?? null),
-        hue: hues.get(c.id)!,
-      },
-    ]),
+    categories.map((c) => {
+      const parent = c.parentId === null ? null : byId.get(c.parentId)
+      return [
+        c.id,
+        {
+          name: c.name,
+          parentName: parent?.name ?? null,
+          hue: resolveCategoryHue(c, parent),
+        },
+      ]
+    }),
   )
 }
 
@@ -77,7 +79,7 @@ export function selectorGroups<C extends TreeCategory>(
   const groups: SelectorGroup<C>[] = []
   for (const node of buildCategoryTree(categories)) {
     const category = byId.get(node.id)!
-    if (isLeafCategory(categories, node.id)) {
+    if (node.children.length === 0) {
       if (visible(category) && matches(category.name)) groups.push({ type: "leaf", category })
       continue
     }

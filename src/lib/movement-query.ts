@@ -192,20 +192,6 @@ export type Page<T> = {
   totalCount: number
 }
 
-export function paginate<T>(items: T[], page: number): Page<T> {
-  const totalCount = items.length
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
-  const current = Math.min(Math.max(1, page), totalPages)
-  const start = (current - 1) * PAGE_SIZE
-
-  return {
-    items: items.slice(start, start + PAGE_SIZE),
-    page: current,
-    totalPages,
-    totalCount,
-  }
-}
-
 export function buildMovementHref(
   basePath: string,
   query: MovementQuery,

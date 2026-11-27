@@ -4,11 +4,11 @@ import { CategoryBadge } from "@/components/category-badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   buildCategoryTree,
-  categoryCheckState,
   categoryLabels,
   normalizeSearch,
+  type CategoryCheckState,
 } from "@/lib/category-tree"
-import { formatAmountInput, formatMoney } from "@/lib/money"
+import { centsToAmountInput, formatMoney } from "@/lib/money"
 import { CARD_FILTER_CASH, CURRENCY_VALUES, type QueryCurrency } from "@/lib/movement-query"
 import type { CardOption } from "@/server/card-queries"
 import type { Category } from "@/server/queries"
@@ -20,10 +20,7 @@ export const CURRENCY_OPTIONS: (QueryCurrency | "all")[] = ["all", ...CURRENCY_V
 export const TODAS = <span className="text-muted-foreground">Todas</span>
 export const TODOS = <span className="text-muted-foreground">Todos</span>
 
-export function centsToInputValue(cents: number | null): string {
-  if (cents === null) return ""
-  return formatAmountInput((cents / 100).toFixed(2).replace(".", ","))
-}
+export const centsToInputValue = centsToAmountInput
 
 export function formatAmountRangeLabel(minCents: number | null, maxCents: number | null): string {
   if (minCents !== null && maxCents !== null) {
@@ -69,6 +66,8 @@ export function CategoryChecklist({
 }) {
   const labels = categoryLabels(categories)
   const tree = buildCategoryTree(categories)
+  const selectedSet = new Set(selectedIds)
+  const fullChildrenById = new Map(tree.map((node) => [node.id, node.children]))
   const q = normalizeSearch(searchTerm)
 
   const filteredTree = tree
@@ -89,7 +88,25 @@ export function CategoryChecklist({
   return (
     <div className="space-y-1">
       {filteredTree.map((node) => {
-        const nodeState = categoryCheckState(selectedIds, node.id, categories)
+        const allChildren = fullChildrenById.get(node.id) ?? []
+        let nodeState: CategoryCheckState
+        if (allChildren.length === 0) {
+          nodeState = selectedSet.has(node.id)
+        } else if (selectedSet.has(node.id)) {
+          nodeState = true
+        } else {
+          let checkedCount = 0
+          for (const c of allChildren) {
+            if (selectedSet.has(c.id)) checkedCount += 1
+          }
+          nodeState =
+            checkedCount === 0
+              ? false
+              : checkedCount === allChildren.length
+                ? true
+                : "indeterminate"
+        }
+        const parentSelected = selectedSet.has(node.id)
         const nodeLabel = labels.get(node.id)
         return (
           <div key={node.id} className="space-y-0.5">
@@ -105,7 +122,7 @@ export function CategoryChecklist({
               )}
             </label>
             {node.children.map((child) => {
-              const childChecked = categoryCheckState(selectedIds, child.id, categories) === true
+              const childChecked = selectedSet.has(child.id) || parentSelected
               const childLabel = labels.get(child.id)
               return (
                 <label

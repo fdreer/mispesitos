@@ -1,17 +1,15 @@
 "use client"
 
-import { useActionState, useEffect, useState } from "react"
+import { useActionState, useState } from "react"
 import { toast } from "sonner"
-import { CalendarIcon } from "lucide-react"
-import { es } from "date-fns/locale"
 
+import { DateField } from "@/components/date-field"
 import { Button } from "@/components/ui/button"
-import { Calendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { dateToIso, formatIsoForDisplay, isoToDate, type IsoDate } from "@/lib/dates"
+import { useActionSuccess } from "@/hooks/use-action-success"
+import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
 import { createExchange } from "@/server/actions/movements"
 
 type Props = {
@@ -24,15 +22,12 @@ export function ExchangeForm({ buyRate, sellRate, today }: Props) {
   const [state, action, pending] = useActionState(createExchange, null)
   const [direction, setDirection] = useState<"buy" | "sell">("buy")
   const [date, setDate] = useState<IsoDate>(today)
-  const [dateOpen, setDateOpen] = useState(false)
 
   const suggested = direction === "buy" ? buyRate : sellRate
 
-  useEffect(() => {
-    if (state?.ok) {
-      toast.success("Cambio registrado")
-    }
-  }, [state])
+  useActionSuccess(state, () => {
+    toast.success("Cambio registrado")
+  })
 
   return (
     <form action={action} className="max-w-lg space-y-4 rounded-lg border p-4">
@@ -57,34 +52,14 @@ export function ExchangeForm({ buyRate, sellRate, today }: Props) {
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1">
           <Label htmlFor="date">Fecha</Label>
-          <input type="hidden" name="date" value={date} />
-          <Popover open={dateOpen} onOpenChange={setDateOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                id="date"
-                type="button"
-                variant="outline"
-                aria-label={`Fecha: ${formatIsoForDisplay(date)}`}
-                className="w-full justify-start font-normal"
-              >
-                <CalendarIcon />
-                {formatIsoForDisplay(date)}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="single"
-                locale={es}
-                required
-                selected={isoToDate(date)}
-                defaultMonth={isoToDate(date)}
-                onSelect={(d) => {
-                  setDate(dateToIso(d))
-                  setDateOpen(false)
-                }}
-              />
-            </PopoverContent>
-          </Popover>
+          <DateField
+            id="date"
+            hiddenName="date"
+            value={date}
+            onChange={setDate}
+            ariaLabel={`Fecha: ${formatIsoForDisplay(date)}`}
+            className="w-full justify-start font-normal"
+          />
         </div>
 
         <div className="space-y-1">

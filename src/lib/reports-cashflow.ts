@@ -295,20 +295,28 @@ function buildMonthlyRows(input: CashflowInput, currentBalanceCents: number): Ca
 
 function buildWeeklyRows(input: CashflowInput, currentBalanceCents: number): CashflowRow[] {
   const end = addMonthsClamped(input.today, 3)
-  const futurePending = input.pending.filter((p) => p.dueDate >= input.today && p.dueDate <= end)
+  const futurePending = input.pending
+    .filter((p) => p.dueDate >= input.today && p.dueDate <= end)
+    .sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0))
 
   const rows: CashflowRow[] = []
   let running = currentBalanceCents
   let cursor = input.today
+  let idx = 0
 
   while (cursor <= end) {
     const candidateEnd = addDaysIso(cursor, 6)
     const weekEnd = candidateEnd > end ? end : candidateEnd
 
+    while (idx < futurePending.length && futurePending[idx].dueDate < cursor) {
+      idx += 1
+    }
+
     let inflowsCents = 0
     let outflowsCents = 0
-    for (const p of futurePending) {
-      if (p.dueDate < cursor || p.dueDate > weekEnd) continue
+    while (idx < futurePending.length && futurePending[idx].dueDate <= weekEnd) {
+      const p = futurePending[idx]
+      idx += 1
       const val = pendingToArsCents(p, input.officialRate)
       if (val === null) continue
       const kind = assertInstallmentMovementKind(p.kind)

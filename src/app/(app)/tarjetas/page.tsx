@@ -38,9 +38,7 @@ type CardView = {
   available: AvailableCredit | null
 }
 
-function pluralize(n: number, one: string, many: string) {
-  return `${n} ${n === 1 ? one : many}`
-}
+import { pluralize } from "@/lib/utils"
 
 /** La línea fina debajo de un resumen con dólares: cuánto sería en pesos, o cuánto se pagó. */
 function UsdNote({

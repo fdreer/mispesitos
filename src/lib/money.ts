@@ -120,3 +120,8 @@ export function formatAmountInput(raw: string, previous = ""): string {
   const decimals = text.slice(commaAt + 1).replace(/\D/g, "").slice(0, 2)
   return `${groupThousands(integerDigits) || "0"},${decimals}`
 }
+
+export function centsToAmountInput(cents: number | null): string {
+  if (cents === null) return ""
+  return formatAmountInput((cents / 100).toFixed(2).replace(".", ","))
+}
