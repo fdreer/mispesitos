@@ -1,7 +1,6 @@
 "use client"
 
 import { useActionState, useEffect, useRef, useState, useTransition } from "react"
-import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { AlertTriangle, CalendarCog, Check } from "lucide-react"
 
@@ -60,16 +59,14 @@ function centsToInput(cents: number): string {
 }
 
 function useOnSuccess(state: ActionResult | null, message: string, then: () => void) {
-  const router = useRouter()
   const handled = useRef<ActionResult | null>(null)
   useEffect(() => {
     if (state?.ok && handled.current !== state) {
       handled.current = state
       toast.success(message)
-      router.refresh()
       then()
     }
-  }, [state, message, router, then])
+  }, [state, message, then])
 }
 
 export function PayStatementButton({
@@ -386,7 +383,6 @@ function PayStatementForm({
 export function UnpayStatementButton({ statement }: { statement: StatementForActions }) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const router = useRouter()
 
   function unpay() {
     if (!statement.id) return
@@ -398,7 +394,6 @@ export function UnpayStatementButton({ statement }: { statement: StatementForAct
         return
       }
       toast.success(`Resumen de ${formatPeriod(statement.period)} desmarcado`)
-      router.refresh()
     })
   }
 

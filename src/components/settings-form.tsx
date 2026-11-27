@@ -55,7 +55,6 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
   useEffect(() => {
     if (state?.ok && redirectTo) {
       router.push(redirectTo)
-      router.refresh()
     }
   }, [state, redirectTo, router])
 

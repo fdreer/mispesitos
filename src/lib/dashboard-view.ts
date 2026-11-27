@@ -165,6 +165,7 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
       usdCents: e.amountCents,
       rate: Number(e.rate),
     })),
+    today,
   )
 
   const consolidatedArsCents =

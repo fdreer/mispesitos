@@ -26,9 +26,26 @@ const CACHE_SECONDS = 600
 
 const TIMEOUT_MS = 3_000
 
-async function fetchDolarEndpoint(
-  endpoint: string,
-): Promise<{ compra: number; venta: number } | null> {
+type DolarQuote = {
+  compra: number
+  venta: number
+  /** `fechaActualizacion` de dolarapi: cuándo cambió la cotización, no cuándo la pedimos. */
+  updatedAt: Date | null
+}
+
+/**
+ * La fecha que informa dolarapi. `null` si no viene o no se puede leer; una
+ * fecha en el futuro (reloj corrido de un lado o del otro) se acota a ahora
+ * para no mostrar una cotización "de mañana".
+ */
+function parseUpdatedAt(raw: unknown, now: Date): Date | null {
+  if (typeof raw !== "string") return null
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed > now ? now : parsed
+}
+
+async function fetchDolarEndpoint(endpoint: string): Promise<DolarQuote | null> {
   const url = `https://dolarapi.com/v1/dolares/${endpoint}`
 
   try {
@@ -41,14 +58,18 @@ async function fetchDolarEndpoint(
     const data: unknown = await response.json()
     if (typeof data !== "object" || data === null) return null
 
-    const { compra, venta } = data as { compra?: unknown; venta?: unknown }
+    const { compra, venta, fechaActualizacion } = data as {
+      compra?: unknown
+      venta?: unknown
+      fechaActualizacion?: unknown
+    }
     if (typeof compra !== "number" || typeof venta !== "number") return null
     if (!Number.isFinite(compra) || !Number.isFinite(venta)) return null
     // Un TC cero o negativo no es una cotización: pre-llenar el formulario con
     // eso valuaría los dólares en nada. Mejor campo vacío y que lo tipee.
     if (compra <= 0 || venta <= 0) return null
 
-    return { compra, venta }
+    return { compra, venta, updatedAt: parseUpdatedAt(fechaActualizacion, new Date()) }
   } catch {
     return null
   }
@@ -62,7 +83,34 @@ async function fetchDolarEndpoint(
 export async function fetchOfficialRate(): Promise<OfficialRate | null> {
   const quote = await fetchDolarEndpoint("oficial")
   if (!quote) return null
-  return { ...quote, fetchedAt: new Date() }
+  // La respuesta HTTP viene cacheada hasta `CACHE_SECONDS`: `new Date()` haría
+  // ver cada render como una cotización recién traída. La fecha de la API es
+  // estable entre renders; sólo si no viene se usa la hora actual.
+  return { compra: quote.compra, venta: quote.venta, fetchedAt: quote.updatedAt ?? new Date() }
+}
+
+/** Margen para refrescar `lastOfficialAt` aunque compra y venta no cambien. */
+const REFRESH_MS = 10 * 60 * 1000
+
+/**
+ * Si el respaldo guardado ya dice lo mismo que la cotización en vivo, no hay
+ * nada que escribir. Se reescribe cuando cambia compra o venta, o cuando la
+ * fecha de la cotización avanzó al menos `REFRESH_MS` (así la etiqueta
+ * "oficial de …" del respaldo no queda vieja de más).
+ */
+export function shouldPersistOfficialRate(
+  saved: {
+    lastOfficialBuy: string | null
+    lastOfficialSell: string | null
+    lastOfficialAt: Date | null
+  },
+  live: OfficialRate,
+): boolean {
+  if (saved.lastOfficialBuy === null || saved.lastOfficialSell === null) return true
+  if (saved.lastOfficialAt === null) return true
+  if (Number(saved.lastOfficialBuy) !== live.compra) return true
+  if (Number(saved.lastOfficialSell) !== live.venta) return true
+  return live.fetchedAt.getTime() - saved.lastOfficialAt.getTime() >= REFRESH_MS
 }
 
 /**

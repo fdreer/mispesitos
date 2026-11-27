@@ -62,7 +62,10 @@ const invalidCard = () => failure(TARJETA_INVALIDA, { creditCardId: [TARJETA_INV
 
 const SOLO_EGRESOS = "Sólo un egreso se puede pagar con tarjeta."
 
-const RESUMEN_CAMBIO = "Un resumen de la tarjeta cambió mientras cargabas. Probá de nuevo."
+const PAGADO_FUTURO =
+  "Con fecha futura no puede estar pagado: desmarcá “Ya está pagado” o elegí una fecha hasta hoy."
+
+const RESUMEN_CAMBIO ="Un resumen de la tarjeta cambió mientras cargabas. Probá de nuevo."
 
 function readInstallments(formData: FormData): { amountCents: string; dueDate: string }[] | null {
   const amounts = formData.getAll("installmentAmount").map(String)
@@ -104,6 +107,11 @@ export async function createMovement(
   if (cardId !== null && input.kind !== "expense") return failure(SOLO_EGRESOS)
   if (cardId !== null && settled) {
     return failure("Una compra con tarjeta se paga con el resumen: no se carga como pagada.")
+  }
+  // Misma regla que `resolvePaidDate`: la plata no puede haberse movido en un
+  // día que todavía no llegó. Lo cargado a futuro queda pendiente.
+  if (settled && input.date > todayInAr()) {
+    return failure(PAGADO_FUTURO, { date: [PAGADO_FUTURO] })
   }
 
   const movementId = randomUUID()

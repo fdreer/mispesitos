@@ -1,6 +1,6 @@
 "use client"
 
-import type { ComponentProps } from "react"
+import { useId, type ComponentProps } from "react"
 import {
   Area,
   Bar,
@@ -125,6 +125,10 @@ export function CashflowChart({
 }) {
   const formatter = makeMoneyFormatter("ARS")
   const goesNegative = rows.some((r) => r.closingCents < 0)
+  // Único por instancia: dos gráficos en la misma página compartirían el
+  // degradado. Sólo caracteres seguros adentro de `url(#…)`.
+  const instanceId = useId()
+  const fillId = `saldo-fill-${instanceId.replace(/[^\w-]/g, "")}`
 
   const chartData = rows.map((r) => ({
     label: r.label,
@@ -137,7 +141,7 @@ export function CashflowChart({
     <ChartContainer config={CASHFLOW_CONFIG} className="aspect-auto w-full" style={{ height }}>
       <ComposedChart data={chartData} margin={{ left: 4, right: 4, top: 8 }}>
         <defs>
-          <linearGradient id="saldo-fill" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={SIGNAL_TEAL} stopOpacity={0.28} />
             <stop offset="100%" stopColor={SIGNAL_TEAL} stopOpacity={0.02} />
           </linearGradient>
@@ -172,7 +176,7 @@ export function CashflowChart({
           dataKey="saldo"
           stroke="var(--color-saldo)"
           strokeWidth={2}
-          fill="url(#saldo-fill)"
+          fill={`url(#${fillId})`}
           dot={{ r: 2.5, fill: SIGNAL_TEAL, strokeWidth: 0 }}
           activeDot={{ r: 4 }}
         />

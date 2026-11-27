@@ -1,7 +1,6 @@
 "use client"
 
 import { useActionState, useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { CalendarIcon } from "lucide-react"
 import { es } from "date-fns/locale"
@@ -22,7 +21,6 @@ type Props = {
 }
 
 export function ExchangeForm({ buyRate, sellRate, today }: Props) {
-  const router = useRouter()
   const [state, action, pending] = useActionState(createExchange, null)
   const [direction, setDirection] = useState<"buy" | "sell">("buy")
   const [date, setDate] = useState<IsoDate>(today)
@@ -32,10 +30,9 @@ export function ExchangeForm({ buyRate, sellRate, today }: Props) {
 
   useEffect(() => {
     if (state?.ok) {
-      router.refresh()
       toast.success("Cambio registrado")
     }
-  }, [state, router])
+  }, [state])
 
   return (
     <form action={action} className="max-w-lg space-y-4 rounded-lg border p-4">

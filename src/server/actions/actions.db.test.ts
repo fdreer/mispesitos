@@ -14,6 +14,7 @@ import {
   user,
   userSettings,
 } from "@/db/schema"
+import { addDaysIso, todayInAr } from "@/lib/dates"
 import { DEFAULT_CATEGORIES } from "@/lib/default-categories"
 import {
   createCard,
@@ -402,6 +403,52 @@ describe("createMovement", () => {
     // La suma de las cuotas es el total del movimiento: la invariante de la
     // sección 4 del spec, verificada sobre lo que quedó en la base.
     expect(cuotas.reduce((total, c) => total + c.amountCents, 0)).toBe(fila.amountCents)
+  })
+
+  it("'ya pagado' con fecha pasada guarda una única cuota pagada ese mismo día", async () => {
+    comoUsuario(USUARIO_A)
+
+    const resultado = await createMovement(
+      null,
+      formulario({
+        ...ALTA_VALIDA,
+        description: "Pagado en el pasado",
+        settled: "true",
+        installmentAmount: ["10000"],
+        installmentDueDate: ["2026-04-15"],
+      }),
+    )
+
+    expect(resultado).toEqual({ ok: true })
+    const [fila] = await movimientosPorDescripcion(USUARIO_A, "Pagado en el pasado")
+    const cuotas = await cuotasDe(USUARIO_A, fila.id)
+    expect(cuotas.map((c) => ({ paid: c.paid, paidDate: c.paidDate }))).toEqual([
+      { paid: true, paidDate: "2026-04-15" },
+    ])
+  })
+
+  // NO BORRAR NI RELAJAR. Una cuota pagada en un día que todavía no llegó suma
+  // al saldo de hoy en el Dashboard y no en el Informe de flujo: los dos
+  // muestran números distintos sin un solo error a la vista.
+  it("'ya pagado' con fecha futura se rechaza y no guarda nada", async () => {
+    comoUsuario(USUARIO_A)
+    const futuro = addDaysIso(todayInAr(), 30)
+
+    const resultado = await createMovement(
+      null,
+      formulario({
+        ...ALTA_VALIDA,
+        description: "Pagado en el futuro",
+        date: futuro,
+        settled: "true",
+        installmentAmount: ["10000"],
+        installmentDueDate: [futuro],
+      }),
+    )
+
+    expect(rechazo(resultado).fieldErrors?.date?.[0]).toMatch(/fecha futura/)
+    expect(await movimientosPorDescripcion(USUARIO_A, "Pagado en el futuro")).toEqual([])
+    expect(rutasRevalidadas()).toEqual([])
   })
 
   // NO BORRAR NI RELAJAR. Un centavo de diferencia entre el total y sus cuotas

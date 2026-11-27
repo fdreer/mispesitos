@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type ComponentProps } from "react"
+import { useId, useState, type ComponentProps } from "react"
 import { ChevronRight } from "lucide-react"
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, XAxis, YAxis } from "recharts"
 
@@ -136,13 +136,14 @@ function CategoryBreakdown({
       return next
     })
   const percent = (cents: number) => (total > 0 ? Math.round((cents / total) * 100) : 0)
+  const idPrefix = useId()
 
   return (
     <ul aria-label="Gastos por categoría" className="divide-y divide-border text-sm">
       {data.map((group, index) => {
         const expandable = group.children.length > 0
         const isOpen = open.has(group.name)
-        const detailsId = `desglose-${index}`
+        const detailsId = `${idPrefix}-desglose-${index}`
         const row = (
           <>
             <span

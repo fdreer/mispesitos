@@ -1,7 +1,6 @@
 "use client"
 
 import { useActionState, useEffect, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -59,7 +58,6 @@ function CategoryDialogForm({
   mode,
   onClose,
 }: Omit<Props, "mode"> & { mode: CategoryDialogMode }) {
-  const router = useRouter()
   const actionFor = { "create-child": createCategory, edit: updateCategory, move: moveCategory }
   const [state, action, pending] = useActionState<ActionResult | null, FormData>(
     actionFor[mode.type],
@@ -83,10 +81,9 @@ function CategoryDialogForm({
             ? "Categoría guardada"
             : "Categoría movida",
       )
-      router.refresh()
       onClose()
     }
-  }, [state, mode.type, router, onClose])
+  }, [state, mode.type, onClose])
 
   const receivingParent =
     mode.type === "create-child"

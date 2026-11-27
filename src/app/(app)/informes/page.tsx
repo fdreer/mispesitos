@@ -119,22 +119,19 @@ async function InformeBody({
         initialUsdCents: settings.initialBalanceUsdCents,
         initialDate: settings.initialBalanceDate,
       },
-      paid
-        .filter((p) => p.paidDate <= today)
-        .map((p) => ({
-          paidDate: p.paidDate,
-          currency: assertCurrency(p.currency),
-          kind: assertInstallmentMovementKind(p.kind),
-          amountCents: p.amountCents,
-        })),
-      exchanges
-        .filter((e) => e.date <= today)
-        .map((e) => ({
-          date: e.date,
-          direction: assertExchangeDirection(e.direction),
-          usdCents: e.amountCents,
-          rate: Number(e.rate),
-        })),
+      paid.map((p) => ({
+        paidDate: p.paidDate,
+        currency: assertCurrency(p.currency),
+        kind: assertInstallmentMovementKind(p.kind),
+        amountCents: p.amountCents,
+      })),
+      exchanges.map((e) => ({
+        date: e.date,
+        direction: assertExchangeDirection(e.direction),
+        usdCents: e.amountCents,
+        rate: Number(e.rate),
+      })),
+      today,
     )
 
     const view = buildCashflowReport({

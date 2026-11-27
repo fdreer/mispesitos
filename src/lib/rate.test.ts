@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { fetchOfficialRate, fetchSuggestedRate, formatOfficialRateLabel } from "@/lib/rate"
+import {
+  fetchOfficialRate,
+  fetchSuggestedRate,
+  formatOfficialRateLabel,
+  shouldPersistOfficialRate,
+} from "@/lib/rate"
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -181,6 +186,28 @@ describe("fetchOfficialRate", () => {
     expect(result?.fetchedAt).toBeInstanceOf(Date)
   })
 
+  it("toma fetchedAt de fechaActualizacion, estable aunque la respuesta venga cacheada", async () => {
+    stubFetch(() =>
+      ok({ compra: 1100, venta: 1150, fechaActualizacion: "2026-11-27T13:05:00.000Z" }),
+    )
+
+    const primera = await fetchOfficialRate()
+    const segunda = await fetchOfficialRate()
+
+    expect(primera?.fetchedAt.toISOString()).toBe("2026-11-27T13:05:00.000Z")
+    expect(segunda?.fetchedAt.getTime()).toBe(primera?.fetchedAt.getTime())
+  })
+
+  it("acota a ahora una fechaActualizacion futura e ignora una ilegible", async () => {
+    stubFetch(() => ok({ compra: 1100, venta: 1150, fechaActualizacion: "2999-01-01T00:00:00Z" }))
+    const futura = await fetchOfficialRate()
+    expect(futura!.fetchedAt.getTime()).toBeLessThanOrEqual(Date.now())
+
+    stubFetch(() => ok({ compra: 1100, venta: 1150, fechaActualizacion: "ayer" }))
+    const ilegible = await fetchOfficialRate()
+    expect(Number.isNaN(ilegible!.fetchedAt.getTime())).toBe(false)
+  })
+
   it("devuelve null si la API falla o trae datos inválidos", async () => {
     stubFetch(() => new Response("boom", { status: 503 }))
     expect(await fetchOfficialRate()).toBeNull()
@@ -202,5 +229,38 @@ describe("formatOfficialRateLabel", () => {
     expect(formatOfficialRateLabel(new Date("2026-11-24T17:30:00Z"), now)).toBe(
       "oficial del 24/11 14:30",
     )
+  })
+})
+
+describe("shouldPersistOfficialRate", () => {
+  const at = new Date("2026-11-27T13:00:00Z")
+  const saved = { lastOfficialBuy: "1100.0000", lastOfficialSell: "1150.0000", lastOfficialAt: at }
+
+  it("no escribe si compra, venta y fecha son las mismas", () => {
+    expect(shouldPersistOfficialRate(saved, { compra: 1100, venta: 1150, fetchedAt: at })).toBe(
+      false,
+    )
+  })
+
+  it("escribe si no había respaldo o si cambió compra o venta", () => {
+    const live = { compra: 1100, venta: 1150, fetchedAt: at }
+    expect(
+      shouldPersistOfficialRate(
+        { lastOfficialBuy: null, lastOfficialSell: null, lastOfficialAt: null },
+        live,
+      ),
+    ).toBe(true)
+    expect(shouldPersistOfficialRate(saved, { ...live, compra: 1101 })).toBe(true)
+    expect(shouldPersistOfficialRate(saved, { ...live, venta: 1149.5 })).toBe(true)
+  })
+
+  it("con la misma cotización, sólo refresca la fecha cuando avanzó 10 minutos o más", () => {
+    const live = (minutos: number) => ({
+      compra: 1100,
+      venta: 1150,
+      fetchedAt: new Date(at.getTime() + minutos * 60_000),
+    })
+    expect(shouldPersistOfficialRate(saved, live(9))).toBe(false)
+    expect(shouldPersistOfficialRate(saved, live(10))).toBe(true)
   })
 })

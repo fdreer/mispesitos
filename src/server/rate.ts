@@ -1,17 +1,24 @@
 import "server-only"
 
 import { cache } from "react"
+import { after } from "next/server"
 import { eq } from "drizzle-orm"
 
 import { withUser } from "@/db/client"
 import { userSettings } from "@/db/schema"
-import { fetchOfficialRate, type OfficialRateSnapshot } from "@/lib/rate"
+import { logDbError } from "@/lib/log-db-error"
+import {
+  fetchOfficialRate,
+  shouldPersistOfficialRate,
+  type OfficialRateSnapshot,
+} from "@/lib/rate"
 import type { Settings } from "@/server/queries"
 
 /**
  * Obtiene la cotización oficial del dólar para el flujo, las tarjetas y el
- * dashboard. Si dolarapi responde, la guarda en `user_settings` como respaldo;
- * si no responde, devuelve la última guardada (`stale: true`). Devuelve `null`
+ * dashboard. Si dolarapi responde, la guarda en `user_settings` como respaldo
+ * (sólo si cambió, y después de enviar la respuesta: no frena el render); si
+ * no responde, devuelve la última guardada (`stale: true`). Devuelve `null`
  * sólo si la API falló y nunca se obtuvo una antes.
  */
 export const resolveOfficialRate = cache(async function resolveOfficialRate(
@@ -20,19 +27,24 @@ export const resolveOfficialRate = cache(async function resolveOfficialRate(
 ): Promise<OfficialRateSnapshot | null> {
   const live = await fetchOfficialRate()
   if (live) {
-    try {
-      await withUser(userId, (tx) =>
-        tx
-          .update(userSettings)
-          .set({
-            lastOfficialBuy: String(live.compra),
-            lastOfficialSell: String(live.venta),
-            lastOfficialAt: live.fetchedAt,
-          })
-          .where(eq(userSettings.userId, userId)),
-      )
-    } catch {
-      // No romper el render si falla guardar el respaldo.
+    if (shouldPersistOfficialRate(settings, live)) {
+      after(async () => {
+        try {
+          await withUser(userId, (tx) =>
+            tx
+              .update(userSettings)
+              .set({
+                lastOfficialBuy: String(live.compra),
+                lastOfficialSell: String(live.venta),
+                lastOfficialAt: live.fetchedAt,
+              })
+              .where(eq(userSettings.userId, userId)),
+          )
+        } catch (error) {
+          // El respaldo es best-effort: la respuesta ya salió.
+          logDbError("resolveOfficialRate", error)
+        }
+      })
     }
     return { ...live, stale: false }
   }

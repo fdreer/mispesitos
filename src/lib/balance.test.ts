@@ -161,4 +161,20 @@ describe("computeBalances", () => {
       computeBalances(settings, paid, exchanges),
     )
   })
+
+  it("con asOf, ignora pagos y cambios posteriores a esa fecha (y cuenta los de ese mismo día)", () => {
+    const paid: PaidInstallment[] = [
+      { paidDate: "2026-03-10", currency: "ARS", kind: "income", amountCents: 10_000_00 },
+      { paidDate: "2026-03-11", currency: "ARS", kind: "expense", amountCents: 99_000_00 },
+    ]
+    const exchanges: ExchangeMovement[] = [
+      { date: "2026-03-10", direction: "buy", usdCents: 10_00, rate: 1_000 },
+      { date: "2026-03-11", direction: "buy", usdCents: 400_00, rate: 1_000 },
+    ]
+
+    expect(computeBalances(settings, paid, exchanges, "2026-03-10")).toEqual({
+      arsCents: 100_000_00 + 10_000_00 - 10_000_00,
+      usdCents: 500_00 + 10_00,
+    })
+  })
 })

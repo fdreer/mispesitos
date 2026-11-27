@@ -1,7 +1,6 @@
 "use client"
 
 import { useActionState, useEffect, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Pencil, Plus } from "lucide-react"
 
@@ -61,7 +60,6 @@ export function CardDialog({ card }: { card?: EditableCard }) {
 }
 
 function CardForm({ card, onClose }: { card?: EditableCard; onClose: () => void }) {
-  const router = useRouter()
   const [state, action, pending] = useActionState<ActionResult | null, FormData>(
     card ? updateCard : createCard,
     null,
@@ -74,10 +72,9 @@ function CardForm({ card, onClose }: { card?: EditableCard; onClose: () => void 
     if (state?.ok && handled.current !== state) {
       handled.current = state
       toast.success(card ? "Tarjeta guardada" : "Tarjeta creada")
-      router.refresh()
       onClose()
     }
-  }, [state, card, router, onClose])
+  }, [state, card, onClose])
 
   const currentColor = CATEGORY_PALETTE.some((c) => c.key === card?.color) ? card!.color : ""
 

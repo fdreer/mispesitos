@@ -1,7 +1,6 @@
 "use client"
 
 import { useActionState, useEffect, useId, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Minus, Plus } from "lucide-react"
 
@@ -90,7 +89,6 @@ export function MovementForm({
     movement ? updateMovement : createMovement,
     null,
   )
-  const router = useRouter()
   const ids = useId()
   const amountRef = useRef<HTMLInputElement>(null)
   const descriptionRef = useRef<HTMLInputElement>(null)
@@ -137,7 +135,10 @@ export function MovementForm({
   const isCard = card !== undefined
   // §1.3: una compra con tarjeta nunca es "ya pagada" al cargarla.
   const canSettle = !movement && !isCard
-  const isSettled = canSettle && settled
+  // Con fecha futura no hay "ya pagado": la plata todavía no se movió (misma
+  // regla que `resolvePaidDate` y que valida `createMovement`).
+  const isFutureDate = date > today
+  const isSettled = canSettle && settled && !isFutureDate
 
   // Los centavos de cada fila, derivados de lo tipeado. `null` cuando el texto
   // todavía no es un número: eso hace que la suma no cierre y el botón quede
@@ -253,8 +254,9 @@ export function MovementForm({
     }
   }
 
-  // `router.refresh()` sí es un efecto legítimo: notifica al router, no
-  // actualiza estado de React, así que no dispara la regla anterior.
+  // El toast y el aviso a quien abrió el diálogo son efectos: no actualizan
+  // estado de React del formulario. No hace falta `router.refresh()`: la
+  // acción ya llamó a `revalidatePath` y el árbol nuevo llega en su respuesta.
   //
   // Todo va UNA vez por resultado (la marca `toastedState`): `onSaved` llega
   // como flecha nueva en cada render, y sin la marca cada re-render apilaba
@@ -264,7 +266,6 @@ export function MovementForm({
   useEffect(() => {
     if (!state?.ok || toastedState.current === state) return
     toastedState.current = state
-    router.refresh()
     if (!movement) rememberCategory(kind, categoryId)
     toast.success(
       movement ? "Cambios guardados" : kind === "income" ? "Ingreso cargado" : "Egreso cargado",
@@ -275,7 +276,7 @@ export function MovementForm({
     } else {
       onSaved?.()
     }
-  }, [state, router, onSaved, movement, kind, categoryId])
+  }, [state, onSaved, movement, kind, categoryId])
 
   function updateRow(index: number, patch: Partial<Row>) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)))
@@ -312,6 +313,11 @@ export function MovementForm({
   const datalistId = `${ids}-descripciones`
   const rowsId = `${ids}-cuotas`
   const settledId = `${ids}-settled`
+  const amountId = `${ids}-amount`
+  const descriptionId = `${ids}-description`
+  const categoryFieldId = `${ids}-category`
+  const dateId = `${ids}-date`
+  const countId = `${ids}-count`
 
   return (
     <form action={action} className="flex min-h-0 flex-1 flex-col">
@@ -338,7 +344,7 @@ export function MovementForm({
           hay que escribir, y con el foco puesto el diálogo arranca listo para
           tipear. Sin caja: una línea de base que se enciende con el foco. */}
       <div className="space-y-1.5">
-        <Label htmlFor="amount" className="sr-only">
+        <Label htmlFor={amountId} className="sr-only">
           Importe
         </Label>
         <div
@@ -354,7 +360,7 @@ export function MovementForm({
           </span>
           <input
             ref={amountRef}
-            id="amount"
+            id={amountId}
             inputMode="decimal"
             autoComplete="off"
             enterKeyHint="next"
@@ -392,10 +398,10 @@ export function MovementForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5 sm:col-span-2">
-          <Label htmlFor="description">Descripción</Label>
+          <Label htmlFor={descriptionId}>Descripción</Label>
           <Input
             ref={descriptionRef}
-            id="description"
+            id={descriptionId}
             name="description"
             required
             maxLength={200}
@@ -405,7 +411,7 @@ export function MovementForm({
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault()
-                document.getElementById("categoryId")?.focus()
+                document.getElementById(categoryFieldId)?.focus()
               }
             }}
             list={suggestions.length > 0 ? datalistId : undefined}
@@ -425,13 +431,13 @@ export function MovementForm({
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="categoryId">Categoría</Label>
+          <Label htmlFor={categoryFieldId}>Categoría</Label>
           {/* Editando arranca en la del movimiento, que puede ser una archivada:
               el selector la sigue ofreciendo (`keepId`). Sin eso, abrir el
               diálogo de un movimiento viejo lo movía de categoría con sólo
               guardarlo. */}
           <CategoryPicker
-            id="categoryId"
+            id={categoryFieldId}
             name="categoryId"
             categories={categories}
             value={categoryId}
@@ -442,9 +448,9 @@ export function MovementForm({
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="date">{isCard ? "Fecha de la compra" : "Fecha"}</Label>
+          <Label htmlFor={dateId}>{isCard ? "Fecha de la compra" : "Fecha"}</Label>
           <DateField
-            id="date"
+            id={dateId}
             hiddenName="date"
             value={date}
             onChange={setDate}
@@ -492,7 +498,11 @@ export function MovementForm({
               {kind === "income" ? "Ya está cobrado" : "Ya está pagado"}
             </span>
             <span className="block text-xs text-muted-foreground">
-              {settled
+              {isFutureDate
+                ? kind === "income"
+                  ? "Con fecha futura queda pendiente de cobro"
+                  : "Con fecha futura queda pendiente de pago"
+                : isSettled
                 ? `En la fecha del movimiento${totalCents > 0 ? `, por ${formatMoney(totalCents, currency)}` : ""}`
                 : kind === "income"
                   ? "Queda pendiente de cobro"
@@ -502,7 +512,8 @@ export function MovementForm({
           <Switch
             id={settledId}
             aria-label={kind === "income" ? "Cobrado" : "Pagado"}
-            checked={settled}
+            checked={isSettled}
+            disabled={isFutureDate}
             onCheckedChange={setSettled}
           />
         </label>
@@ -517,7 +528,7 @@ export function MovementForm({
 
       {kind === "expense" && !isSettled && (
         <div className="space-y-1.5">
-          <Label htmlFor="count">Cuotas</Label>
+          <Label htmlFor={countId}>Cuotas</Label>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex h-9 items-center rounded-lg bg-white/[0.04] p-0.5">
               <Button
@@ -532,7 +543,7 @@ export function MovementForm({
                 <Minus className="size-3.5" />
               </Button>
               <Input
-                id="count"
+                id={countId}
                 type="text"
                 inputMode="numeric"
                 maxLength={3}

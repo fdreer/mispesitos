@@ -76,7 +76,9 @@ describe("ExchangeForm", () => {
     expect(campo("date")?.value).toBe("2026-08-20")
   })
 
-  it("al guardar bien refresca la pantalla: las tres tarjetas de arriba cambian", async () => {
+  // Las tarjetas de arriba se actualizan con el `revalidatePath` de la acción,
+  // que trae el árbol nuevo en la misma respuesta: no hace falta otro refresh.
+  it("al guardar bien no pide un refresh aparte: la acción ya revalida", async () => {
     montar()
 
     await act(async () => {
@@ -84,7 +86,7 @@ describe("ExchangeForm", () => {
     })
 
     expect(createExchange).toHaveBeenCalled()
-    expect(refresh).toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
   })
 
   it("un error se muestra y no refresca", async () => {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, useTransition } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import {
   CalendarIcon,
@@ -97,8 +97,6 @@ const BAR_CLASS = "flex flex-wrap items-end gap-x-2 gap-y-3"
 const DEBOUNCE_MS = 400
 
 const CALENDAR_YEARS_MARGIN = 10
-const CALENDAR_START_MONTH = new Date(new Date().getFullYear() - CALENDAR_YEARS_MARGIN, 0, 1)
-const CALENDAR_END_MONTH = new Date(new Date().getFullYear() + CALENDAR_YEARS_MARGIN, 11, 1)
 
 function rangeFromQuery(query: Pick<MovementQuery, "from" | "to">): DateRange | undefined {
   return query.from || query.to
@@ -345,6 +343,19 @@ export function MovementFilters({
 
   const prevShift = shiftPeriod(query.from, query.to, -1)
   const nextShift = shiftPeriod(query.from, query.to, 1)
+  // El rango del calendario sale de `today` (lo manda el servidor) y no del
+  // reloj al cargar el módulo: un proceso que pasa de un año al otro sin
+  // reiniciar dejaba el rango congelado y distinto del que calcula el cliente.
+  const calendarYear = Number(today.slice(0, 4))
+  const calendarStartMonth = useMemo(
+    () => new Date(calendarYear - CALENDAR_YEARS_MARGIN, 0, 1),
+    [calendarYear],
+  )
+  const calendarEndMonth = useMemo(
+    () => new Date(calendarYear + CALENDAR_YEARS_MARGIN, 11, 1),
+    [calendarYear],
+  )
+
   const activePreset = detectDatePreset(query.from, query.to, today)
   const periodLabel =
     !query.from && !query.to
@@ -615,8 +626,8 @@ export function MovementFilters({
                         mode="range"
                         locale={es}
                         captionLayout="dropdown"
-                        startMonth={CALENDAR_START_MONTH}
-                        endMonth={CALENDAR_END_MONTH}
+                        startMonth={calendarStartMonth}
+                        endMonth={calendarEndMonth}
                         defaultMonth={
                           rangeFromQuery(mobileDraft)?.from ?? rangeFromQuery(mobileDraft)?.to
                         }
@@ -1097,8 +1108,8 @@ export function MovementFilters({
                       mode="range"
                       locale={es}
                       captionLayout="dropdown"
-                      startMonth={CALENDAR_START_MONTH}
-                      endMonth={CALENDAR_END_MONTH}
+                      startMonth={calendarStartMonth}
+                      endMonth={calendarEndMonth}
                       defaultMonth={draft?.from ?? draft?.to}
                       selected={draft}
                       onSelect={handleCalendarSelect}

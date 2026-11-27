@@ -1,13 +1,11 @@
 import { Suspense } from "react"
-import { Plus } from "lucide-react"
 
 import { MovementColumnsMenu } from "@/components/movement-columns-menu"
 import { MovementFilters, MovementFiltersSkeleton } from "@/components/movement-filters"
-import { MovementFormDialog } from "@/components/movement-form-dialog"
 import { MovementList, MovementListSkeleton } from "@/components/movement-list"
 import { MovementPagination } from "@/components/movement-pagination"
+import { NewMovementButton, NewMovementProvider } from "@/components/new-movement-button"
 import { MovementStatusPills, MovementTotalsBar } from "@/components/movement-status-pills"
-import { buttonVariants } from "@/components/ui/button"
 import { todayInAr, type IsoDate } from "@/lib/dates"
 import { groupModeFor } from "@/lib/movement-list-view"
 import {
@@ -17,7 +15,6 @@ import {
   type MovementQuery,
 } from "@/lib/movement-query"
 import { BASE_PATHS } from "@/lib/movement-routes"
-import { cn } from "@/lib/utils"
 import {
   listCardOptions,
   listDescriptionSuggestions,
@@ -35,35 +32,6 @@ type Props = {
   searchParams: Record<string, string | string[] | undefined>
 }
 
-async function BotonNuevo({ kind }: { kind: Kind }) {
-  const { user } = await requireSettings()
-  const today = todayInAr()
-  const [categories, cards, suggestions] = await Promise.all([
-    listCategories(user.id, kind, true),
-    kind === "expense" ? listCardOptions(user.id, today) : Promise.resolve([]),
-    listDescriptionSuggestions(user.id, kind),
-  ])
-
-  return (
-    <MovementFormDialog
-      kind={kind}
-      categories={categories}
-      cards={cards}
-      suggestions={suggestions}
-      today={today}
-    />
-  )
-}
-
-function BotonNuevoSkeleton() {
-  return (
-    <div aria-hidden className={cn(buttonVariants(), "pointer-events-none opacity-50")}>
-      <Plus />
-      Nuevo
-    </div>
-  )
-}
-
 async function BarraDeFiltros({
   kind,
   query,
@@ -74,35 +42,39 @@ async function BarraDeFiltros({
   today: IsoDate
 }) {
   const { user } = await requireSettings()
+  // Sin `await`: el diálogo las espera solo, la barra no.
+  const suggestions = listDescriptionSuggestions(user.id, kind)
   const [categories, cards] = await Promise.all([
     listCategories(user.id, kind, true),
     kind === "expense" ? listCardOptions(user.id, today) : Promise.resolve([]),
   ])
 
   return (
-    <MovementFilters
-      basePath={BASE_PATHS[kind]}
-      query={query}
-      defaultSort={defaultSortForKind(kind)}
-      today={today}
+    <NewMovementProvider
+      kind={kind}
       categories={categories}
       cards={cards}
-      showPaymentMethod={kind === "expense"}
-      layout="toolbar"
-      mobileAction={
-        <Suspense fallback={<BotonNuevoSkeleton />}>
-          <BotonNuevo kind={kind} />
-        </Suspense>
-      }
-      trailing={
-        <>
-          <MovementColumnsMenu kind={kind} />
-          <Suspense fallback={<BotonNuevoSkeleton />}>
-            <BotonNuevo kind={kind} />
-          </Suspense>
-        </>
-      }
-    />
+      today={today}
+      suggestions={suggestions}
+    >
+      <MovementFilters
+        basePath={BASE_PATHS[kind]}
+        query={query}
+        defaultSort={defaultSortForKind(kind)}
+        today={today}
+        categories={categories}
+        cards={cards}
+        showPaymentMethod={kind === "expense"}
+        layout="toolbar"
+        mobileAction={<NewMovementButton />}
+        trailing={
+          <>
+            <MovementColumnsMenu kind={kind} />
+            <NewMovementButton />
+          </>
+        }
+      />
+    </NewMovementProvider>
   )
 }
 

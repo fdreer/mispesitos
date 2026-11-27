@@ -12,7 +12,41 @@ if (!connectionString) {
   throw new Error("Falta DATABASE_URL. Copiá .env.example a .env.local y completalo.")
 }
 
-export const sqlClient = postgres(connectionString, { prepare: false })
+/** Un entero positivo de una variable de entorno, o el default si no está o no es válido. */
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (raw === undefined || raw === "") return fallback
+  const value = Number(raw)
+  return Number.isInteger(value) && value > 0 ? value : fallback
+}
+
+function createSqlClient(url: string) {
+  return postgres(url, {
+    max: envInt("DATABASE_POOL_MAX", 10),
+    // Segundos. Las conexiones ociosas se cierran: un proceso de larga vida no
+    // retiene conexiones que Postgres podría necesitar para otro.
+    idle_timeout: envInt("DATABASE_IDLE_TIMEOUT", 20),
+    connect_timeout: envInt("DATABASE_CONNECT_TIMEOUT", 10),
+    // Prepared statements activados por defecto (Postgres directo, sin
+    // pooler). `DATABASE_PREPARE=false` sólo hace falta detrás de PgBouncer en
+    // modo transaction, que no los soporta.
+    prepare: process.env.DATABASE_PREPARE !== "false",
+  })
+}
+
+/*
+ * En desarrollo cada recarga de HMR vuelve a evaluar este módulo: sin guardar
+ * el cliente en `globalThis`, cada recarga abría un pool nuevo y dejaba el
+ * anterior con sus conexiones vivas hasta agotar `max_connections`.
+ */
+const globalForDb = globalThis as typeof globalThis & {
+  __mispesitosSql?: ReturnType<typeof createSqlClient>
+}
+
+export const sqlClient = globalForDb.__mispesitosSql ?? createSqlClient(connectionString)
+// Sólo en desarrollo: en tests cada archivo cierra su cliente con `end()`, y
+// heredar uno cerrado por `globalThis` rompería el siguiente.
+if (process.env.NODE_ENV === "development") globalForDb.__mispesitosSql = sqlClient
 
 export const db = drizzle(sqlClient, { schema })
 

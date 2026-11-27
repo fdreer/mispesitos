@@ -1,7 +1,6 @@
 "use client"
 
 import { useActionState, useCallback, useEffect, useMemo, useState, useTransition } from "react"
-import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Archive, ChevronRight, FolderInput, MoreHorizontal, Pencil, Plus } from "lucide-react"
 
@@ -37,7 +36,6 @@ export function CategoryManager({
   categories: Category[]
   movementCounts?: Record<string, number>
 }) {
-  const router = useRouter()
   const [state, action, pending] = useActionState(createCategory, null)
   const [archiving, startTransition] = useTransition()
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null)
@@ -47,10 +45,9 @@ export function CategoryManager({
 
   useEffect(() => {
     if (state?.ok) {
-      router.refresh()
       toast.success("Categoría creada")
     }
-  }, [state, router])
+  }, [state])
 
   const labels = useMemo(() => categoryLabels(categories), [categories])
   const tree = useMemo(() => buildCategoryTree(categories.filter((c) => !c.archived)), [categories])

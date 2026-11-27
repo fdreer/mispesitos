@@ -186,7 +186,10 @@ describe("CategoryManager", () => {
     expect(refresh).not.toHaveBeenCalled()
   })
 
-  it("crear bien refresca la pantalla: la lista sale de la base, no del estado local", async () => {
+  // La lista sale de la base, no del estado local: la refresca el
+  // `revalidatePath` de la acción en su misma respuesta. Un `router.refresh()`
+  // acá sería un segundo render completo en el servidor por cada alta.
+  it("crear bien no pide un refresh aparte: la acción ya revalida", async () => {
     montar([categoria("c1", "Supermercado")])
 
     fireEvent.change(screen.getByPlaceholderText("Nombre de la categoría"), {
@@ -196,7 +199,8 @@ describe("CategoryManager", () => {
       fireEvent.submit(screen.getByRole("button", { name: "Agregar" }).closest("form")!)
     })
 
-    expect(refresh).toHaveBeenCalled()
+    expect(createCategory).toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
   })
 
   describe("el árbol", () => {

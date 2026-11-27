@@ -123,6 +123,7 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
           usdCents: e.amountCents,
           rate: Number(e.rate),
         })),
+        today,
       ).usdCents
     : 0
 

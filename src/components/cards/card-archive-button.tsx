@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Archive, ArchiveRestore } from "lucide-react"
 
@@ -19,7 +18,6 @@ export function CardArchiveButton({
 }) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const router = useRouter()
 
   function toggle() {
     setError(null)
@@ -30,7 +28,6 @@ export function CardArchiveButton({
         return
       }
       toast.success(archived ? `${name} volvió a estar activa` : `${name} archivada`)
-      router.refresh()
     })
   }
 
