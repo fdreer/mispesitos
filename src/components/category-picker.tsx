@@ -175,9 +175,9 @@ export function CategoryPicker({
         role="option"
         aria-selected={isSelected}
         className={cn(
-          "flex min-h-10 cursor-pointer items-center gap-2 rounded-md px-2 text-sm",
+          "flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-sm",
           indented && "pl-5",
-          index === active && "bg-accent",
+          index === active && "bg-white/[0.06]",
         )}
         // mousedown y no click: con click, el blur del buscador llega antes y
         // el panel se cierra sin elegir nada.
@@ -219,9 +219,10 @@ export function CategoryPicker({
         data-invalid={invalid || undefined}
         onClick={() => (open ? close() : openPanel())}
         className={cn(
-          "flex h-11 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-left text-sm shadow-xs outline-none",
-          "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
-          "data-invalid:border-destructive",
+          "flex h-10 w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-transparent bg-white/[0.04] px-3 text-left text-sm outline-none transition-colors",
+          "hover:bg-white/[0.06] aria-expanded:bg-white/[0.06]",
+          "focus-visible:border-white/15 focus-visible:bg-white/[0.06]",
+          "data-invalid:border-destructive/60",
         )}
       >
         {selected ? (
@@ -229,11 +230,11 @@ export function CategoryPicker({
         ) : (
           <span className="text-muted-foreground">Elegí una categoría</span>
         )}
-        <ChevronDown aria-hidden className="size-4 shrink-0 opacity-50" />
+        <ChevronDown aria-hidden className="size-4 shrink-0 text-muted-foreground" />
       </button>
 
       {open && (
-        <div className="rounded-md border border-border bg-popover p-1.5 shadow-md">
+        <div className="rounded-lg border border-white/[0.06] bg-obsidian p-1.5 shadow-lg shadow-black/40">
           <div className="relative">
             <Search
               aria-hidden
@@ -260,7 +261,7 @@ export function CategoryPicker({
               onBlur={(e) => {
                 if (e.relatedTarget !== triggerRef.current) setOpen(false)
               }}
-              className="h-10 pl-8"
+              className="h-9 border-transparent bg-white/[0.04] pl-8 focus-visible:border-white/15"
             />
           </div>
 

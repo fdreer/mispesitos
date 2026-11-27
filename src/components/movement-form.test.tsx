@@ -43,7 +43,7 @@ describe("MovementForm", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
-    fireEvent.click(screen.getByRole("checkbox", { name: /Pagado/ }))
+    fireEvent.click(screen.getByRole("switch", { name: /Pagado/ }))
     expect(screen.getByLabelText("Importe de la cuota 1")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: /^Fecha:/ }))
@@ -64,7 +64,7 @@ describe("MovementForm", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
-    const estado = screen.getByRole("checkbox", { name: label })
+    const estado = screen.getByRole("switch", { name: label })
     expect(estado.getAttribute("aria-checked")).toBe("true")
 
     expect(screen.queryByLabelText("Importe de la cuota 1")).toBeNull()
@@ -88,7 +88,7 @@ describe("MovementForm", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
-    fireEvent.click(screen.getByRole("checkbox", { name: /Pagado/ }))
+    fireEvent.click(screen.getByRole("switch", { name: /Pagado/ }))
     fireEvent.change(screen.getByLabelText("Cuotas"), { target: { value: "2" } })
 
     const visible1 = screen.getByLabelText<HTMLInputElement>("Importe de la cuota 1")
@@ -108,7 +108,7 @@ describe("MovementForm", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
-    fireEvent.click(screen.getByRole("checkbox", { name: /Pagado/ }))
+    fireEvent.click(screen.getByRole("switch", { name: /Pagado/ }))
     fireEvent.change(screen.getByLabelText("Importe de la cuota 1"), {
       target: { value: "1.000,50" },
     })
@@ -125,7 +125,7 @@ describe("MovementForm", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
-    fireEvent.click(screen.getByRole("checkbox", { name: /Pagado/ }))
+    fireEvent.click(screen.getByRole("switch", { name: /Pagado/ }))
     fireEvent.change(screen.getByLabelText("Cuotas"), { target: { value: "5000" } })
 
     expect(screen.queryByLabelText("Importe de la cuota 121")).toBeNull()
@@ -341,7 +341,7 @@ describe("MovementForm, el formulario de carga", () => {
   it("los atajos y el stepper cambian la cantidad de cuotas", () => {
     alta()
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1200" } })
-    fireEvent.click(screen.getByRole("checkbox", { name: /Pagado/ }))
+    fireEvent.click(screen.getByRole("switch", { name: /Pagado/ }))
 
     fireEvent.click(screen.getByRole("button", { name: "12 cuotas" }))
     expect(screen.getByLabelText<HTMLInputElement>("Cuotas").value).toBe("12")
@@ -357,7 +357,7 @@ describe("MovementForm, el formulario de carga", () => {
   it("el plan arranca colapsado, con un resumen, y se despliega con Editar cuotas", () => {
     alta()
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1200" } })
-    fireEvent.click(screen.getByRole("checkbox", { name: /Pagado/ }))
+    fireEvent.click(screen.getByRole("switch", { name: /Pagado/ }))
     fireEvent.click(screen.getByRole("button", { name: "12 cuotas" }))
 
     expect(screen.getByText(/^12 cuotas de .*100,00 desde 10\/08$/)).toBeTruthy()
@@ -380,7 +380,7 @@ describe("MovementForm, el formulario de carga", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Visa" }))
     fireEvent.click(screen.getByRole("button", { name: "3 cuotas" }))
 
-    expect(screen.queryByRole("checkbox", { name: /Pagado/ })).toBeNull()
+    expect(screen.queryByRole("switch", { name: /Pagado/ })).toBeNull()
     expect(valores(container, "creditCardId")).toEqual([VISA.id])
     expect(valores(container, "installmentDueDate")).toEqual([
       "2026-09-05",

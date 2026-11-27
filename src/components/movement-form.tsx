@@ -16,9 +16,9 @@ import {
 import { DateField } from "@/components/date-field"
 import { Segmented } from "@/components/segmented"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { assignStatements, formatPeriod, type StatementDates } from "@/lib/cards"
 import { isLeafCategory } from "@/lib/category-tree"
 import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
@@ -54,6 +54,13 @@ function rateToInput(rate: string): string {
 function planKeyOf(totalCents: number, count: number, date: IsoDate, cardId: string): string {
   return `${totalCents}|${count}|${date}|${cardId}`
 }
+
+/** Campos del formulario: relleno suave en vez de caja con borde. */
+const FIELD =
+  "h-10 rounded-lg border-transparent bg-white/[0.04] px-3 hover:bg-white/[0.06] focus-visible:border-white/15 focus-visible:bg-white/[0.06] dark:bg-white/[0.04]"
+
+/** Etiquetas discretas: el dato manda, no el rótulo. */
+const LABEL = "text-xs font-normal text-muted-foreground"
 
 /** Los atajos de cantidad de cuotas (§5.2 del plan v2). */
 const COUNT_SHORTCUTS = [1, 3, 6, 12] as const
@@ -317,7 +324,7 @@ export function MovementForm({
 
   return (
     <form action={action} className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-5 pt-4 pb-5 sm:px-6">
       {/* Sólo editando. `updateMovement` lo valida como UUID y filtra además
           por usuario, igual que borrar: que el id viaje por el formulario no
           lo hace más confiable que cualquier otro campo. */}
@@ -339,60 +346,70 @@ export function MovementForm({
       {/* El error general arriba (§5.2). Si la acción marcó campos, cada uno
           lleva el suyo al lado y acá sólo se avisa que hay que mirarlos. */}
       {state && !state.ok && (
-        <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {hasFieldErrors ? "Revisá los campos marcados." : state.message}
         </p>
       )}
 
-      {/* Importe primero (§5.2): es lo único que siempre hay que escribir, y
-          con el foco puesto el diálogo arranca listo para tipear. */}
+      {/* Importe primero (§5.2) y como protagonista: es lo único que siempre
+          hay que escribir, y con el foco puesto el diálogo arranca listo para
+          tipear. Sin caja: una línea de base que se enciende con el foco. */}
       <div className="space-y-1.5">
-        <Label htmlFor="amount">Importe</Label>
-        <div className="flex items-stretch gap-2">
-          <div className="relative flex-1">
-            <span className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-base font-medium">
-              {currency === "USD" ? "US$" : "$"}
-            </span>
-            <Input
-              ref={amountRef}
-              id="amount"
-              inputMode="decimal"
-              autoComplete="off"
-              enterKeyHint="next"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  descriptionRef.current?.focus()
-                }
-              }}
-              // Sin autoFocus editando: el diálogo se abre para cambiar
-              // cualquier cosa, y el teclado del teléfono tapando media
-              // pantalla no ayuda.
-              autoFocus={!movement}
-              value={amount}
-              onChange={(e) => setAmount(formatAmountInput(e.target.value, amount))}
-              required
-              aria-invalid={errors.amountCents !== undefined}
-              className={cn("h-11 text-lg font-medium tracking-tight tabular-nums", currency === "USD" ? "pl-13" : "pl-8")}
-            />
-          </div>
+        <Label htmlFor="amount" className="sr-only">
+          Importe
+        </Label>
+        <div
+          className={cn(
+            "flex items-center gap-3 border-b pb-2 transition-colors",
+            errors.amountCents
+              ? "border-destructive/70"
+              : "border-white/10 focus-within:border-primary/70",
+          )}
+        >
+          <span className="shrink-0 text-2xl font-medium text-muted-foreground tabular-nums">
+            {currency === "USD" ? "US$" : "$"}
+          </span>
+          <input
+            ref={amountRef}
+            id="amount"
+            inputMode="decimal"
+            autoComplete="off"
+            enterKeyHint="next"
+            placeholder="0"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                descriptionRef.current?.focus()
+              }
+            }}
+            // Sin autoFocus editando: el diálogo se abre para cambiar
+            // cualquier cosa, y el teclado del teléfono tapando media
+            // pantalla no ayuda.
+            autoFocus={!movement}
+            value={amount}
+            onChange={(e) => setAmount(formatAmountInput(e.target.value, amount))}
+            required
+            aria-invalid={errors.amountCents !== undefined}
+            className="h-12 w-full min-w-0 flex-1 bg-transparent text-[2rem] leading-none font-semibold tracking-tight text-paper tabular-nums outline-none placeholder:text-smoke"
+          />
           <Segmented
             label="Moneda"
+            size="sm"
             value={currency}
             onChange={setCurrency}
             options={[
               { value: "ARS", label: "ARS" },
               { value: "USD", label: "USD" },
             ]}
-            className="w-28 shrink-0 sm:w-32"
+            className="w-auto shrink-0"
           />
         </div>
         {errors.amountCents && <p className="text-destructive text-xs">{errors.amountCents[0]}</p>}
       </div>
 
-      <div className="grid gap-3.5 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5 sm:col-span-2">
-          <Label htmlFor="description">Descripción</Label>
+          <Label htmlFor="description" className={LABEL}>Descripción</Label>
           <Input
             ref={descriptionRef}
             id="description"
@@ -401,6 +418,7 @@ export function MovementForm({
             maxLength={200}
             autoComplete="off"
             enterKeyHint="next"
+            placeholder={kind === "income" ? "Ej. Sueldo" : "Ej. Supermercado"}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault()
@@ -411,7 +429,7 @@ export function MovementForm({
             value={description}
             onChange={(e) => changeDescription(e.target.value)}
             aria-invalid={errors.description !== undefined}
-            className="h-11"
+            className={FIELD}
           />
           {suggestions.length > 0 && (
             <datalist id={datalistId}>
@@ -423,8 +441,8 @@ export function MovementForm({
           {errors.description && <p className="text-destructive text-xs">{errors.description[0]}</p>}
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="categoryId">Categoría</Label>
+        <div className="space-y-1.5">
+          <Label htmlFor="categoryId" className={LABEL}>Categoría</Label>
           {/* Editando arranca en la del movimiento, que puede ser una archivada:
               el selector la sigue ofreciendo (`keepId`). Sin eso, abrir el
               diálogo de un movimiento viejo lo movía de categoría con sólo
@@ -440,21 +458,22 @@ export function MovementForm({
           {errors.categoryId && <p className="text-destructive text-xs">{errors.categoryId[0]}</p>}
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="date">{isCard ? "Fecha de la compra" : "Fecha"}</Label>
+        <div className="space-y-1.5">
+          <Label htmlFor="date" className={LABEL}>{isCard ? "Fecha de la compra" : "Fecha"}</Label>
           <DateField
             id="date"
             hiddenName="date"
             value={date}
             onChange={setDate}
             ariaLabel={`Fecha: ${formatIsoForDisplay(date)}`}
+            className={cn(FIELD, "w-full cursor-pointer justify-start gap-2 font-normal tabular-nums")}
           />
           {errors.date && <p className="text-destructive text-xs">{errors.date[0]}</p>}
         </div>
 
         {currency === "USD" && (
-          <div className="space-y-2">
-            <Label htmlFor="rateVisible">Tipo de cambio</Label>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor="rateVisible" className={LABEL}>Tipo de cambio</Label>
             {/* Editando gana el TC con el que se guardó: es el del día de la
                 operación, y el sugerido de hoy no tiene nada que ver con ella.
                 Sólo si el movimiento estaba en pesos y se lo pasa a dólares acá
@@ -470,7 +489,7 @@ export function MovementForm({
               }
               required
               aria-invalid={errors.rate !== undefined}
-              className="h-11"
+              className={cn(FIELD, "tabular-nums")}
             />
             {errors.rate ? (
               <p className="text-destructive text-xs">{errors.rate[0]}</p>
@@ -490,8 +509,8 @@ export function MovementForm({
       {/* Medio de pago (§1.4 del plan v2). Sin tarjetas cargadas no aparece:
           sería una pregunta con una sola respuesta. */}
       {kind === "expense" && cardChoices.length > 0 && (
-        <div className="space-y-2">
-          <p aria-hidden className="text-sm font-medium">
+        <div className="space-y-1.5">
+          <p aria-hidden className={LABEL}>
             Medio de pago
           </p>
           <Segmented
@@ -510,46 +529,52 @@ export function MovementForm({
         </div>
       )}
 
-      {/* Checkbox "Pagado / Cobrado" marcado por defecto: la mayoría de los
+      {/* "Pagado / Cobrado" activado por defecto: la mayoría de los
           movimientos en efectivo/débito ya están pagos al cargarlos. Con
           tarjeta no se ofrece: se paga con el resumen (§1.3). */}
       {canSettle && (
         <label
           htmlFor={settledId}
-          className="flex cursor-pointer items-center gap-3 rounded-lg border border-graphite bg-carbon/50 px-3.5 py-2.5 transition-colors hover:border-smoke"
+          className="flex cursor-pointer items-center gap-3 rounded-lg bg-white/[0.03] px-3.5 py-3 transition-colors hover:bg-white/[0.05]"
         >
-          <Checkbox
-            id={settledId}
-            checked={settled}
-            onCheckedChange={(checked) => setSettled(checked === true)}
-          />
           <div className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-foreground">
-              {kind === "income" ? "Cobrado" : "Pagado"}
+            <span className="block text-sm text-foreground">
+              {kind === "income" ? "Ya está cobrado" : "Ya está pagado"}
             </span>
             <span className="block text-xs text-muted-foreground">
               {settled
-                ? kind === "income"
-                  ? "Desmarcalo si queda pendiente de cobro"
-                  : "Desmarcalo si queda pendiente o es en cuotas"
+                ? `En la fecha del movimiento${totalCents > 0 ? `, por ${formatMoney(totalCents, currency)}` : ""}`
                 : kind === "income"
-                  ? "Pendiente de cobro · elegí el vencimiento abajo"
-                  : "Pendiente de pago · podés dividir en cuotas"}
+                  ? "Queda pendiente de cobro"
+                  : "Queda pendiente · podés dividirlo en cuotas"}
             </span>
           </div>
+          <Switch
+            id={settledId}
+            aria-label={kind === "income" ? "Cobrado" : "Pagado"}
+            checked={settled}
+            onCheckedChange={setSettled}
+          />
         </label>
+      )}
+
+      {totalCents > 0 && isSettled && (
+        <>
+          <input type="hidden" name="installmentAmount" value={totalCents} />
+          <input type="hidden" name="installmentDueDate" value={date} />
+        </>
       )}
 
       {kind === "expense" && !isSettled && (
         <div className="space-y-1.5">
-          <Label htmlFor="count">Cuotas</Label>
+          <Label htmlFor="count" className={LABEL}>Cuotas</Label>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center">
+            <div className="flex h-9 items-center rounded-lg bg-white/[0.04] p-0.5">
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 size="icon"
-                className="size-9 rounded-r-none"
+                className="size-8 text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
                 aria-label="Una cuota menos"
                 disabled={!countValid || count <= 1}
                 onClick={() => setCount(count - 1)}
@@ -565,13 +590,13 @@ export function MovementForm({
                 aria-invalid={!countValid}
                 onFocus={(e) => e.currentTarget.select()}
                 onChange={(e) => setCountInput(e.target.value)}
-                className="h-9 w-12 rounded-none border-x-0 px-1 text-center text-sm tabular-nums"
+                className="h-8 w-10 border-transparent bg-transparent px-1 text-center text-sm font-medium tabular-nums dark:bg-transparent"
               />
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 size="icon"
-                className="size-9 rounded-l-none"
+                className="size-8 text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
                 aria-label="Una cuota más"
                 disabled={!countValid || count >= MAX_INSTALLMENTS}
                 onClick={() => setCount(count + 1)}
@@ -580,23 +605,26 @@ export function MovementForm({
               </Button>
             </div>
             <div className="flex items-center gap-1" role="group" aria-label="Cantidades frecuentes">
-              {COUNT_SHORTCUTS.map((n) => (
-                <Button
-                  key={n}
-                  type="button"
-                  size="sm"
-                  variant={countValid && count === n ? "secondary" : "ghost"}
-                  aria-pressed={countValid && count === n}
-                  aria-label={n === 1 ? "1 cuota" : `${n} cuotas`}
-                  onClick={() => setCount(n)}
-                  className={cn(
-                    "h-9 min-w-9 px-2.5 text-xs tabular-nums",
-                    countValid && count === n && "border border-graphite bg-graphite text-paper",
-                  )}
-                >
-                  {n}
-                </Button>
-              ))}
+              {COUNT_SHORTCUTS.map((n) => {
+                const on = countValid && count === n
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    aria-pressed={on}
+                    aria-label={n === 1 ? "1 cuota" : `${n} cuotas`}
+                    onClick={() => setCount(n)}
+                    className={cn(
+                      "h-8 min-w-9 cursor-pointer rounded-full px-3 text-xs font-medium tabular-nums transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                      on
+                        ? "bg-paper text-void"
+                        : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground",
+                    )}
+                  >
+                    {n}
+                  </button>
+                )
+              })}
             </div>
           </div>
           {!countValid && (
@@ -607,22 +635,11 @@ export function MovementForm({
         </div>
       )}
 
-      {totalCents > 0 && isSettled && (
-        <>
-          <input type="hidden" name="installmentAmount" value={totalCents} />
-          <input type="hidden" name="installmentDueDate" value={date} />
-          <p className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-sm text-primary">
-            {kind === "income" ? "Cobrado" : "Pagado"} por {formatMoney(totalCents, currency)} en la
-            fecha del movimiento.
-          </p>
-        </>
-      )}
-
       {totalCents > 0 && !isSettled && (
-        <div className="space-y-3 rounded-lg border border-graphite bg-carbon/70 p-3 sm:p-3.5">
-          <div className="flex items-center justify-between gap-2">
+        <div className="space-y-3 rounded-lg bg-white/[0.03] px-3.5 py-3">
+          <div className="flex items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-medium text-foreground sm:text-sm" aria-live="polite">
+              <p className="truncate text-sm text-foreground" aria-live="polite">
                 {planSummary(installmentCents, dueDatesForSummary, currency, today)}
               </p>
               {card && statementPlan?.[0] && (
@@ -633,17 +650,15 @@ export function MovementForm({
                 </p>
               )}
             </div>
-            <Button
+            <button
               type="button"
-              variant="secondary"
-              size="sm"
-              className="h-7 shrink-0 px-2.5 text-xs"
+              className="shrink-0 cursor-pointer rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors outline-none hover:text-paper focus-visible:ring-3 focus-visible:ring-ring/50"
               aria-expanded={showRows}
               aria-controls={rowsId}
               onClick={() => setPlanOpen((o) => !o)}
             >
               {showRows ? "Ocultar cuotas" : "Editar cuotas"}
-            </Button>
+            </button>
           </div>
 
           {paidStatementHit >= 0 && statementPlan && (
@@ -658,14 +673,15 @@ export function MovementForm({
           <div
             id={rowsId}
             className={cn(
-              "space-y-2 border-t border-graphite/80 pt-2.5",
-              rows.length > 5 && "max-h-60 overflow-y-auto pr-1",
+              // Sin scroll propio: el cuerpo del modal ya scrollea, y dos
+              // barras anidadas se pelean por la rueda.
+              "space-y-1.5 border-t border-white/[0.06] pt-3",
               !showRows && "hidden",
             )}
           >
             {rows.map((row, index) => (
               <div key={index} className="flex items-center gap-2">
-                <span className="text-muted-foreground w-6 shrink-0 text-center text-xs font-medium tabular-nums">
+                <span className="text-muted-foreground w-5 shrink-0 text-center text-xs tabular-nums">
                   {index + 1}
                 </span>
                 {/* El que viaja: centavos, el formato que espera la acción. Vacío
@@ -686,10 +702,10 @@ export function MovementForm({
                     onChange={(e) => updateRow(index, { amount: formatAmountInput(e.target.value, row.amount) })}
                     aria-label={`Importe de la cuota ${index + 1}`}
                     aria-invalid={row.amount !== "" && installmentCents[index] === null}
-                    className={cn("h-9 text-sm tabular-nums", currency === "USD" ? "pl-10" : "pl-6")}
+                    className={cn(FIELD, "h-9 text-sm tabular-nums", currency === "USD" ? "pl-10" : "pl-6")}
                   />
                 </div>
-                <div className="w-[122px] shrink-0 sm:w-[138px]">
+                <div className="w-[122px] shrink-0 sm:w-[132px]">
                   {card && statementPlan?.[index] ? (
                     // Con tarjeta el vencimiento no se elige: es el del
                     // resumen. Se corrige desde /tarjetas, para todas las
@@ -712,6 +728,7 @@ export function MovementForm({
                       value={row.dueDate}
                       onChange={(next) => updateRow(index, { dueDate: next })}
                       ariaLabel={`Vencimiento de la cuota ${index + 1}: ${formatIsoForDisplay(row.dueDate)}`}
+                      className={cn(FIELD, "h-9 w-full cursor-pointer justify-start gap-1.5 px-2.5 text-sm font-normal tabular-nums")}
                     />
                   )}
                 </div>
@@ -735,10 +752,10 @@ export function MovementForm({
 
       {/* Fijo abajo en el modal: header y botones quedan siempre accesibles
           aunque el plan de cuotas tenga muchas filas. */}
-      <div className="flex shrink-0 flex-col gap-2 border-t border-graphite bg-popover px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:flex-row-reverse sm:px-6 sm:py-4">
+      <div className="flex shrink-0 flex-col gap-1.5 border-t border-white/[0.06] px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:flex-row-reverse sm:items-center sm:px-6 sm:py-4">
         <Button
           type="submit"
-          className="h-11 sm:flex-1"
+          className="h-10 rounded-lg px-5 font-semibold sm:min-w-32"
           disabled={pending || !sumMatches || totalCents <= 0}
           onClick={() => {
             keepOpen.current = false
@@ -749,8 +766,8 @@ export function MovementForm({
         {!movement && (
           <Button
             type="submit"
-            variant="outline"
-            className="h-11 sm:flex-1"
+            variant="ghost"
+            className="h-10 rounded-lg px-4 text-muted-foreground hover:text-foreground"
             disabled={pending || !sumMatches || totalCents <= 0}
             onClick={() => {
               keepOpen.current = true

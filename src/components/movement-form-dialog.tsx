@@ -66,11 +66,13 @@ export function MovementFormDialog({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="top-auto bottom-0 left-0 flex max-h-[92dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-t-2xl rounded-b-none border-t border-graphite p-0 ring-0 sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:max-h-[calc(100dvh-2rem)] sm:max-w-[540px] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:border sm:border-graphite">
-        <div className="shrink-0 border-b border-graphite/70 px-4 pt-3 pb-3 sm:px-6 sm:pt-5 sm:pb-4">
-          <div aria-hidden className="mx-auto mb-2.5 h-1 w-10 rounded-full bg-smoke sm:hidden" />
+      <DialogContent className="top-auto bottom-0 left-0 flex max-h-[92dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-t-2xl rounded-b-none border-t border-white/[0.08] p-0 shadow-2xl shadow-black/60 ring-0 sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:max-h-[calc(100dvh-2rem)] sm:max-w-[480px] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:border sm:border-white/[0.08]">
+        <div className="shrink-0 px-5 pt-3 sm:px-6 sm:pt-5">
+          <div aria-hidden className="mx-auto mb-3 h-1 w-9 rounded-full bg-white/15 sm:hidden" />
           <DialogHeader>
-            <DialogTitle>{(movement ? EDIT_TITLES : TITLES)[kind]}</DialogTitle>
+            <DialogTitle className="text-[15px] font-medium text-paper">
+              {(movement ? EDIT_TITLES : TITLES)[kind]}
+            </DialogTitle>
           </DialogHeader>
         </div>
         <MovementForm
