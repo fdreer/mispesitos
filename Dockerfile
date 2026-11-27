@@ -18,11 +18,17 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # Docker el proyecto sigue usando el layout normal de pnpm.
 RUN pnpm install --frozen-lockfile --node-linker=hoisted
 
-FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
+# Sobre `deps` y no copiando node_modules: hereda la capa tal cual en vez de
+# duplicarla (la copia sola tardaba 7–13 s en CI).
+FROM deps AS builder
 COPY . .
+# SKIP_TYPECHECK=1 saltea el chequeo de tipos de `next build` (~16 s). Sólo lo
+# pasa el CI, donde el job `verify` ya corrió `tsc` y es requisito para
+# publicar. Una build local lo sigue haciendo.
+ARG SKIP_TYPECHECK=0
 ENV NEXT_TELEMETRY_DISABLED=1 \
-    NEXT_OUTPUT=standalone
+    NEXT_OUTPUT=standalone \
+    SKIP_TYPECHECK=${SKIP_TYPECHECK}
 # Valores de mentira SOLO para compilar: src/db/client.ts y better-auth los
 # exigen al cargar los módulos, pero ninguna página se prerenderiza contra la
 # base. Los de verdad llegan en runtime por variables de entorno.

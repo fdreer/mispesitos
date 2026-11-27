@@ -83,7 +83,8 @@ El script se ejecuta en cada `docker compose up` (servicio `migrate`) y con `pnp
 - `MISPESITOS_VERSION` elige el tag de la imagen; en un servidor conviene fijarlo y no seguir `latest`.
 
 ### CI (`.github/workflows/docker.yml`)
-- El job `verify` (lint, typecheck, tests unitarios) es requisito de todo lo demás: no se publica `latest` con el código roto. En PRs se compila la imagen sin publicarla.
+- `verify` (lint, typecheck, tests unitarios) corre en paralelo con `build`, y `merge` necesita a los dos: ningún tag apunta a código roto. Si `verify` falla, las imágenes ya subidas quedan sin tag en GHCR. En PRs se compila la imagen sin publicarla, y los cambios que sólo tocan `*.md`, `docs/` o `.env.example` no disparan el workflow.
+- Sin caché de capas de BuildKit: con `cache-to: type=gha,mode=max` la exportación tardaba 75–114 s por arquitectura y sólo ahorraba el `pnpm install` (~22 s). Por la misma cuenta, `builder` parte de `deps` en vez de copiar `node_modules`, y el CI pasa `SKIP_TYPECHECK=1` (`typescript.ignoreBuildErrors` en `next.config.ts`) porque `verify` ya corrió `tsc`; una build local sigue chequeando tipos.
 - La imagen es multi-arquitectura sin QEMU: `build` compila `linux/amd64` en `ubuntu-latest` y `linux/arm64` en `ubuntu-24.04-arm` (runners ARM nativos, gratis en repos públicos), sube cada una por digest, y `merge` arma el manifiesto con los tags (`latest`, `sha-*`, semver). El lockfile ya trae los binarios `linux-*-musl` de las dependencias nativas (SWC, Tailwind oxide, sharp), así que el `Dockerfile` no cambia por arquitectura. Si el repo vuelve a ser privado, los runners ARM dejan de ser gratuitos.
 - No corre `pnpm test:db` porque necesita un Postgres con los roles; si se suma, con un `services: postgres` del workflow.
 

@@ -1,11 +1,22 @@
 name: Publish Docker images to GHCR
 
+# Los cambios que sólo tocan documentación no compilan ni publican nada.
 on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".env.example"
+      - "LICENSE"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".env.example"
+      - "LICENSE"
   workflow_dispatch:
 
 concurrency:
@@ -17,8 +28,9 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  # Ninguna imagen se publica si el código no pasa lint, tipos y tests
-  # unitarios: `latest` es lo que baja `docker compose pull` en cada instalación.
+  # `verify` corre en paralelo con `build`, pero `merge` necesita a los dos:
+  # ningún tag (`latest` incluido) apunta a código que no pasó lint, tipos y
+  # tests. Si `verify` falla, las imágenes ya subidas quedan sin tag.
   verify:
     runs-on: ubuntu-latest
     permissions:
@@ -49,7 +61,6 @@ jobs:
   # Una compilación nativa por arquitectura (sin QEMU): amd64 para PCs y
   # servidores x86, arm64 para Macs con Apple Silicon y servidores ARM.
   build:
-    needs: verify
     strategy:
       fail-fast: true
       matrix:
@@ -91,6 +102,10 @@ jobs:
       # En un PR sólo se compila (para detectar roturas del Dockerfile). En
       # main y en tags v* se sube por digest, sin tag; el job `merge` arma el
       # manifiesto multi-arquitectura con los tags finales.
+      #
+      # Sin caché de capas a propósito: exportarla a la caché de Actions
+      # tardaba 75–114 s por arquitectura y sólo ahorraba el `pnpm install`
+      # (~22 s); el resto cambia en cada commit.
       - name: Build
         id: build
         uses: docker/build-push-action@v6
@@ -99,8 +114,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
-          cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
-          cache-to: type=gha,mode=max,scope=${{ env.PLATFORM_PAIR }}
+          # `verify` ya corre tsc: no repetirlo dentro de `next build`.
+          build-args: SKIP_TYPECHECK=1
 
       - name: Export digest
         if: github.event_name != 'pull_request'
@@ -120,7 +135,7 @@ jobs:
 
   merge:
     if: github.event_name != 'pull_request'
-    needs: build
+    needs: [verify, build]
     runs-on: ubuntu-latest
     permissions:
       contents: read

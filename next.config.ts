@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
+  typescript: {
+    ignoreBuildErrors: process.env.SKIP_TYPECHECK === "1",
+  },
   async headers() {
     return [
       {
