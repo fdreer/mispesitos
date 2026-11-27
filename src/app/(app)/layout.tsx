@@ -9,7 +9,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   await requireSettings()
 
   return (
-    <div className="lg:flex">
+    <div className="min-h-dvh lg:flex">
       <AppSidebar />
       <Suspense fallback={null}>
         <MobileQuickAddLoader />
