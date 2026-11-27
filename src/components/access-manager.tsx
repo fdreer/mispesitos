@@ -69,7 +69,7 @@ export function InviteForm() {
       </form>
 
       {link && (
-        <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3" aria-live="polite">
+        <div className="space-y-2 rounded-lg bg-white/[0.03] px-3.5 py-3" aria-live="polite">
           <p className="text-sm text-paper">Copiá el link y mandáselo. No se vuelve a mostrar.</p>
           <div className="flex gap-2">
             <Input value={link} readOnly className="h-10 font-mono text-xs" onFocus={(e) => e.currentTarget.select()} aria-label="Link de invitación" />

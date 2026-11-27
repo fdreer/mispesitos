@@ -50,7 +50,7 @@ function AjustesSkeleton() {
       {[0, 1, 2, 3, 4].map((i) => (
         <div key={i} className="space-y-1.5">
           <div className="h-4 w-2/3 animate-pulse rounded bg-graphite" />
-          <div className="h-8 w-full animate-pulse rounded-lg border border-input" />
+          <div className="h-8 w-full animate-pulse rounded-lg bg-white/[0.03]" />
         </div>
       ))}
       <div className="h-8 w-full animate-pulse rounded-lg bg-graphite" />

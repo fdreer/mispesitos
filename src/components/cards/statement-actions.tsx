@@ -150,7 +150,7 @@ function PayStatementForm({
       <input type="hidden" name="statementId" value={statement.id ?? ""} />
       <input type="hidden" name="mode" value={mode} />
 
-      <dl className="grid grid-cols-2 gap-2 rounded-lg border border-border/70 bg-muted/20 p-3 text-sm">
+      <dl className="grid grid-cols-2 gap-2 rounded-lg bg-white/[0.03] px-3.5 py-3 text-sm">
         {statement.arsCents > 0 && (
           <>
             <dt className="text-muted-foreground">En pesos</dt>
@@ -181,7 +181,7 @@ function PayStatementForm({
 
       {hasUsd && (
         <fieldset className="space-y-3">
-          <legend className="mb-2 text-sm font-medium">La parte en dólares la pagaste…</legend>
+          <legend className="mb-2 text-xs text-muted-foreground">La parte en dólares la pagaste…</legend>
           <Segmented
             label="Cómo pagaste la parte en dólares"
             value={mode}
@@ -202,7 +202,7 @@ function PayStatementForm({
                 value={rate}
                 onChange={(e) => setRate(e.target.value)}
                 aria-invalid={errors.usdPaidRate !== undefined}
-                className="h-11"
+                className="h-10"
               />
               {errors.usdPaidRate ? (
                 <p className="text-destructive text-xs">{errors.usdPaidRate[0]}</p>

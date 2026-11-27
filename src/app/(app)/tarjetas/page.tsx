@@ -170,7 +170,7 @@ function TarjetasSkeleton() {
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-hidden>
       {[0, 1].map((i) => (
-        <div key={i} className="h-[236px] animate-pulse rounded-xl border border-border" />
+        <div key={i} className="h-[236px] animate-pulse rounded-xl bg-white/[0.03]" />
       ))}
     </div>
   )

@@ -150,7 +150,7 @@ function MovementCards({
               <article
                 key={m.id}
                 aria-label={m.description}
-                className="rounded-lg border border-border bg-background p-3"
+                className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5"
               >
                 <button
                   type="button"
@@ -271,7 +271,7 @@ export function MovementList({
 
   if (movements.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-3 rounded-lg border border-border bg-card/40 px-4 py-10 text-center">
+      <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-white/[0.08] px-4 py-12 text-center">
         <p className="text-muted-foreground text-sm">{emptyMessage}</p>
         {hasActiveFilters && basePath ? (
           <Button asChild variant="outline">
@@ -437,7 +437,7 @@ export function MovementList({
           <Button
             type="button"
             variant="outline"
-            className="h-11 w-full"
+            className="h-10 w-full"
             disabled={loadingMore}
             onClick={handleLoadMore}
           >
@@ -472,7 +472,7 @@ export function MovementListSkeleton({ rows = 5 }: { rows?: number }) {
       </div>
       <div className="space-y-2 md:hidden" aria-hidden>
         {Array.from({ length: 3 }, (_, i) => (
-          <div key={i} className="space-y-3 rounded-lg border border-border bg-background p-3">
+          <div key={i} className="space-y-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5">
             <div className="flex items-start justify-between gap-3">
               <div className="h-4 w-40 animate-pulse rounded bg-graphite" />
               <div className="h-4 w-20 animate-pulse rounded bg-graphite" />

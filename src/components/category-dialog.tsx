@@ -132,7 +132,7 @@ function CategoryDialogForm({
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoFocus
-              className="h-11"
+              className="h-10"
             />
           </div>
           <ColorField
@@ -159,7 +159,7 @@ function CategoryDialogForm({
             id="category-parent"
             value={parentId}
             onChange={(e) => setParentId(e.target.value)}
-            className="h-11 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+            className="h-10 w-full cursor-pointer rounded-lg border border-transparent bg-white/[0.04] px-3 text-sm outline-none transition-colors hover:bg-white/[0.06] focus-visible:border-white/15"
           >
             <option value="">Primer nivel (sin categoría padre)</option>
             {moveTargets(categories, mode.category.id).map((c) => (
@@ -177,8 +177,8 @@ function CategoryDialogForm({
       )}
 
       {movementsToMove > 0 && receivingParent && (
-        <fieldset className="space-y-2 rounded-md border border-border p-3">
-          <legend className="px-1 text-sm font-medium">
+        <fieldset className="space-y-2 rounded-lg bg-white/[0.03] px-3.5 py-3">
+          <legend className="px-1 text-xs text-muted-foreground">
             {receivingParent.name} tiene {movementsToMove}{" "}
             {movementsToMove === 1 ? "movimiento" : "movimientos"}
           </legend>
@@ -235,7 +235,7 @@ function ColorField({
   const current = CATEGORY_PALETTE.some((c) => c.key === defaultValue) ? defaultValue : ""
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">Color</legend>
+      <legend className="text-xs text-muted-foreground">Color</legend>
       <div className="flex flex-wrap gap-2">
         {options.map((o) => (
           <label key={o.key || "auto"} className="relative cursor-pointer" title={o.label}>
@@ -269,7 +269,7 @@ function IconField({ defaultValue }: { defaultValue: string | null }) {
   const current = defaultValue && keys.includes(defaultValue as CategoryIconKey) ? defaultValue : ""
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">Icono</legend>
+      <legend className="text-xs text-muted-foreground">Icono</legend>
       <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-9">
         <label className="cursor-pointer" title="Sin icono">
           <input
@@ -282,7 +282,7 @@ function IconField({ defaultValue }: { defaultValue: string | null }) {
           />
           <span
             aria-hidden
-            className="flex size-9 items-center justify-center rounded-md border border-border text-xs text-muted-foreground peer-checked:border-foreground peer-checked:bg-accent peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50"
+            className="flex size-9 items-center justify-center rounded-lg border border-transparent bg-white/[0.04] text-xs text-muted-foreground transition-colors hover:bg-white/[0.07] peer-checked:border-white/30 peer-checked:bg-white/10 peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50"
           >
             —
           </span>
@@ -301,7 +301,7 @@ function IconField({ defaultValue }: { defaultValue: string | null }) {
               />
               <span
                 aria-hidden
-                className="flex size-9 items-center justify-center rounded-md border border-border peer-checked:border-foreground peer-checked:bg-accent peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50"
+                className="flex size-9 items-center justify-center rounded-lg border border-transparent bg-white/[0.04] text-muted-foreground transition-colors hover:bg-white/[0.07] peer-checked:border-white/30 peer-checked:bg-white/10 peer-checked:text-paper peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50"
               >
                 <Icon className="size-4" />
               </span>

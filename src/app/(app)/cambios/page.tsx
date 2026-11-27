@@ -147,10 +147,10 @@ function CambiosSkeleton() {
     <div className="space-y-6" aria-hidden>
       <div className="grid gap-3 sm:grid-cols-3">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="h-[92px] animate-pulse rounded-xl border border-border" />
+          <div key={i} className="h-[92px] animate-pulse rounded-xl bg-white/[0.03]" />
         ))}
       </div>
-      <div className="h-[180px] animate-pulse rounded-lg border border-border" />
+      <div className="h-[180px] animate-pulse rounded-lg bg-white/[0.03]" />
     </div>
   )
 }

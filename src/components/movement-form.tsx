@@ -14,6 +14,7 @@ import {
   rememberCategory,
 } from "@/components/category-picker"
 import { DateField } from "@/components/date-field"
+import { PaymentMethodPills } from "@/components/payment-method-pills"
 import { Segmented } from "@/components/segmented"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -55,12 +56,8 @@ function planKeyOf(totalCents: number, count: number, date: IsoDate, cardId: str
   return `${totalCents}|${count}|${date}|${cardId}`
 }
 
-/** Campos del formulario: relleno suave en vez de caja con borde. */
-const FIELD =
-  "h-10 rounded-lg border-transparent bg-white/[0.04] px-3 hover:bg-white/[0.06] focus-visible:border-white/15 focus-visible:bg-white/[0.06] dark:bg-white/[0.04]"
-
-/** Etiquetas discretas: el dato manda, no el rótulo. */
-const LABEL = "text-xs font-normal text-muted-foreground"
+/** Campos del formulario: algo más altos que el default de la app. */
+const FIELD = "h-10"
 
 /** Los atajos de cantidad de cuotas (§5.2 del plan v2). */
 const COUNT_SHORTCUTS = [1, 3, 6, 12] as const
@@ -409,7 +406,7 @@ export function MovementForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5 sm:col-span-2">
-          <Label htmlFor="description" className={LABEL}>Descripción</Label>
+          <Label htmlFor="description">Descripción</Label>
           <Input
             ref={descriptionRef}
             id="description"
@@ -442,7 +439,7 @@ export function MovementForm({
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="categoryId" className={LABEL}>Categoría</Label>
+          <Label htmlFor="categoryId">Categoría</Label>
           {/* Editando arranca en la del movimiento, que puede ser una archivada:
               el selector la sigue ofreciendo (`keepId`). Sin eso, abrir el
               diálogo de un movimiento viejo lo movía de categoría con sólo
@@ -459,7 +456,7 @@ export function MovementForm({
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="date" className={LABEL}>{isCard ? "Fecha de la compra" : "Fecha"}</Label>
+          <Label htmlFor="date">{isCard ? "Fecha de la compra" : "Fecha"}</Label>
           <DateField
             id="date"
             hiddenName="date"
@@ -473,7 +470,7 @@ export function MovementForm({
 
         {currency === "USD" && (
           <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor="rateVisible" className={LABEL}>Tipo de cambio</Label>
+            <Label htmlFor="rateVisible">Tipo de cambio</Label>
             {/* Editando gana el TC con el que se guardó: es el del día de la
                 operación, y el sugerido de hoy no tiene nada que ver con ella.
                 Sólo si el movimiento estaba en pesos y se lo pasa a dólares acá
@@ -509,20 +506,21 @@ export function MovementForm({
       {/* Medio de pago (§1.4 del plan v2). Sin tarjetas cargadas no aparece:
           sería una pregunta con una sola respuesta. */}
       {kind === "expense" && cardChoices.length > 0 && (
-        <div className="space-y-1.5">
-          <p aria-hidden className={LABEL}>
+        <div className="space-y-2">
+          <p aria-hidden className="text-xs text-muted-foreground">
             Medio de pago
           </p>
-          <Segmented
-            label="Medio de pago"
-            value={cardId}
-            onChange={setCardId}
-            wrap
-            options={[
-              { value: "", label: "Efectivo / débito" },
-              ...cardChoices.map((c) => ({ value: c.id, label: c.name })),
-            ]}
-          />
+          <PaymentMethodPills value={cardId} onChange={setCardId} cards={cardChoices} />
+          {/* Con tarjeta, a qué resumen va la compra: se ve apenas se elige,
+              sin esperar a cargar el importe. Sale de `assignStatements`, lo
+              mismo que guarda la acción. */}
+          {card && statementPlan?.[0] && (
+            <p className="text-muted-foreground text-xs" aria-live="polite">
+              {count > 1 ? "Primer resumen" : "Resumen"} {formatPeriod(statementPlan[0].period)} ·
+              cierra el {formatShortDate(statementPlan[0].closingDate, today)} · vence el{" "}
+              {formatShortDate(statementPlan[0].dueDate, today)}
+            </p>
+          )}
           {errors.creditCardId && (
             <p className="text-destructive text-xs">{errors.creditCardId[0]}</p>
           )}
@@ -567,7 +565,7 @@ export function MovementForm({
 
       {kind === "expense" && !isSettled && (
         <div className="space-y-1.5">
-          <Label htmlFor="count" className={LABEL}>Cuotas</Label>
+          <Label htmlFor="count">Cuotas</Label>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex h-9 items-center rounded-lg bg-white/[0.04] p-0.5">
               <Button
@@ -642,13 +640,6 @@ export function MovementForm({
               <p className="truncate text-sm text-foreground" aria-live="polite">
                 {planSummary(installmentCents, dueDatesForSummary, currency, today)}
               </p>
-              {card && statementPlan?.[0] && (
-                <p className="text-muted-foreground text-xs">
-                  {card.name} · {count > 1 ? "primer resumen" : "resumen"}{" "}
-                  {formatPeriod(statementPlan[0].period)}, cierra el{" "}
-                  {formatShortDate(statementPlan[0].closingDate, today)}
-                </p>
-              )}
             </div>
             <button
               type="button"

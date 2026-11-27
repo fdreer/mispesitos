@@ -27,10 +27,10 @@ export default function Loading() {
       <div className="hidden space-y-6 sm:block">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-24 animate-pulse rounded-lg border border-graphite" />
+            <div key={i} className="h-24 animate-pulse rounded-lg bg-white/[0.03]" />
           ))}
         </div>
-        <div className="h-64 animate-pulse rounded-lg border border-graphite" />
+        <div className="h-64 animate-pulse rounded-lg bg-white/[0.03]" />
       </div>
     </div>
   )

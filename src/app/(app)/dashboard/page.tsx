@@ -185,21 +185,21 @@ function DashboardSkeleton() {
     <div className="space-y-6" aria-hidden>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="h-[116px] animate-pulse rounded-xl border border-border" />
+          <div key={i} className="h-[116px] animate-pulse rounded-xl bg-white/[0.03]" />
         ))}
       </div>
       {/* La única que no tiene alto fijo: crece con la cantidad de
           vencimientos. 150px es lo que mide con uno. */}
-      <div className="h-[150px] animate-pulse rounded-xl border border-border" />
+      <div className="h-[150px] animate-pulse rounded-xl bg-white/[0.03]" />
       {/* Las tres de gráfico miden lo mismo desde que el criterio de cálculo
           dejó de imprimirse arriba del gráfico y pasó al ícono de ayuda: antes
           cada una era más alta según cuántos renglones ocupaba su explicación. */}
       <div className="grid gap-4 lg:grid-cols-2">
         {[0, 1].map((i) => (
-          <div key={i} className="h-[288px] animate-pulse rounded-xl border border-border" />
+          <div key={i} className="h-[288px] animate-pulse rounded-xl bg-white/[0.03]" />
         ))}
       </div>
-      <div className="h-[288px] animate-pulse rounded-xl border border-border" />
+      <div className="h-[288px] animate-pulse rounded-xl bg-white/[0.03]" />
     </div>
   )
 }

@@ -686,7 +686,7 @@ export function MovementFilters({
                     </Button>
                   </div>
                   {mobileShowCalendar && (
-                    <div className="flex justify-center rounded-lg border border-border p-1">
+                    <div className="flex justify-center rounded-lg bg-white/[0.03] p-1">
                       <Calendar
                         mode="range"
                         locale={es}
@@ -719,7 +719,7 @@ export function MovementFilters({
                     placeholder="Buscar categoría..."
                     className="h-9"
                   />
-                  <div className="max-h-48 overflow-y-auto rounded-lg border border-border p-1.5">
+                  <div className="max-h-48 overflow-y-auto rounded-lg bg-white/[0.03] p-1.5">
                     <CategoryChecklist
                       categories={categories}
                       selectedIds={mobileDraft.categoryIds}
@@ -744,7 +744,7 @@ export function MovementFilters({
                       value={mobileDraft.cardId}
                       onValueChange={(v) => setMobileDraft((d) => ({ ...d, cardId: v }))}
                     >
-                      <SelectTrigger id="filtro-mobile-tarjeta" className="h-11 w-full">
+                      <SelectTrigger id="filtro-mobile-tarjeta" className="h-10 w-full">
                         <SelectValue>
                           {mobileDraft.cardId === "all"
                             ? TODOS
@@ -779,7 +779,7 @@ export function MovementFilters({
                           setMobileDraft((d) => ({ ...d, currency: v as QueryCurrency | "all" }))
                         }
                       >
-                        <SelectTrigger id="filtro-mobile-moneda" className="h-11 w-full">
+                        <SelectTrigger id="filtro-mobile-moneda" className="h-10 w-full">
                           <SelectValue>
                             {mobileDraft.currency === "all" ? TODAS : mobileDraft.currency}
                           </SelectValue>
@@ -806,7 +806,7 @@ export function MovementFilters({
                           setMobileDraft((d) => ({ ...d, sort: v as MovementSort }))
                         }
                       >
-                        <SelectTrigger id="filtro-mobile-orden" className="h-11 w-full">
+                        <SelectTrigger id="filtro-mobile-orden" className="h-10 w-full">
                           <SelectValue>{SORT_LABELS[mobileDraft.sort]}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
@@ -855,7 +855,7 @@ export function MovementFilters({
                   <Button
                     type="button"
                     variant="ghost"
-                    className="h-11"
+                    className="h-10"
                     onClick={() => {
                       limpiar()
                       setMobileFiltersOpen(false)
@@ -864,7 +864,7 @@ export function MovementFilters({
                     Limpiar todo
                   </Button>
                 )}
-                <Button type="button" className="h-11" onClick={applyMobileSheet}>
+                <Button type="button" className="h-10" onClick={applyMobileSheet}>
                   Aplicar
                 </Button>
               </SheetFooter>
@@ -1235,7 +1235,7 @@ export function MovementFilters({
           {chips.map((chip) => (
             <span
               key={chip.key}
-              className="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-secondary pr-1.5 pl-2.5 text-xs text-foreground"
+              className="inline-flex h-7 items-center gap-1 rounded-full bg-white/[0.06] pr-1.5 pl-2.5 text-xs text-foreground"
             >
               <span>{chip.label}</span>
               <button
@@ -1297,7 +1297,7 @@ export function MovementFiltersSkeleton({
       {fields.map((f) => (
         <div key={f.label} className={cn(f.width, "space-y-1.5")}>
           <Label className={LABEL_CLASS}>{f.label}</Label>
-          <div className="h-8 w-full animate-pulse rounded-lg border border-input bg-white/[0.02]" />
+          <div className="h-8 w-full animate-pulse rounded-lg bg-white/[0.03]" />
         </div>
       ))}
     </div>

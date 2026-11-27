@@ -106,7 +106,7 @@ function CardForm({ card, onClose }: { card?: EditableCard; onClose: () => void 
           placeholder="Visa Galicia"
           autoFocus
           aria-invalid={errors.name !== undefined}
-          className="h-11"
+          className="h-10"
         />
         {errors.name && <p className="text-destructive text-xs">{errors.name[0]}</p>}
       </div>
@@ -122,7 +122,7 @@ function CardForm({ card, onClose }: { card?: EditableCard; onClose: () => void 
             maxLength={2}
             defaultValue={card?.closingDay ?? ""}
             aria-invalid={errors.closingDay !== undefined}
-            className="h-11"
+            className="h-10"
           />
           {errors.closingDay && <p className="text-destructive text-xs">{errors.closingDay[0]}</p>}
         </div>
@@ -136,7 +136,7 @@ function CardForm({ card, onClose }: { card?: EditableCard; onClose: () => void 
             maxLength={2}
             defaultValue={card?.dueDay ?? ""}
             aria-invalid={errors.dueDay !== undefined}
-            className="h-11"
+            className="h-10"
           />
           {errors.dueDay && <p className="text-destructive text-xs">{errors.dueDay[0]}</p>}
         </div>
@@ -158,7 +158,7 @@ function CardForm({ card, onClose }: { card?: EditableCard; onClose: () => void 
             value={limit}
             onChange={(e) => setLimit(formatAmountInput(e.target.value, limit))}
             aria-invalid={errors.creditLimitCents !== undefined}
-            className="h-11 pl-7"
+            className="h-10 pl-7"
           />
         </div>
         {errors.creditLimitCents ? (
@@ -169,7 +169,7 @@ function CardForm({ card, onClose }: { card?: EditableCard; onClose: () => void 
       </div>
 
       <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">Color</legend>
+        <legend className="text-xs text-muted-foreground">Color</legend>
         <div className="flex flex-wrap gap-2">
           {[{ key: "", label: "Automático", hue: null }, ...CATEGORY_PALETTE].map((o) => (
             <label key={o.key || "auto"} className="cursor-pointer" title={o.label}>

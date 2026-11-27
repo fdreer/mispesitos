@@ -49,7 +49,7 @@ export function DateField({
               className ??
               (size === "sm"
                 ? "h-9 w-full justify-start gap-1.5 px-2.5 text-sm font-normal tabular-nums"
-                : "h-11 w-full justify-start font-normal tabular-nums")
+                : "h-10 w-full justify-start gap-2 font-normal tabular-nums")
             }
           >
             <CalendarIcon className={size === "sm" ? "size-3.5 text-muted-foreground" : "text-muted-foreground"} />

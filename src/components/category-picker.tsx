@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 import { Check, ChevronDown, Search } from "lucide-react"
 
 import { CategoryBadge } from "@/components/category-badge"
@@ -17,6 +18,41 @@ import { cn } from "@/lib/utils"
 type PickerCategory = TreeCategory & { icon: string | null }
 
 const lastKey = (kind: "income" | "expense") => `mis-pesitos:ultima-categoria:${kind}`
+
+/** Alto de la lista: el cómodo, y el mínimo antes de preferir scrollear. */
+const LIST_MAX = 240
+const LIST_MIN = 140
+/** Lo que ocupa el panel además de la lista: el buscador y los márgenes. */
+const PANEL_CHROME = 60
+const PANEL_GAP = 6
+/** Con este lugar abajo no se considera abrir hacia arriba. */
+const PANEL_COMFORT = LIST_MAX + PANEL_CHROME
+/** Margen contra los bordes de la ventana cuando el panel desborda el modal. */
+const VIEWPORT_MARGIN = 8
+/** Ancho mínimo del panel: la columna de Categoría es angosta. */
+const PANEL_MIN_WIDTH = 288
+
+type Placement = {
+  up: boolean
+  listMax: number
+  /** Sólo dentro de un diálogo: la posición relativa a su contenedor. */
+  style?: CSSProperties
+}
+
+/**
+ * Lo visible alrededor del selector: el primer ancestro que scrollea (el
+ * cuerpo del modal), o la ventana si no hay ninguno.
+ */
+function visibleBox(el: HTMLElement): { top: number; bottom: number } {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node)
+    if (overflowY === "auto" || overflowY === "scroll") {
+      const r = node.getBoundingClientRect()
+      return { top: r.top, bottom: r.bottom }
+    }
+  }
+  return { top: 0, bottom: window.innerHeight }
+}
 
 /**
  * "Recuerda la última usada" (§2.3 del plan v2). En el navegador y no en la
@@ -63,10 +99,12 @@ export function initialCategoryId(
  * encabezados y no opciones (decisión 7.4: un movimiento va siempre a una
  * hoja).
  *
- * El panel se despliega EN EL LUGAR, debajo del botón, y no en un Popover. El
- * formulario vive adentro de un Dialog de Radix, que bloquea el scroll de todo
- * lo que esté fuera de su contenido: un Popover se portea al `body`, o sea
- * afuera, y su lista no se podía scrollear con la rueda. Además, React propaga
+ * El panel vive EN EL ÁRBOL del formulario, debajo del botón, y no en un
+ * Popover. El formulario vive adentro de un Dialog de Radix, que bloquea el
+ * scroll de todo lo que esté fuera de su contenido: un Popover se portea al
+ * `body`, o sea afuera, y su lista no se podía scrollear con la rueda. Flota
+ * (`absolute`) sobre los campos de abajo en vez de empujarlos: abrirlo no
+ * estira el modal ni corre el resto del formulario. Además, React propaga
  * los eventos a través de los portales (ver `movement-list.tsx`): con el panel
  * adentro del árbol del formulario no hay nada nuevo que cuide la fila de la
  * tabla de la que cuelga el diálogo de edición.
@@ -104,6 +142,14 @@ export function CategoryPicker({
   const [active, setActive] = useState(0)
   const listId = useId()
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  // Dónde abre el panel y cuánto alto le queda a la lista: se mide al abrir.
+  const [placement, setPlacement] = useState<Placement>({ up: false, listMax: LIST_MAX })
+  // Dentro de un diálogo, el panel se cuelga de su contenedor y no del cuerpo
+  // que scrollea: así puede asomar por debajo del modal en vez de quedar
+  // recortado por él. Sigue siendo un descendiente del diálogo en el DOM, así
+  // que el bloqueo de scroll de Radix deja usar la rueda sobre la lista.
+  const [host, setHost] = useState<HTMLElement | null>(null)
 
   const labels = useMemo(() => categoryLabels(categories), [categories])
   // `keepId`: editando, la categoría del movimiento puede estar archivada y
@@ -116,6 +162,7 @@ export function CategoryPicker({
   const selected = labels.get(value)
 
   function openPanel() {
+    setHost(triggerRef.current?.closest<HTMLElement>('[data-slot="dialog-content"]') ?? null)
     setQuery("")
     // Arranca parado en la elegida, para que Enter sin moverse no la cambie.
     const all = flattenSelectorGroups(selectorGroups(categories, { keepId: value }))
@@ -164,6 +211,64 @@ export function CategoryPicker({
     if (activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: "nearest" })
   }, [activeId])
 
+  /*
+   * Al abrir (y mientras esté abierto, si algo scrollea o cambia el tamaño):
+   * hacia abajo, o hacia arriba si abajo no entra y arriba hay más lugar, con
+   * la lista achicada para entrar. Abrirlo no corre nada.
+   *
+   * Dentro de un diálogo el límite es la ventana: el panel puede pasarse del
+   * borde del modal. Fuera de uno, el límite es lo visible del primer
+   * ancestro que scrollea; ahí hacia arriba sólo si entra entero (lo que
+   * asoma por encima de un área que scrollea queda cortado sin forma de
+   * llegar), y si ni achicado entra el área scrollea lo justo.
+   */
+  useLayoutEffect(() => {
+    if (!open) return
+    function measure() {
+      const el = triggerRef.current
+      if (!el) return
+      const trigger = el.getBoundingClientRect()
+      const box = host
+        ? { top: VIEWPORT_MARGIN, bottom: window.innerHeight - VIEWPORT_MARGIN }
+        : visibleBox(el)
+      const below = box.bottom - trigger.bottom - PANEL_GAP
+      const above = trigger.top - box.top - PANEL_GAP
+      const up =
+        below < PANEL_COMFORT && above > below && (host !== null || above - PANEL_CHROME >= LIST_MIN)
+      const room = (up ? above : below) - PANEL_CHROME
+      const listMax = Math.max(LIST_MIN, Math.min(LIST_MAX, room))
+      if (!host) {
+        setPlacement({ up, listMax })
+        return
+      }
+      const frame = host.getBoundingClientRect()
+      setPlacement({
+        up,
+        listMax,
+        style: {
+          left: trigger.left - frame.left,
+          width: Math.max(trigger.width, PANEL_MIN_WIDTH),
+          ...(up
+            ? { bottom: frame.bottom - trigger.top + PANEL_GAP }
+            : { top: trigger.bottom - frame.top + PANEL_GAP }),
+        },
+      })
+    }
+    measure()
+    if (!host) return
+    // Captura: el scroll del cuerpo del modal no burbujea hasta `window`.
+    window.addEventListener("scroll", measure, true)
+    window.addEventListener("resize", measure)
+    return () => {
+      window.removeEventListener("scroll", measure, true)
+      window.removeEventListener("resize", measure)
+    }
+  }, [open, host])
+
+  useEffect(() => {
+    if (open && !host) panelRef.current?.scrollIntoView?.({ block: "nearest" })
+  }, [open, host, placement])
+
   function renderOption(category: PickerCategory, indented: boolean) {
     const index = options.indexOf(category)
     const isSelected = category.id === value
@@ -198,8 +303,10 @@ export function CategoryPicker({
     )
   }
 
+  const portal = (node: ReactNode) => (host ? createPortal(node, host) : node)
+
   return (
-    <div className="space-y-1.5">
+    <div className="relative">
       {/* Lo que viaja en el FormData: el botón y el buscador son sólo la cara. */}
       <input type="hidden" name={name} value={value} />
 
@@ -233,8 +340,17 @@ export function CategoryPicker({
         <ChevronDown aria-hidden className="size-4 shrink-0 text-muted-foreground" />
       </button>
 
-      {open && (
-        <div className="rounded-lg border border-white/[0.06] bg-obsidian p-1.5 shadow-lg shadow-black/40">
+      {open && portal(
+        <div
+          ref={panelRef}
+          data-placement={placement.up ? "top" : "bottom"}
+          style={placement.style}
+          className={cn(
+            "absolute z-50 rounded-xl border border-white/[0.08] bg-obsidian p-1.5 shadow-2xl shadow-black/60 animate-in fade-in-0 zoom-in-95 duration-100",
+            !placement.style &&
+              (placement.up ? "bottom-full left-0 mb-1.5 w-full min-w-72" : "top-full left-0 mt-1.5 w-full min-w-72"),
+          )}
+        >
           <div className="relative">
             <Search
               aria-hidden
@@ -269,7 +385,8 @@ export function CategoryPicker({
             id={listId}
             role="listbox"
             aria-label="Categorías"
-            className="mt-1.5 max-h-64 space-y-0.5 overflow-y-auto"
+            style={{ maxHeight: placement.listMax }}
+            className="mt-1.5 space-y-0.5 overflow-y-auto overscroll-contain"
           >
             {groups.map((group) =>
               group.type === "leaf" ? (

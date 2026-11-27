@@ -35,7 +35,7 @@ function CategoriasSkeleton() {
         <div
           key={i}
           aria-hidden
-          className="h-[248px] animate-pulse rounded-xl border border-border"
+          className="h-[248px] animate-pulse rounded-xl bg-white/[0.03]"
         />
       ))}
     </>

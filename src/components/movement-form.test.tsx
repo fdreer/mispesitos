@@ -387,7 +387,7 @@ describe("MovementForm, el formulario de carga", () => {
       "2026-10-05",
       "2026-11-05",
     ])
-    expect(screen.getByText(/primer resumen ago 2026/)).toBeTruthy()
+    expect(screen.getByText(/^Primer resumen ago 2026 · cierra el/)).toBeTruthy()
   })
 
   it("editando con la misma tarjeta y fecha, la compra se queda en su resumen", () => {
@@ -415,7 +415,7 @@ describe("MovementForm, el formulario de carga", () => {
     }
     const { container } = alta({ cards: [corregida], movement: conTarjeta })
     expect(valores(container, "installmentDueDate")).toEqual(["2026-08-15"])
-    expect(screen.getByText(/^Visa · resumen ago 2026/)).toBeTruthy()
+    expect(screen.getByText(/^Resumen ago 2026 · cierra el/)).toBeTruthy()
   })
 
   it("con tarjeta, usa las fechas corregidas de un resumen que ya existe", () => {

@@ -50,7 +50,7 @@ export function AuthForm({
         {mode === "registro" && (
           <div className="space-y-2">
             <Label htmlFor="name">Nombre</Label>
-            <Input id="name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} required className="h-11" />
+            <Input id="name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} required className="h-10" />
           </div>
         )}
 
@@ -65,7 +65,7 @@ export function AuthForm({
             readOnly={Boolean(fixedEmail)}
             aria-readonly={fixedEmail ? true : undefined}
             required
-            className="h-11 read-only:opacity-70"
+            className="h-10 read-only:opacity-70"
           />
         </div>
 
@@ -79,7 +79,7 @@ export function AuthForm({
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            className="h-11"
+            className="h-10"
           />
         </div>
 
@@ -89,7 +89,7 @@ export function AuthForm({
           </p>
         )}
 
-        <Button type="submit" className="mt-2 h-11 w-full" disabled={pending}>
+        <Button type="submit" className="mt-2 h-10 w-full" disabled={pending}>
           {pending ? "Un segundo…" : (submitLabel ?? (mode === "registro" ? "Crear cuenta" : "Entrar"))}
         </Button>
       </form>

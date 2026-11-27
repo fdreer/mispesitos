@@ -173,11 +173,11 @@ function InformeSkeleton({ isFlow }: { isFlow: boolean }) {
     <div className="space-y-6" aria-hidden>
       <div className={isFlow ? "grid gap-3 sm:grid-cols-2 lg:grid-cols-3" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4"}>
         {(isFlow ? [0, 1, 2] : [0, 1, 2, 3]).map((i) => (
-          <div key={i} className="h-[92px] animate-pulse rounded-xl border border-border" />
+          <div key={i} className="h-[92px] animate-pulse rounded-xl bg-white/[0.03]" />
         ))}
       </div>
-      <div className="h-[310px] animate-pulse rounded-xl border border-border" />
-      <div className="h-[280px] animate-pulse rounded-xl border border-border" />
+      <div className="h-[310px] animate-pulse rounded-xl bg-white/[0.03]" />
+      <div className="h-[280px] animate-pulse rounded-xl bg-white/[0.03]" />
     </div>
   )
 }
