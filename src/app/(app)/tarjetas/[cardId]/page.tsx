@@ -1,8 +1,9 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
-import { ArrowLeft, ChevronLeft, ChevronRight, Info } from "lucide-react"
+import { ChevronLeft, ChevronRight, Info } from "lucide-react"
 import { z } from "zod"
 
+import { PageTitle } from "@/components/app-header"
 import { CardArchiveButton } from "@/components/cards/card-archive-button"
 import { CardDialog } from "@/components/cards/card-dialog"
 import {
@@ -166,13 +167,7 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
   return (
     <div className="space-y-6">
       <div className="space-y-4">
-        <Link
-          href="/tarjetas"
-          className="text-muted-foreground inline-flex items-center gap-1 text-xs hover:text-foreground"
-        >
-          <ArrowLeft className="size-3.5" aria-hidden />
-          Tarjetas
-        </Link>
+        <PageTitle title={card.name} />
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
             <h1 className="flex items-center gap-2.5 text-2xl font-semibold text-paper">

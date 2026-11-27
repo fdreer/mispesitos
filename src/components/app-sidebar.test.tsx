@@ -33,32 +33,25 @@ describe("AppSidebar", () => {
     )
   })
 
-  it("permite expandir y contraer la barra lateral en escritorio y persiste el estado", () => {
+  it("se expande y contrae con Ctrl+B y persiste el estado", () => {
     const { container } = render(<AppSidebar />)
     const rail = container.querySelector("aside")!
 
     expect(rail.getAttribute("data-expanded")).toBe("false")
-    expect(rail.className).toContain("w-[68px]")
+    expect(rail.className).toContain("w-14")
 
-    const expandBtn = within(rail).getByRole("button", { name: "Expandir barra lateral" })
-    expect(expandBtn.getAttribute("aria-expanded")).toBe("false")
-
-    fireEvent.click(expandBtn)
+    fireEvent.keyDown(window, { key: "b", ctrlKey: true })
 
     expect(rail.getAttribute("data-expanded")).toBe("true")
-    expect(rail.className).toContain("w-60")
+    expect(rail.className).toContain("w-56")
     expect(window.localStorage.getItem("mispesitos:sidebar-expanded")).toBe("true")
-    expect(within(rail).getByText("Principal")).toBeTruthy()
-    expect(within(rail).getByText("Finanzas")).toBeTruthy()
-    expect(within(rail).getByText("Configuración")).toBeTruthy()
+    expect(within(rail).getByRole("group", { name: "Principal" })).toBeTruthy()
+    expect(within(rail).getByRole("group", { name: "Finanzas" })).toBeTruthy()
+    expect(within(rail).getByRole("group", { name: "Configuración" })).toBeTruthy()
 
-    const collapseBtn = within(rail).getByRole("button", { name: "Contraer barra lateral" })
-    expect(collapseBtn.getAttribute("aria-expanded")).toBe("true")
-
-    fireEvent.click(collapseBtn)
+    fireEvent.keyDown(window, { key: "b", ctrlKey: true })
 
     expect(rail.getAttribute("data-expanded")).toBe("false")
-    expect(rail.className).toContain("w-[68px]")
     expect(window.localStorage.getItem("mispesitos:sidebar-expanded")).toBe("false")
   })
 

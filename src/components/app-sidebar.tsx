@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { useEffect, useState } from "react"
 import {
   ArrowLeftRight,
   BarChart3,
@@ -10,7 +10,6 @@ import {
   LayoutDashboard,
   LogOut,
   MoreHorizontal,
-  PanelLeft,
   Plus,
   Settings,
   Tags,
@@ -29,31 +28,8 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { isMoreMenuActive, isRouteActive, openQuickAddSheet } from "@/lib/mobile-nav"
+import { toggleSidebar, useSidebarExpanded } from "@/lib/sidebar-state"
 import { cn } from "@/lib/utils"
-
-const SIDEBAR_STORAGE_KEY = "mispesitos:sidebar-expanded"
-const SIDEBAR_EVENT = "mispesitos:sidebar-change"
-
-function subscribeSidebarExpanded(callback: () => void) {
-  window.addEventListener("storage", callback)
-  window.addEventListener(SIDEBAR_EVENT, callback)
-  return () => {
-    window.removeEventListener("storage", callback)
-    window.removeEventListener(SIDEBAR_EVENT, callback)
-  }
-}
-
-function getSidebarExpandedSnapshot() {
-  try {
-    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true"
-  } catch {
-    return false
-  }
-}
-
-function getSidebarExpandedServerSnapshot() {
-  return false
-}
 
 const NAV_GROUPS = [
   {
@@ -106,30 +82,9 @@ function DesktopNavLinks({
   expanded: boolean
 }) {
   return (
-    <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-2.5 px-2.5">
-      {NAV_GROUPS.map((group, groupIndex) => (
-        <div key={group.label} className="flex flex-col gap-0.5">
-          <div className="relative flex h-5 items-center px-3">
-            <span
-              aria-hidden={!expanded}
-              className={cn(
-                "text-[11px] font-medium tracking-wider whitespace-nowrap text-ash uppercase transition-opacity duration-200 ease-out",
-                expanded ? "opacity-100 delay-75" : "pointer-events-none opacity-0",
-              )}
-            >
-              {group.label}
-            </span>
-            {groupIndex > 0 ? (
-              <div
-                aria-hidden
-                className={cn(
-                  "absolute left-1/2 w-5 -translate-x-1/2 border-t border-graphite transition-opacity duration-200 ease-out",
-                  expanded ? "pointer-events-none opacity-0" : "opacity-100 delay-75",
-                )}
-              />
-            ) : null}
-          </div>
-
+    <nav aria-label="Navegación principal" className="flex flex-col gap-4 px-2">
+      {NAV_GROUPS.map((group) => (
+        <div key={group.label} role="group" aria-label={group.label} className="flex flex-col gap-px">
           {group.items.map((link) => {
             const active = isRouteActive(pathname, link.href)
             const Icon = link.icon
@@ -140,16 +95,16 @@ function DesktopNavLinks({
                 title={expanded ? undefined : link.label}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "group relative flex h-9 items-center justify-start gap-3 overflow-hidden rounded-lg px-[15px] text-[13px] whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "group flex h-8 items-center gap-2.5 overflow-hidden rounded-md px-[11px] text-[13px] whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   active
                     ? "bg-accent font-medium text-paper"
-                    : "text-fog hover:bg-accent/50 hover:text-paper",
+                    : "text-fog hover:bg-accent/50 hover:text-mist",
                 )}
               >
                 <Icon
                   className={cn(
-                    "size-[17px] shrink-0 transition-colors",
-                    active ? "text-paper" : "text-fog group-hover:text-paper",
+                    "size-4 shrink-0 transition-colors",
+                    active ? "text-paper" : "text-fog group-hover:text-mist",
                   )}
                 />
                 <span
@@ -178,27 +133,13 @@ export function AppSidebar({ onQuickAdd }: Props = {}) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
-  const expanded = useSyncExternalStore(
-    subscribeSidebarExpanded,
-    getSidebarExpandedSnapshot,
-    getSidebarExpandedServerSnapshot,
-  )
+  const expanded = useSidebarExpanded()
 
   const [lastPathname, setLastPathname] = useState(pathname)
   if (pathname !== lastPathname) {
     setLastPathname(pathname)
     setMoreOpen(false)
   }
-
-  const toggleExpanded = useCallback(() => {
-    const next = !getSidebarExpandedSnapshot()
-    try {
-      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next))
-    } catch {
-      // Ignore storage access errors
-    }
-    window.dispatchEvent(new Event(SIDEBAR_EVENT))
-  }, [])
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -209,12 +150,12 @@ export function AppSidebar({ onQuickAdd }: Props = {}) {
           return
         }
         e.preventDefault()
-        toggleExpanded()
+        toggleSidebar()
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [toggleExpanded])
+  }, [])
 
   async function handleSignOut() {
     setPending(true)
@@ -362,16 +303,16 @@ export function AppSidebar({ onQuickAdd }: Props = {}) {
         data-expanded={expanded}
         className={cn(
           "sticky top-0 z-30 hidden h-screen shrink-0 self-start flex-col overflow-hidden border-r border-graphite bg-carbon transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] lg:flex",
-          expanded ? "w-60" : "w-[68px]",
+          expanded ? "w-56" : "w-14",
         )}
       >
-        <div className="flex h-14 shrink-0 items-center justify-between gap-1 border-b border-graphite px-2">
+        <div className="flex h-12 shrink-0 items-center px-2">
           <Link
             href="/dashboard"
             title={expanded ? undefined : "Mis Pesitos"}
-            className="flex min-w-0 items-center gap-2.5 overflow-hidden rounded-lg p-1 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-8 min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-2 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <img src="/brand/mark.svg" alt="Mis Pesitos" className="h-6 w-auto shrink-0" />
+            <img src="/brand/mark.svg" alt="Mis Pesitos" className="h-[22px] w-auto shrink-0" />
             <span
               aria-hidden={!expanded}
               className={cn(
@@ -382,26 +323,13 @@ export function AppSidebar({ onQuickAdd }: Props = {}) {
               Mis Pesitos
             </span>
           </Link>
-
-          <button
-            type="button"
-            onClick={toggleExpanded}
-            aria-expanded={expanded}
-            aria-label={expanded ? "Contraer barra lateral" : "Expandir barra lateral"}
-            title={
-              expanded ? "Contraer barra lateral (Ctrl+B)" : "Expandir barra lateral (Ctrl+B)"
-            }
-            className="flex size-7 shrink-0 items-center justify-center rounded-lg text-fog transition-colors hover:bg-accent/60 hover:text-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <PanelLeft className="size-4" />
-          </button>
         </div>
 
-        <div className="flex-1 overflow-x-hidden overflow-y-auto py-3">
+        <div className="flex-1 overflow-x-hidden overflow-y-auto pt-2 pb-3">
           <DesktopNavLinks pathname={pathname} expanded={expanded} />
         </div>
 
-        <div className="shrink-0 border-t border-graphite p-2.5">
+        <div className="shrink-0 p-2">
           <Button
             type="button"
             variant="ghost"
@@ -409,9 +337,9 @@ export function AppSidebar({ onQuickAdd }: Props = {}) {
             disabled={pending}
             title={expanded ? undefined : cerrarSesion}
             aria-label={cerrarSesion}
-            className="h-9 w-full justify-start gap-3 overflow-hidden rounded-lg px-[15px] text-[13px] whitespace-nowrap text-fog transition-colors hover:bg-coral-red/10 hover:text-coral-red"
+            className="h-8 w-full justify-start gap-2.5 overflow-hidden rounded-md px-[11px] text-[13px] font-normal whitespace-nowrap text-fog transition-colors hover:bg-coral-red/10 hover:text-coral-red"
           >
-            <LogOut className="size-[17px] shrink-0" />
+            <LogOut className="size-4 shrink-0" />
             <span
               className={cn(
                 "truncate transition-opacity duration-200 ease-out",

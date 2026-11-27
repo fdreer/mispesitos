@@ -1,6 +1,3 @@
-import Link from "next/link"
-import { ChevronLeft } from "lucide-react"
-
 import { InviteForm, RevokeInvitationButton, UserAccessButton } from "@/components/access-manager"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -30,10 +27,6 @@ export default async function UsuariosPage() {
   return (
     <div className="max-w-2xl space-y-6">
       <div className="space-y-1">
-        <Link href="/ajustes" className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-paper">
-          <ChevronLeft className="size-4" aria-hidden />
-          Ajustes
-        </Link>
         <h1 className="text-2xl font-semibold text-paper">Usuarios</h1>
         <p className="text-sm text-muted-foreground">
           La instalación es privada: solo entra quien invitás. Cada persona ve únicamente sus propias finanzas.
