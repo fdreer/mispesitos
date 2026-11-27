@@ -9,6 +9,7 @@ import type { MovementWithInstallments } from "@/server/queries"
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
+  patchMovement: vi.fn(async () => ({ ok: true })),
   setInstallmentPaid: vi.fn(async () => ({ ok: true })),
   fetchMovementListPage: vi.fn(async () => ({
     items: [] as MovementWithInstallments[],
@@ -24,6 +25,7 @@ vi.mock("@/server/actions/movements", () => ({
   deleteMovement: async () => ({ ok: true }),
   createMovement: async () => ({ ok: true }),
   updateMovement: async () => ({ ok: true }),
+  patchMovement: mocks.patchMovement,
 }))
 
 vi.mock("next/link", () => ({
@@ -43,6 +45,7 @@ Element.prototype.scrollIntoView ??= () => {}
 
 afterEach(() => {
   cleanup()
+  mocks.patchMovement.mockClear()
   window.localStorage.clear()
   mocks.push.mockClear()
   mocks.setInstallmentPaid.mockClear()
@@ -490,5 +493,72 @@ describe("MovementList", () => {
     )
     fireEvent.click(tabla.getByRole("button", { name: "Importe" }))
     expect(mocks.push).toHaveBeenLastCalledWith("/ingresos?sort=amount&dir=asc")
+  })
+
+  describe("edición inline", () => {
+    const UNA_CUOTA: MovementWithInstallments = {
+      ...MOVIMIENTO,
+      id: "11111111-1111-4111-8111-111111111111",
+      description: "Una cuota",
+      installments: [{ ...MOVIMIENTO.installments[0], movementId: "11111111-1111-4111-8111-111111111111" }],
+    }
+    const CATS = [
+      ...CATEGORIAS,
+      { ...CATEGORIAS[0], id: "cat-2", name: "Sueldo" },
+    ]
+
+    function renderTabla(m: MovementWithInstallments) {
+      const r = render(
+        <MovementList movements={[m]} categories={CATS} today="2026-08-11" emptyMessage="vacío" kind="income" />,
+      )
+      return within(r.container.querySelector("table")!)
+    }
+
+    it("el importe se edita con Enter y no despliega la fila", async () => {
+      const tabla = renderTabla(UNA_CUOTA)
+      fireEvent.click(tabla.getByRole("button", { name: "Cambiar importe de Una cuota" }))
+      const input = tabla.getByRole("textbox", { name: "Importe de Una cuota" })
+      fireEvent.change(input, { target: { value: "1.500" } })
+      await act(async () => {
+        fireEvent.keyDown(input, { key: "Enter" })
+      })
+      expect(mocks.patchMovement).toHaveBeenCalledWith(UNA_CUOTA.id, { amountCents: 150000 })
+      expect(tabla.getByText("Una cuota").closest("tr")?.getAttribute("aria-expanded")).toBe("false")
+    })
+
+    it("Esc cancela la edición del importe sin guardar", () => {
+      const tabla = renderTabla(UNA_CUOTA)
+      fireEvent.click(tabla.getByRole("button", { name: "Cambiar importe de Una cuota" }))
+      const input = tabla.getByRole("textbox", { name: "Importe de Una cuota" })
+      fireEvent.change(input, { target: { value: "9" } })
+      fireEvent.keyDown(input, { key: "Escape" })
+      expect(mocks.patchMovement).not.toHaveBeenCalled()
+      expect(tabla.getByRole("button", { name: "Cambiar importe de Una cuota" })).toBeTruthy()
+    })
+
+    it("con varias cuotas fecha e importe no se editan desde la tabla", () => {
+      const tabla = renderTabla(MOVIMIENTO)
+      expect(tabla.queryByRole("button", { name: /Cambiar importe/ })).toBeNull()
+      expect(tabla.queryByRole("button", { name: /Cambiar fecha/ })).toBeNull()
+      expect(tabla.getByText("11/08/2026").getAttribute("title")).toContain("recalcular cuotas")
+    })
+
+    it("la categoría se cambia desde un buscador", async () => {
+      const tabla = renderTabla(UNA_CUOTA)
+      fireEvent.click(tabla.getByRole("button", { name: "Cambiar categoría de Una cuota" }))
+      await act(async () => {
+        fireEvent.click(screen.getByRole("option", { name: "Sueldo" }))
+      })
+      expect(mocks.patchMovement).toHaveBeenCalledWith(UNA_CUOTA.id, { categoryId: "cat-2" })
+    })
+
+    it("el estado de una sola cuota ofrece marcarla hoy", async () => {
+      const tabla = renderTabla(UNA_CUOTA)
+      fireEvent.click(tabla.getByRole("button", { name: "Estado de Una cuota" }))
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Marcar cobrada hoy" }))
+      })
+      expect(mocks.setInstallmentPaid).toHaveBeenCalledWith("cuo-1", true, undefined)
+    })
   })
 })

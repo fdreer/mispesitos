@@ -8,7 +8,7 @@ import { z } from "zod"
 import { withUser, type Tx } from "@/db/client"
 import { category, installment, movement } from "@/db/schema"
 import { isCheckViolation } from "@/lib/db-errors"
-import { isValidIsoDate, todayInAr, type IsoDate } from "@/lib/dates"
+import { addDaysIso, diffDaysIso, isValidIsoDate, todayInAr, type IsoDate } from "@/lib/dates"
 import { highestPaidNumber, resolvePaidDate } from "@/lib/installments"
 import { logDbError } from "@/lib/log-db-error"
 import {
@@ -19,7 +19,8 @@ import {
   STATUS_VALUES,
   type MovementQuery,
 } from "@/lib/movement-query"
-import { exchangeSchema, movementSchema } from "@/lib/schemas"
+import { assertCurrency, assertInstallmentMovementKind } from "@/lib/movement-asserts"
+import { exchangeSchema, isoDate, movementSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { planCardInstallments } from "@/server/card-plan"
 import { queryMovementsView, type MovementWithInstallments } from "@/server/queries"
@@ -179,6 +180,156 @@ export async function createMovement(
 
 const EDITABLE_KINDS = ["income", "expense"]
 
+type MovementInput = z.output<typeof movementSchema>
+
+/**
+ * El corazón de `updateMovement`, adentro de una transacción ya abierta:
+ * valida categoría, cuotas pagas y tarjeta, y reemplaza el movimiento y su
+ * plan de cuotas. Lo reutiliza `patchMovement` para la edición inline de
+ * fecha e importe, así las reglas viven en un solo lugar.
+ */
+async function applyMovementUpdate(
+  tx: Tx,
+  userId: string,
+  id: string,
+  input: MovementInput,
+  cardId: string | null,
+): Promise<ActionResult> {
+  const [actual] = await tx
+    .select({
+      kind: movement.kind,
+      creditCardId: movement.creditCardId,
+      date: movement.date,
+      categoryId: movement.categoryId,
+    })
+    .from(movement)
+    .where(
+      and(
+        eq(movement.id, id),
+        eq(movement.userId, userId),
+        inArray(movement.kind, EDITABLE_KINDS),
+      ),
+    )
+  if (!actual) return failure("Ese movimiento no existe.")
+  if (cardId !== null && actual.kind !== "expense") return failure(SOLO_EGRESOS)
+
+  const previas = await tx
+    .select({
+      number: installment.number,
+      amountCents: installment.amountCents,
+      paid: installment.paid,
+      paidDate: installment.paidDate,
+      statementId: installment.statementId,
+    })
+    .from(installment)
+    .where(and(eq(installment.movementId, id), eq(installment.userId, userId)))
+
+  if (
+    input.categoryId !== actual.categoryId &&
+    (await isCategoryArchived(tx, userId, input.categoryId))
+  ) {
+    return categoryArchived()
+  }
+  if (await categoryHasChildren(tx, userId, input.categoryId)) return categoryNotLeaf()
+
+  const masAlta = highestPaidNumber(previas)
+  if (masAlta > input.installments.length) {
+    return failure(
+      `La cuota ${masAlta} está paga: no podés dejar el plan en ${input.installments.length}. ` +
+        `Desmarcala primero.`,
+    )
+  }
+
+  if (cardId === null && previas.some((p) => p.statementId !== null && p.paid)) {
+    return failure(
+      "Tiene cuotas en un resumen de tarjeta ya pagado: desmarcalo antes de cambiar el medio de pago.",
+    )
+  }
+
+  // Con tarjeta: el plan sale de los resúmenes, y una edición no puede
+  // cambiar lo que tenía un resumen ya pagado (ver `planCardInstallments`).
+  const cardPlan =
+    cardId === null
+      ? null
+      : await planCardInstallments(tx, userId, {
+          cardId,
+          purchaseDate: input.date,
+          amounts: input.installments.map((c) => c.amountCents),
+          previous: previas,
+          previousCardId: actual.creditCardId,
+          previousPurchaseDate: actual.date,
+        })
+  if (cardPlan && !cardPlan.ok) return cardPlan.result
+
+  const actualizado = await tx
+    .update(movement)
+    .set({
+      description: input.description,
+      categoryId: input.categoryId,
+      date: input.date,
+      currency: input.currency,
+      amountCents: input.amountCents,
+      rate: String(input.rate),
+      creditCardId: cardId,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(movement.id, id),
+        eq(movement.userId, userId),
+        inArray(movement.kind, EDITABLE_KINDS),
+      ),
+    )
+    .returning({ id: movement.id })
+
+  if (actualizado.length === 0) return failure("Ese movimiento no existe.")
+
+  const pagoPorNumero = new Map(previas.map((p) => [p.number, p]))
+
+  // Reemplazo y no UPDATE fila por fila: la cantidad de cuotas puede subir
+  // o bajar, así que igual habría que insertar y borrar. Adentro de la
+  // misma transacción, así que en ningún momento el movimiento queda sin
+  // sus cuotas para nadie más.
+  await tx
+    .delete(installment)
+    .where(and(eq(installment.movementId, id), eq(installment.userId, userId)))
+
+  if (cardPlan) {
+    await tx.insert(installment).values(
+      cardPlan.rows.map((cuota, index) => ({
+        id: randomUUID(),
+        movementId: id,
+        userId,
+        number: index + 1,
+        ...cuota,
+      })),
+    )
+    return success()
+  }
+
+  await tx.insert(installment).values(
+    input.installments.map((cuota, index) => {
+      const number = index + 1
+      const previo = pagoPorNumero.get(number)
+      return {
+        id: randomUUID(),
+        movementId: id,
+        userId,
+        number,
+        amountCents: cuota.amountCents,
+        dueDate: cuota.dueDate,
+        // Sin `?? false` el tipo sería `boolean | undefined` y la fila
+        // caería en el default de la columna, que da lo mismo hoy y
+        // dejaría de darlo el día que el default cambie.
+        paid: previo?.paid ?? false,
+        paidDate: previo?.paidDate ?? null,
+      }
+    }),
+  )
+
+  return success()
+}
+
 export async function updateMovement(
   _prev: ActionResult | null,
   formData: FormData,
@@ -218,141 +369,9 @@ export async function updateMovement(
   if (cardId !== null && input.kind !== "expense") return failure(SOLO_EGRESOS)
 
   try {
-    const resultado = await withUser(user.id, async (tx) => {
-      const [actual] = await tx
-        .select({
-          kind: movement.kind,
-          creditCardId: movement.creditCardId,
-          date: movement.date,
-          categoryId: movement.categoryId,
-        })
-        .from(movement)
-        .where(
-          and(
-            eq(movement.id, id.data),
-            eq(movement.userId, user.id),
-            inArray(movement.kind, EDITABLE_KINDS),
-          ),
-        )
-      if (!actual) return failure("Ese movimiento no existe.")
-      if (cardId !== null && actual.kind !== "expense") return failure(SOLO_EGRESOS)
-
-      const previas = await tx
-        .select({
-          number: installment.number,
-          amountCents: installment.amountCents,
-          paid: installment.paid,
-          paidDate: installment.paidDate,
-          statementId: installment.statementId,
-        })
-        .from(installment)
-        .where(and(eq(installment.movementId, id.data), eq(installment.userId, user.id)))
-
-      if (
-        input.categoryId !== actual.categoryId &&
-        (await isCategoryArchived(tx, user.id, input.categoryId))
-      ) {
-        return categoryArchived()
-      }
-      if (await categoryHasChildren(tx, user.id, input.categoryId)) return categoryNotLeaf()
-
-      const masAlta = highestPaidNumber(previas)
-      if (masAlta > input.installments.length) {
-        return failure(
-          `La cuota ${masAlta} está paga: no podés dejar el plan en ${input.installments.length}. ` +
-            `Desmarcala primero.`,
-        )
-      }
-
-      if (cardId === null && previas.some((p) => p.statementId !== null && p.paid)) {
-        return failure(
-          "Tiene cuotas en un resumen de tarjeta ya pagado: desmarcalo antes de cambiar el medio de pago.",
-        )
-      }
-
-      // Con tarjeta: el plan sale de los resúmenes, y una edición no puede
-      // cambiar lo que tenía un resumen ya pagado (ver `planCardInstallments`).
-      const cardPlan =
-        cardId === null
-          ? null
-          : await planCardInstallments(tx, user.id, {
-              cardId,
-              purchaseDate: input.date,
-              amounts: input.installments.map((c) => c.amountCents),
-              previous: previas,
-              previousCardId: actual.creditCardId,
-              previousPurchaseDate: actual.date,
-            })
-      if (cardPlan && !cardPlan.ok) return cardPlan.result
-
-      const actualizado = await tx
-        .update(movement)
-        .set({
-          description: input.description,
-          categoryId: input.categoryId,
-          date: input.date,
-          currency: input.currency,
-          amountCents: input.amountCents,
-          rate: String(input.rate),
-          creditCardId: cardId,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(movement.id, id.data),
-            eq(movement.userId, user.id),
-            inArray(movement.kind, EDITABLE_KINDS),
-          ),
-        )
-        .returning({ id: movement.id })
-
-      if (actualizado.length === 0) return failure("Ese movimiento no existe.")
-
-      const pagoPorNumero = new Map(previas.map((p) => [p.number, p]))
-
-      // Reemplazo y no UPDATE fila por fila: la cantidad de cuotas puede subir
-      // o bajar, así que igual habría que insertar y borrar. Adentro de la
-      // misma transacción, así que en ningún momento el movimiento queda sin
-      // sus cuotas para nadie más.
-      await tx
-        .delete(installment)
-        .where(and(eq(installment.movementId, id.data), eq(installment.userId, user.id)))
-
-      if (cardPlan) {
-        await tx.insert(installment).values(
-          cardPlan.rows.map((cuota, index) => ({
-            id: randomUUID(),
-            movementId: id.data,
-            userId: user.id,
-            number: index + 1,
-            ...cuota,
-          })),
-        )
-        return success()
-      }
-
-      await tx.insert(installment).values(
-        input.installments.map((cuota, index) => {
-          const number = index + 1
-          const previo = pagoPorNumero.get(number)
-          return {
-            id: randomUUID(),
-            movementId: id.data,
-            userId: user.id,
-            number,
-            amountCents: cuota.amountCents,
-            dueDate: cuota.dueDate,
-            // Sin `?? false` el tipo sería `boolean | undefined` y la fila
-            // caería en el default de la columna, que da lo mismo hoy y
-            // dejaría de darlo el día que el default cambie.
-            paid: previo?.paid ?? false,
-            paidDate: previo?.paidDate ?? null,
-          }
-        }),
-      )
-
-      return success()
-    })
+    const resultado = await withUser(user.id, (tx) =>
+      applyMovementUpdate(tx, user.id, id.data, input, cardId),
+    )
 
     if (!resultado.ok) return resultado
   } catch (error) {
@@ -361,6 +380,120 @@ export async function updateMovement(
     if (isCheckViolation(error, "installment_matches_statement")) return failure(RESUMEN_CAMBIO)
     if (isCheckViolation(error, "movement_credit_card_only_expense")) return failure(SOLO_EGRESOS)
     return failure("No pudimos guardar los cambios. Probá de nuevo.")
+  }
+
+  revalidatePath("/", "layout")
+  return success()
+}
+
+const VARIAS_CUOTAS =
+  "Tiene varias cuotas: editá la fecha o el importe desde el detalle para recalcularlas."
+
+const patchMovementSchema = z.object({
+  id: z.uuid("Ese movimiento no existe."),
+  patch: z.union([
+    z.strictObject({ categoryId: z.string().min(1, "Elegí una categoría.").max(100) }),
+    z.strictObject({ date: isoDate }),
+    z.strictObject({
+      amountCents: z
+        .number()
+        .int()
+        .positive("El importe tiene que ser mayor a cero.")
+        .max(Number.MAX_SAFE_INTEGER),
+    }),
+  ]),
+})
+
+export type MovementPatch =
+  | { categoryId: string }
+  | { date: IsoDate }
+  | { amountCents: number }
+
+/**
+ * Edición inline desde la tabla: cambia un solo campo (categoría, fecha o
+ * importe). La categoría se cambia directo; fecha e importe pasan por las
+ * mismas reglas que `updateMovement` (incluida la reasignación de resumen de
+ * una compra con tarjeta) y sólo se aceptan con una única cuota: con varias,
+ * cambiar el total o la fecha obliga a recalcular el plan, y eso se hace
+ * desde el detalle.
+ */
+export async function patchMovement(id: string, patch: MovementPatch): Promise<ActionResult> {
+  const user = await requireUser()
+
+  if (!z.uuid().safeParse(id).success) return failure("Ese movimiento no existe.")
+  const parsed = patchMovementSchema.safeParse({ id, patch })
+  if (!parsed.success) {
+    const flat = z.flattenError(parsed.error)
+    return failure(flat.formErrors[0] ?? "Revisá el dato.")
+  }
+  const { id: movementId, patch: cambio } = parsed.data
+
+  try {
+    const resultado = await withUser(user.id, async (tx) => {
+      const [actual] = await tx
+        .select()
+        .from(movement)
+        .where(
+          and(
+            eq(movement.id, movementId),
+            eq(movement.userId, user.id),
+            inArray(movement.kind, EDITABLE_KINDS),
+          ),
+        )
+      if (!actual) return failure("Ese movimiento no existe.")
+
+      if ("categoryId" in cambio) {
+        if (cambio.categoryId === actual.categoryId) return success()
+        if (await isCategoryArchived(tx, user.id, cambio.categoryId)) return categoryArchived()
+        if (await categoryHasChildren(tx, user.id, cambio.categoryId)) return categoryNotLeaf()
+        const [cat] = await tx
+          .select({ kind: category.kind })
+          .from(category)
+          .where(and(eq(category.id, cambio.categoryId), eq(category.userId, user.id)))
+        if (!cat || cat.kind !== actual.kind) return failure("Esa categoría no existe.")
+
+        await tx
+          .update(movement)
+          .set({ categoryId: cambio.categoryId, updatedAt: new Date() })
+          .where(and(eq(movement.id, movementId), eq(movement.userId, user.id)))
+        return success()
+      }
+
+      const cuotas = await tx
+        .select({ amountCents: installment.amountCents, dueDate: installment.dueDate })
+        .from(installment)
+        .where(and(eq(installment.movementId, movementId), eq(installment.userId, user.id)))
+      if (cuotas.length !== 1) return failure(VARIAS_CUOTAS)
+      if (!actual.categoryId) return failure("Elegí una categoría primero.")
+
+      const [cuota] = cuotas
+      const date = "date" in cambio ? cambio.date : actual.date
+      const amountCents = "amountCents" in cambio ? cambio.amountCents : actual.amountCents
+      if (date === actual.date && amountCents === actual.amountCents) return success()
+
+      // La cuota se mueve con la fecha: conserva la distancia al vencimiento
+      // (cero en lo cargado como pagado en el momento).
+      const dueDate =
+        "date" in cambio ? addDaysIso(cuota.dueDate, diffDaysIso(date, actual.date)) : cuota.dueDate
+
+      const input: MovementInput = {
+        kind: assertInstallmentMovementKind(actual.kind),
+        description: actual.description,
+        categoryId: actual.categoryId,
+        date,
+        currency: assertCurrency(actual.currency),
+        amountCents,
+        rate: Number(actual.rate),
+        installments: [{ amountCents, dueDate }],
+      }
+      return applyMovementUpdate(tx, user.id, movementId, input, actual.creditCardId)
+    })
+    if (!resultado.ok) return resultado
+  } catch (error) {
+    logDbError("patchMovement", error)
+    if (isCheckViolation(error, "movement_category_is_leaf")) return categoryNotLeaf()
+    if (isCheckViolation(error, "installment_matches_statement")) return failure(RESUMEN_CAMBIO)
+    return failure("No pudimos guardar el cambio. Probá de nuevo.")
   }
 
   revalidatePath("/", "layout")

@@ -32,6 +32,7 @@ import {
   createExchange,
   createMovement,
   deleteMovement,
+  patchMovement,
   setInstallmentPaid,
   updateMovement,
 } from "@/server/actions/movements"
@@ -1208,6 +1209,130 @@ describe("updateMovement", () => {
       "La suma de las cuotas no coincide con el importe total.",
     ])
     expect(await cuotasDe(USUARIO_A, fila.id)).toHaveLength(3)
+  })
+})
+
+describe("patchMovement", () => {
+  async function altaDeUnaCuota(descripcion: string) {
+    expect(
+      await createMovement(
+        null,
+        formulario({
+          ...ALTA_VALIDA,
+          description: descripcion,
+          currency: "ARS",
+          rate: "1",
+          amountCents: "500",
+          date: "2026-05-10",
+          installmentAmount: ["50000"],
+          installmentDueDate: ["2026-05-20"],
+        }),
+      ),
+    ).toEqual({ ok: true })
+    const [fila] = await movimientosPorDescripcion(USUARIO_A, descripcion)
+    return fila
+  }
+
+  it("cambia la categoría sin tocar las cuotas, aunque sean varias", async () => {
+    comoUsuario(USUARIO_A)
+    const fila = await altaDeTresCuotas("Patch categoría")
+    expect(await createCategory(null, formulario({ name: "Patch destino", kind: "expense" }))).toEqual({
+      ok: true,
+    })
+    const [destino] = await categoriaLlamada(USUARIO_A, "Patch destino")
+    const antes = await cuotasDe(USUARIO_A, fila.id)
+    vi.mocked(revalidatePath).mockClear()
+
+    expect(await patchMovement(fila.id, { categoryId: destino.id })).toEqual({ ok: true })
+
+    const [despues] = await movimientosPorDescripcion(USUARIO_A, "Patch categoría")
+    expect(despues.categoryId).toBe(destino.id)
+    expect((await cuotasDe(USUARIO_A, fila.id)).map((c) => c.id)).toEqual(antes.map((c) => c.id))
+    expect(rutasRevalidadas()).toEqual([["/", "layout"]])
+  })
+
+  it("no acepta una categoría del otro tipo ni una ajena", async () => {
+    comoUsuario(USUARIO_A)
+    const fila = await altaDeUnaCuota("Patch categoría inválida")
+
+    expect(rechazo(await patchMovement(fila.id, { categoryId: CAT_A_SUELDO })).message).toBe(
+      "Esa categoría no existe.",
+    )
+    expect(rechazo(await patchMovement(fila.id, { categoryId: CAT_B })).message).toBe(
+      "Esa categoría no existe.",
+    )
+    const [despues] = await movimientosPorDescripcion(USUARIO_A, "Patch categoría inválida")
+    expect(despues.categoryId).toBe(CAT_A_COMIDA)
+  })
+
+  it("con una sola cuota cambia la fecha y mueve el vencimiento la misma distancia", async () => {
+    comoUsuario(USUARIO_A)
+    const fila = await altaDeUnaCuota("Patch fecha")
+
+    expect(await patchMovement(fila.id, { date: "2026-06-01" })).toEqual({ ok: true })
+
+    const [despues] = await movimientosPorDescripcion(USUARIO_A, "Patch fecha")
+    expect(despues.date).toBe("2026-06-01")
+    const [cuota] = await cuotasDe(USUARIO_A, fila.id)
+    expect(cuota).toMatchObject({ dueDate: "2026-06-11", amountCents: 50_000 })
+  })
+
+  it("con una sola cuota cambia el importe y la cuota lo acompaña, conservando el pago", async () => {
+    comoUsuario(USUARIO_A)
+    const fila = await altaDeUnaCuota("Patch importe")
+    const [cuota] = await cuotasDe(USUARIO_A, fila.id)
+    expect(await setInstallmentPaid(cuota.id, true, "2026-05-20")).toEqual({ ok: true })
+
+    expect(await patchMovement(fila.id, { amountCents: 75_000 })).toEqual({ ok: true })
+
+    const [despues] = await movimientosPorDescripcion(USUARIO_A, "Patch importe")
+    expect(despues.amountCents).toBe(75_000)
+    const [nueva] = await cuotasDe(USUARIO_A, fila.id)
+    expect(nueva).toMatchObject({ amountCents: 75_000, paid: true, paidDate: "2026-05-20" })
+  })
+
+  it("con varias cuotas rechaza fecha e importe sin tocar nada", async () => {
+    comoUsuario(USUARIO_A)
+    const fila = await altaDeTresCuotas("Patch varias cuotas")
+    vi.mocked(revalidatePath).mockClear()
+
+    expect(rechazo(await patchMovement(fila.id, { date: "2026-09-09" })).message).toContain(
+      "varias cuotas",
+    )
+    expect(rechazo(await patchMovement(fila.id, { amountCents: 1 })).message).toContain(
+      "varias cuotas",
+    )
+    const [despues] = await movimientosPorDescripcion(USUARIO_A, "Patch varias cuotas")
+    expect(despues).toMatchObject({ date: fila.date, amountCents: 120_000 })
+    expect(rutasRevalidadas()).toEqual([])
+  })
+
+  it("valida el dato: importe cero, fecha inválida o más de un campo se rechazan", async () => {
+    comoUsuario(USUARIO_A)
+    const fila = await altaDeUnaCuota("Patch validación")
+
+    expect((await patchMovement(fila.id, { amountCents: 0 })).ok).toBe(false)
+    expect((await patchMovement(fila.id, { date: "2026-02-31" })).ok).toBe(false)
+    expect(
+      (await patchMovement(fila.id, { date: "2026-06-01", amountCents: 1 } as never)).ok,
+    ).toBe(false)
+    expect(rechazo(await patchMovement("no-uuid", { amountCents: 1 })).message).toBe(
+      "Ese movimiento no existe.",
+    )
+    const [despues] = await movimientosPorDescripcion(USUARIO_A, "Patch validación")
+    expect(despues).toMatchObject({ date: "2026-05-10", amountCents: 50_000 })
+  })
+
+  it("un movimiento ajeno responde como inexistente y no se toca (RLS)", async () => {
+    comoUsuario(USUARIO_A)
+
+    const ajeno = await patchMovement(MOV_B, { amountCents: 1 })
+    const inexistente = await patchMovement(randomUUID(), { amountCents: 1 })
+
+    expect(rechazo(ajeno).message).toBe("Ese movimiento no existe.")
+    expect(ajeno).toEqual(inexistente)
+    const [deB] = await movimientosPorDescripcion(USUARIO_B, "Gasto de B")
+    expect(deB).toMatchObject({ amountCents: 555_00, categoryId: CAT_B })
   })
 })
 
