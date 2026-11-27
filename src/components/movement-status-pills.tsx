@@ -57,7 +57,10 @@ export function MovementStatusPills({
   ]
 
   return (
-    <nav aria-label="Estado" className="flex flex-wrap items-center gap-1.5">
+    <nav
+      aria-label="Estado"
+      className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-lg border border-white/[0.06] bg-white/[0.02] p-0.5"
+    >
       {options.map((opt) => {
         const active = query.status === opt.value
         const Icon = opt.icon
@@ -67,10 +70,10 @@ export function MovementStatusPills({
             href={buildMovementHref(basePath, query, { status: opt.value }, defaultSort)}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors sm:px-3",
+              "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors",
               active
-                ? "border-mist/40 bg-accent text-paper"
-                : "border-border bg-white/[0.02] text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                ? "bg-white/[0.08] text-paper shadow-sm"
+                : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
             )}
           >
             <LinkPending className="inline-flex items-center gap-1.5">

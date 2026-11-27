@@ -139,6 +139,15 @@ async function BarraDeFiltros({
       categories={categories}
       cards={cards}
       showPaymentMethod={kind === "expense"}
+      layout="toolbar"
+      trailing={
+        <>
+          <MovementColumnsMenu kind={kind} />
+          <Suspense fallback={<BotonNuevoSkeleton />}>
+            <BotonNuevo kind={kind} />
+          </Suspense>
+        </>
+      }
     />
   )
 }
@@ -178,12 +187,7 @@ async function ListaConPaginacion({
           defaultSort={defaultSort}
           counts={statusCounts}
         />
-        <div className="flex items-center gap-2">
-          <MovementTotalsBar totals={totals} />
-          <div className="hidden md:block">
-            <MovementColumnsMenu kind={kind} />
-          </div>
-        </div>
+        <MovementTotalsBar totals={totals} />
       </div>
 
       <MovementList
@@ -224,12 +228,15 @@ export function MovementScreen({ kind, searchParams }: Props) {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold text-paper">{TITLES[kind]}</h1>
-        <Suspense fallback={<BotonNuevoSkeleton />}>
-          <BotonNuevo kind={kind} />
-        </Suspense>
+        {/* En escritorio "Nuevo" vive a la derecha de la barra de filtros. */}
+        <div className="md:hidden">
+          <Suspense fallback={<BotonNuevoSkeleton />}>
+            <BotonNuevo kind={kind} />
+          </Suspense>
+        </div>
       </div>
 
-      <Suspense fallback={<MovementFiltersSkeleton showPaymentMethod={kind === "expense"} />}>
+      <Suspense fallback={<MovementFiltersSkeleton layout="toolbar" />}>
         <BarraDeFiltros kind={kind} query={query} today={today} />
       </Suspense>
 

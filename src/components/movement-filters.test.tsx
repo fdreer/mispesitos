@@ -396,3 +396,82 @@ describe("MovementFilters", () => {
     )
   })
 })
+
+describe("MovementFilters · layout toolbar (estilo ClickUp)", () => {
+  function montarToolbar(raw: Record<string, string | string[]> = {}) {
+    push.mockClear()
+    return render(
+      <MovementFilters
+        basePath="/egresos"
+        query={parseMovementQuery(raw, "due")}
+        defaultSort="due"
+        today={HOY}
+        categories={CATEGORIAS}
+        cards={TARJETAS}
+        layout="toolbar"
+        trailing={<button type="button">Nuevo</button>}
+      />,
+    )
+  }
+
+  it("deja a la vista Buscar, Período, Filtrar y lo de la derecha; sin selects sueltos ni Orden", () => {
+    montarToolbar()
+    expect(screen.getByLabelText("Buscar")).toBeTruthy()
+    expect(getPeriodoTrigger()).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Filtrar/ })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Nuevo" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /^Categoría:/ })).toBeNull()
+    expect(screen.queryByLabelText("Orden")).toBeNull()
+  })
+
+  it("el panel agrega una regla y la aplica en vivo", () => {
+    montarToolbar()
+    fireEvent.click(screen.getByRole("button", { name: /Filtrar/ }))
+    const panel = screen.getByRole("dialog", { name: "Filtros" })
+    expect(panel.textContent).toContain("Sin filtros")
+
+    fireEvent.keyDown(within(panel).getByRole("button", { name: "Agregar filtro" }), { key: "Enter" })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Moneda" }))
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Moneda: Todas" }))
+    fireEvent.click(screen.getByRole("option", { name: "USD" }))
+    expect(push).toHaveBeenLastCalledWith("/egresos?currency=USD")
+  })
+
+  it("una regla activa aparece en el panel con su valor y × la quita", () => {
+    montarToolbar({ cardId: "card-1", currency: "USD" })
+    fireEvent.click(screen.getByRole("button", { name: /Filtrar/ }))
+    const panel = screen.getByRole("dialog", { name: "Filtros" })
+    expect(within(panel).getByRole("button", { name: "Medio de pago: Visa Galicia" })).toBeTruthy()
+    fireEvent.click(within(panel).getByRole("button", { name: "Quitar filtro Medio de pago" }))
+    expect(push).toHaveBeenLastCalledWith("/egresos?currency=USD")
+  })
+
+  it("los chips resumen la regla, se editan desde el chip y × la quita", () => {
+    montarToolbar({ categoryId: "cat-1,hogar,alquiler", currency: "USD" })
+    const chips = screen.getByLabelText("Filtros activos")
+    expect(chips.textContent).toContain("Categoría:Supermercado +2")
+    expect(chips.textContent).toContain("Moneda:USD")
+
+    fireEvent.click(within(chips).getByRole("button", { name: "Editar filtro Moneda: USD" }))
+    fireEvent.click(screen.getByRole("option", { name: "ARS" }))
+    expect(push).toHaveBeenLastCalledWith("/egresos?categoryId=cat-1%2Chogar%2Calquiler&currency=ARS")
+
+    // Encadena sobre la última navegación (la moneda ya es ARS).
+    fireEvent.click(within(chips).getByRole("button", { name: "Quitar filtro Categoría: Supermercado +2" }))
+    expect(push).toHaveBeenLastCalledWith("/egresos?currency=ARS")
+
+    fireEvent.click(within(chips).getByRole("button", { name: "Limpiar todo" }))
+    expect(push).toHaveBeenLastCalledWith("/egresos")
+  })
+
+  it("el importe del panel se aplica al confirmar", () => {
+    montarToolbar({ min: "100" })
+    const chips = screen.getByLabelText("Filtros activos")
+    fireEvent.click(within(chips).getByRole("button", { name: /^Editar filtro Importe/ }))
+    const max = screen.getByLabelText("Importe máximo")
+    fireEvent.change(max, { target: { value: "500" } })
+    fireEvent.submit(max.closest("form")!)
+    expect(push).toHaveBeenLastCalledWith("/egresos?min=100&max=500")
+  })
+})

@@ -16,9 +16,21 @@ import { es } from "date-fns/locale"
 import type { DateRange } from "react-day-picker"
 
 import { CategoryBadge } from "@/components/category-badge"
+import { FilterChips } from "@/components/filters/filter-chips"
+import { FilterPanel } from "@/components/filters/filter-panel"
+import { RULE_FIELDS } from "@/components/filters/filter-rules"
+import {
+  cardLabel,
+  CategoryChecklist,
+  categorySummaryText,
+  centsToInputValue,
+  CURRENCY_OPTIONS,
+  formatAmountRangeLabel,
+  TODAS,
+  TODOS,
+} from "@/components/filters/filter-shared"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -36,13 +48,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import {
-  buildCategoryTree,
-  categoryCheckState,
-  categoryLabels,
-  normalizeSearch,
-  toggleCategorySelection,
-} from "@/lib/category-tree"
+import { categoryLabels, toggleCategorySelection } from "@/lib/category-tree"
 import {
   DATE_PRESETS,
   detectDatePreset,
@@ -51,13 +57,12 @@ import {
   shiftPeriod,
 } from "@/lib/date-presets"
 import { dateToIso, isoToDate, type IsoDate } from "@/lib/dates"
-import { formatAmountInput, formatMoney, parseAmountToCents } from "@/lib/money"
-import type { MovementSort } from "@/lib/movement-list-view"
+import { formatAmountInput, parseAmountToCents } from "@/lib/money"
+import { naturalDir, type MovementSort } from "@/lib/movement-list-view"
 import {
   activeFilterCount,
   buildMovementHref,
   CARD_FILTER_CASH,
-  CURRENCY_VALUES,
   FILTER_DEFAULTS,
   hayFiltrosActivos,
   parseMovementQuery,
@@ -85,7 +90,6 @@ const SORT_LABELS: Record<MovementSort, string> = {
   amount: "Importe",
 }
 
-const CURRENCY_OPTIONS: (QueryCurrency | "all")[] = ["all", ...CURRENCY_VALUES]
 
 const LABEL_CLASS = "text-xs font-normal text-muted-foreground"
 const BAR_CLASS = "flex flex-wrap items-end gap-x-2 gap-y-3"
@@ -95,27 +99,6 @@ const DEBOUNCE_MS = 400
 const CALENDAR_YEARS_MARGIN = 10
 const CALENDAR_START_MONTH = new Date(new Date().getFullYear() - CALENDAR_YEARS_MARGIN, 0, 1)
 const CALENDAR_END_MONTH = new Date(new Date().getFullYear() + CALENDAR_YEARS_MARGIN, 11, 1)
-
-const TODAS = <span className="text-muted-foreground">Todas</span>
-const TODOS = <span className="text-muted-foreground">Todos</span>
-
-function centsToInputValue(cents: number | null): string {
-  if (cents === null) return ""
-  return formatAmountInput((cents / 100).toFixed(2).replace(".", ","))
-}
-
-function formatAmountRangeLabel(minCents: number | null, maxCents: number | null): string {
-  if (minCents !== null && maxCents !== null) {
-    return `${formatMoney(minCents, "ARS", minCents % 100 === 0 ? 0 : 2)} – ${formatMoney(maxCents, "ARS", maxCents % 100 === 0 ? 0 : 2)}`
-  }
-  if (minCents !== null) {
-    return `Desde ${formatMoney(minCents, "ARS", minCents % 100 === 0 ? 0 : 2)}`
-  }
-  if (maxCents !== null) {
-    return `Hasta ${formatMoney(maxCents, "ARS", maxCents % 100 === 0 ? 0 : 2)}`
-  }
-  return "Importe"
-}
 
 function rangeFromQuery(query: Pick<MovementQuery, "from" | "to">): DateRange | undefined {
   return query.from || query.to
@@ -136,99 +119,6 @@ function rangeToPatch(range: DateRange | undefined): Pick<MovementQuery, "from" 
 function hrefToQuery(href: string, defaultSort: MovementSort): MovementQuery {
   const qs = href.split("?")[1] ?? ""
   return parseMovementQuery(rawParamsFromSearchParams(new URLSearchParams(qs)), defaultSort)
-}
-
-function cardLabel(cardId: string, cards: CardOption[]): string {
-  if (cardId === CARD_FILTER_CASH) return "Efectivo / débito"
-  const found = cards.find((c) => c.id === cardId)
-  if (!found) return cardId
-  return found.archived ? `${found.name} (archivada)` : found.name
-}
-
-function categorySummaryText(categoryIds: string[], categories: Category[]): string {
-  if (categoryIds.length === 0) return "Todas"
-  if (categoryIds.length === 1) {
-    const label = categoryLabels(categories).get(categoryIds[0])
-    if (!label) return "1 categoría"
-    return label.parentName ? `${label.parentName} › ${label.name}` : label.name
-  }
-  return `${categoryIds.length} categorías`
-}
-
-/** Árbol de categorías con checkboxes para multiselección (§4). */
-function CategoryChecklist({
-  categories,
-  selectedIds,
-  onToggle,
-  searchTerm,
-}: {
-  categories: Category[]
-  selectedIds: string[]
-  onToggle: (id: string) => void
-  searchTerm: string
-}) {
-  const labels = categoryLabels(categories)
-  const tree = buildCategoryTree(categories)
-  const q = normalizeSearch(searchTerm)
-
-  const filteredTree = tree
-    .map((node) => {
-      if (!q) return node
-      const parentMatches = normalizeSearch(node.name).includes(q)
-      if (parentMatches) return node
-      const matchingChildren = node.children.filter((c) => normalizeSearch(c.name).includes(q))
-      if (matchingChildren.length === 0) return null
-      return { ...node, children: matchingChildren }
-    })
-    .filter((n): n is NonNullable<typeof n> => n !== null)
-
-  if (filteredTree.length === 0) {
-    return <p className="text-muted-foreground py-4 text-center text-xs">Sin categorías.</p>
-  }
-
-  return (
-    <div className="space-y-1">
-      {filteredTree.map((node) => {
-        const nodeState = categoryCheckState(selectedIds, node.id, categories)
-        const nodeLabel = labels.get(node.id)
-        return (
-          <div key={node.id} className="space-y-0.5">
-            <label className="hover:bg-accent/50 flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-sm">
-              <Checkbox
-                checked={nodeState}
-                onCheckedChange={() => onToggle(node.id)}
-                aria-label={node.name}
-              />
-              <CategoryBadge name={node.name} hue={nodeLabel?.hue} />
-              {node.archived && (
-                <span className="text-muted-foreground text-xs">(archivada)</span>
-              )}
-            </label>
-            {node.children.map((child) => {
-              const childChecked = categoryCheckState(selectedIds, child.id, categories) === true
-              const childLabel = labels.get(child.id)
-              return (
-                <label
-                  key={child.id}
-                  className="hover:bg-accent/50 flex cursor-pointer items-center gap-2 rounded-md py-1.5 pr-1.5 pl-7 text-sm"
-                >
-                  <Checkbox
-                    checked={childChecked}
-                    onCheckedChange={() => onToggle(child.id)}
-                    aria-label={`${node.name} › ${child.name}`}
-                  />
-                  <CategoryBadge name={child.name} hue={childLabel?.hue} />
-                  {child.archived && (
-                    <span className="text-muted-foreground text-xs">(archivada)</span>
-                  )}
-                </label>
-              )
-            })}
-          </div>
-        )
-      })}
-    </div>
-  )
 }
 
 type Props = {
@@ -261,6 +151,13 @@ type Props = {
   periodPlaceholder?: string
   /** Parámetros extra de la URL (p. ej. tab y moneda en /informes) a conservar al filtrar. */
   extraParams?: Record<string, string | undefined>
+  /**
+   * "classic": un control por filtro (Informes). "toolbar": estilo ClickUp, con
+   * Buscar y Período a la vista y el resto en el panel "Filtrar" y sus chips.
+   */
+  layout?: "classic" | "toolbar"
+  /** Lo que va a la derecha de la barra "toolbar" (Columnas, Nuevo). */
+  trailing?: React.ReactNode
 }
 
 /**
@@ -284,7 +181,10 @@ export function MovementFilters({
   showPeriod = true,
   periodPlaceholder = "Elegir un período",
   extraParams,
+  layout = "classic",
+  trailing,
 }: Props) {
+  const isToolbar = layout === "toolbar"
   const { push } = useRouter()
   const [search, setSearch] = useState(query.search)
   const [lastQuerySearch, setLastQuerySearch] = useState(query.search)
@@ -519,6 +419,16 @@ export function MovementFilters({
     })
   }
 
+  const ruleFields = RULE_FIELDS.filter((f) =>
+    f === "category"
+      ? showCategory
+      : f === "paymentMethod"
+        ? showPaymentMethod && cards.length > 0
+        : f === "currency"
+          ? showCurrency
+          : showAmount,
+  )
+
   const showMobileRow =
     showPeriod ||
     showCategory ||
@@ -531,12 +441,16 @@ export function MovementFilters({
   return (
     <div className="space-y-2.5">
       <div
-        className={cn(BAR_CLASS, "transition-opacity", pending && "opacity-60")}
+        className={cn(
+          isToolbar ? "flex flex-wrap items-center gap-2" : BAR_CLASS,
+          "transition-opacity",
+          pending && "opacity-60",
+        )}
         aria-busy={pending}
       >
         {showSearch && (
-          <div className="w-full space-y-1.5 sm:w-52 md:w-52">
-            <Label htmlFor="filtro-buscar" className={LABEL_CLASS}>
+          <div className={cn("w-full space-y-1.5", isToolbar ? "md:w-56" : "sm:w-52 md:w-52")}>
+            <Label htmlFor="filtro-buscar" className={cn(LABEL_CLASS, isToolbar && "sr-only")}>
               Buscar
             </Label>
             <div className="relative">
@@ -805,14 +719,18 @@ export function MovementFilters({
                       <Select
                         value={mobileDraft.sort}
                         onValueChange={(v) =>
-                          setMobileDraft((d) => ({ ...d, sort: v as MovementSort }))
+                          setMobileDraft((d) => ({
+                            ...d,
+                            sort: v as MovementSort,
+                            dir: naturalDir(v as MovementSort),
+                          }))
                         }
                       >
                         <SelectTrigger id="filtro-mobile-orden" className="h-10 w-full">
                           <SelectValue>{SORT_LABELS[mobileDraft.sort]}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          {(["due", "date", "amount"] as const).map((s) => (
+                          {(["due", "date", "amount", "description", "category"] as const).map((s) => (
                             <SelectItem key={s} value={s}>
                               {SORT_LABELS[s]}
                             </SelectItem>
@@ -875,6 +793,9 @@ export function MovementFilters({
         </div>
         )}
 
+        {/* Barra clásica (Informes): un control por filtro. La barra "toolbar"
+            de Ingresos/Egresos los agrupa en el panel "Filtrar". */}
+        {!isToolbar && (<>
         {/* Categoría multiselección (escritorio) */}
         {showCategory && (
         <div className="hidden w-40 space-y-1.5 md:block">
@@ -1090,10 +1011,16 @@ export function MovementFilters({
         </div>
         )}
 
+        </>)}
+
         {/* Período con atajos + flechas ‹ › (escritorio) */}
         {showPeriod && (
-        <div className="hidden space-y-1.5 md:block">
-          <Label id="filtro-periodo-label" htmlFor="filtro-periodo" className={LABEL_CLASS}>
+        <div className={isToolbar ? "hidden md:block" : "hidden space-y-1.5 md:block"}>
+          <Label
+            id="filtro-periodo-label"
+            htmlFor="filtro-periodo"
+            className={cn(LABEL_CLASS, isToolbar && "sr-only")}
+          >
             Período
           </Label>
           <div className="flex items-center gap-1">
@@ -1201,8 +1128,25 @@ export function MovementFilters({
         </div>
         )}
 
-        {/* Orden (escritorio) */}
-        {showSort && (
+        {isToolbar && ruleFields.length > 0 && (
+          <div className="hidden md:block">
+            <FilterPanel
+              fields={ruleFields}
+              query={query}
+              categories={categories}
+              cards={cards}
+              onChange={go}
+              pending={pending}
+            />
+          </div>
+        )}
+
+        {isToolbar && trailing && (
+          <div className="hidden items-center gap-1.5 md:ml-auto md:flex">{trailing}</div>
+        )}
+
+        {/* Orden (escritorio): en la barra "toolbar" se ordena desde los encabezados. */}
+        {showSort && !isToolbar && (
           <div className="hidden w-32 space-y-1.5 md:block">
             <Label htmlFor="filtro-orden" className={LABEL_CLASS}>
               Orden
@@ -1229,40 +1173,52 @@ export function MovementFilters({
       </div>
 
       {/* Chips de filtros activos con × y "Limpiar todo" (§4). */}
-      {chips.length > 0 && (
-        <div
-          aria-label="Filtros activos"
-          className="flex flex-wrap items-center gap-1.5"
-        >
-          {chips.map((chip) => (
-            <span
-              key={chip.key}
-              className="inline-flex h-7 items-center gap-1 rounded-full bg-white/[0.06] pr-1.5 pl-2.5 text-xs text-foreground"
-            >
-              <span>{chip.label}</span>
-              <button
-                type="button"
-                aria-label={`Quitar filtro ${chip.label}`}
-                onClick={() => {
-                  if (chip.clearSearch) setSearch("")
-                  go(chip.patch)
-                }}
-                className="inline-flex size-4 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-paper"
-              >
-                <XIcon className="size-3" />
-              </button>
-            </span>
-          ))}
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            onClick={limpiar}
-            className="text-muted-foreground"
+      {isToolbar ? (
+        <FilterChips
+          fields={ruleFields}
+          query={query}
+          categories={categories}
+          cards={cards}
+          onChange={go}
+          onClearAll={limpiar}
+          showClearAll={hayFiltrosActivos(query)}
+        />
+      ) : (
+        chips.length > 0 && (
+          <div
+            aria-label="Filtros activos"
+            className="flex flex-wrap items-center gap-1.5"
           >
-            Limpiar todo
-          </Button>
-        </div>
+            {chips.map((chip) => (
+              <span
+                key={chip.key}
+                className="inline-flex h-7 items-center gap-1 rounded-full bg-white/[0.06] pr-1.5 pl-2.5 text-xs text-foreground"
+              >
+                <span>{chip.label}</span>
+                <button
+                  type="button"
+                  aria-label={`Quitar filtro ${chip.label}`}
+                  onClick={() => {
+                    if (chip.clearSearch) setSearch("")
+                    go(chip.patch)
+                  }}
+                  className="inline-flex size-4 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-paper"
+                >
+                  <XIcon className="size-3" />
+                </button>
+              </span>
+            ))}
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={limpiar}
+              className="text-muted-foreground"
+            >
+              Limpiar todo
+            </Button>
+          </div>
+        )
       )}
     </div>
   )
@@ -1276,6 +1232,7 @@ export function MovementFiltersSkeleton({
   showCategory = true,
   showAmount = true,
   showPeriod = true,
+  layout = "classic",
 }: {
   showPaymentMethod?: boolean
   showSort?: boolean
@@ -1284,7 +1241,18 @@ export function MovementFiltersSkeleton({
   showCategory?: boolean
   showAmount?: boolean
   showPeriod?: boolean
+  layout?: "classic" | "toolbar"
 }) {
+  if (layout === "toolbar") {
+    return (
+      <div className="flex flex-wrap items-center gap-2" aria-hidden>
+        <div className="h-10 w-full animate-pulse rounded-lg bg-white/[0.03] md:h-8 md:w-56" />
+        <div className="hidden h-8 w-[248px] animate-pulse rounded-lg bg-white/[0.03] md:block" />
+        <div className="hidden h-8 w-20 animate-pulse rounded-lg bg-white/[0.03] md:block" />
+        <div className="hidden h-8 w-48 animate-pulse rounded-lg bg-white/[0.03] md:ml-auto md:block" />
+      </div>
+    )
+  }
   const fields: { label: string; width: string }[] = []
   if (showSearch) fields.push({ label: "Buscar", width: "w-full sm:w-52" })
   if (showCategory) fields.push({ label: "Categoría", width: "hidden w-40 md:block" })
