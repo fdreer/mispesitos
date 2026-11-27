@@ -168,16 +168,13 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
     <div className="space-y-6">
       <div className="space-y-4">
         <PageTitle title={card.name} />
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h1 className="flex items-center gap-2.5 text-2xl font-semibold text-paper">
-              <CardSwatch color={color} className="h-4 w-6" />
-              {card.name}
-              {card.archived && <Badge variant="secondary">Archivada</Badge>}
-            </h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <CardSwatch color={color} className="h-4 w-6" />
             <p className="text-muted-foreground text-sm">
               Cierra el {card.closingDay} y vence el {card.dueDay} de cada mes
             </p>
+            {card.archived && <Badge variant="secondary">Archivada</Badge>}
           </div>
           <div className="flex items-center gap-1">
             <CardDialog card={card} />

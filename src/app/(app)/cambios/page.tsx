@@ -94,12 +94,9 @@ function CambiosSkeleton() {
   )
 }
 
-/** Sin `async`: el título sale sin esperar a nada. Ver `CambiosBody`. */
 export default function CambiosPage() {
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-paper">Cambios</h1>
-
       <Suspense fallback={<CambiosSkeleton />}>
         <CambiosBody />
       </Suspense>

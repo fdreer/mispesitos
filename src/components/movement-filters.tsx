@@ -156,8 +156,10 @@ type Props = {
    * Buscar y Período a la vista y el resto en el panel "Filtrar" y sus chips.
    */
   layout?: "classic" | "toolbar"
-  /** Lo que va a la derecha de la barra "toolbar" (Columnas, Nuevo). */
+  /** Lo que va a la derecha de la barra "toolbar" en escritorio (Columnas, Nuevo). */
   trailing?: React.ReactNode
+  /** Acción principal junto al buscador en móvil (p. ej. botón Nuevo). */
+  mobileAction?: React.ReactNode
 }
 
 /**
@@ -183,6 +185,7 @@ export function MovementFilters({
   extraParams,
   layout = "classic",
   trailing,
+  mobileAction,
 }: Props) {
   const isToolbar = layout === "toolbar"
   const { push } = useRouter()
@@ -449,21 +452,26 @@ export function MovementFilters({
         aria-busy={pending}
       >
         {showSearch && (
-          <div className={cn("w-full space-y-1.5", isToolbar ? "md:w-56" : "sm:w-52 md:w-52")}>
-            <Label htmlFor="filtro-buscar" className={cn(LABEL_CLASS, isToolbar && "sr-only")}>
-              Buscar
-            </Label>
-            <div className="relative">
-              <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                id="filtro-buscar"
-                value={search}
-                onChange={(e) => handleSearchChange(e.target.value)}
-                placeholder="Texto, categoría o $"
-                maxLength={SEARCH_MAX}
-                className="h-10 pl-8 md:h-8"
-              />
+          <div className={cn("flex w-full items-center gap-2", isToolbar ? "md:w-56" : "sm:w-52 md:w-52")}>
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Label htmlFor="filtro-buscar" className={cn(LABEL_CLASS, isToolbar && "sr-only")}>
+                Buscar
+              </Label>
+              <div className="relative">
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="filtro-buscar"
+                  value={search}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  placeholder="Texto, categoría o $"
+                  maxLength={SEARCH_MAX}
+                  className="h-10 pl-8 md:h-8"
+                />
+              </div>
             </div>
+            {isToolbar && mobileAction && (
+              <div className="shrink-0 md:hidden">{mobileAction}</div>
+            )}
           </div>
         )}
 

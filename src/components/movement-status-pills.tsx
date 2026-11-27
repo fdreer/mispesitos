@@ -59,7 +59,7 @@ export function MovementStatusPills({
   return (
     <nav
       aria-label="Estado"
-      className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-lg border border-white/[0.06] bg-white/[0.02] p-0.5"
+      className="inline-flex max-w-full flex-nowrap items-center gap-0.5 overflow-x-auto rounded-lg border border-white/[0.06] bg-white/[0.02] p-0.5 [scrollbar-width:none]"
     >
       {options.map((opt) => {
         const active = query.status === opt.value

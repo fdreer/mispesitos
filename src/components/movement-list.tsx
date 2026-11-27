@@ -178,7 +178,7 @@ function MovementCards({
                 </div>
 
                 {isOpen && (
-                  <div id={detailsId} className="mt-3 border-t pt-1">
+                  <div id={detailsId} className="mt-3">
                     <InstallmentRows
                       rows={m.installments}
                       currency={currency}

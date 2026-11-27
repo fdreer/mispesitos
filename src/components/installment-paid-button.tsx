@@ -69,7 +69,13 @@ export function InstallmentPaidButton({
       {paid ? (
         <AlertDialog>
           <AlertDialogTrigger asChild>
-            <Button type="button" size="sm" variant="secondary" disabled={pending}>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={pending}
+              className="border border-pulse-green/20 bg-pulse-green/10 text-pulse-green hover:bg-pulse-green/15"
+            >
               <Check />
               {word}
               {paidDate && ` · ${formatShortDate(paidDate, today)}`}

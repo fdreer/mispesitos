@@ -1,13 +1,14 @@
 "use client"
 
 import Link from "next/link"
-import { Check } from "lucide-react"
+import { AlertCircle, Check, CheckCircle2, Clock } from "lucide-react"
 
 import { InstallmentPaidButton } from "@/components/installment-paid-button"
 import { formatPeriod } from "@/lib/cards"
 import { TableCell, TableRow } from "@/components/ui/table"
 import { formatIsoForDisplay, isOverdue, type IsoDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
+import { cn } from "@/lib/utils"
 
 type Row = {
   id: string
@@ -77,15 +78,35 @@ function PaymentControl({
 
 const DEFAULT_TABLE_COLUMNS = ["date", "description", "category", "amount", "status"] as const
 
-/** "Cuota 3", más la marca de vencida cuando corresponde. */
+/** Icono de estado de la cuota (pagada / vencida / pendiente). */
+function CuotaStatusIcon({ paid, overdue }: { paid: boolean; overdue: boolean }) {
+  if (paid) {
+    return <CheckCircle2 className="size-3.5 shrink-0 text-pulse-green" aria-hidden />
+  }
+  if (overdue) {
+    return <AlertCircle className="size-3.5 shrink-0 text-coral-red" aria-hidden />
+  }
+  return <Clock className="size-3.5 shrink-0 text-ember-orange" aria-hidden />
+}
+
+/** "Cuota 3", con icono de estado y marca de vencida cuando corresponde. */
 function CuotaLabel({ row, today }: { row: Row; today: IsoDate }) {
+  const overdue = !row.paid && isOverdue(row.dueDate, today)
   return (
-    <>
-      Cuota {row.number}
-      {!row.paid && isOverdue(row.dueDate, today) && (
-        <span className="text-destructive font-medium"> · vencida</span>
+    <span className="inline-flex items-center gap-2">
+      <CuotaStatusIcon paid={row.paid} overdue={overdue} />
+      <span className={cn("text-sm", row.paid ? "text-muted-foreground" : "font-medium text-foreground")}>
+        Cuota {row.number}
+      </span>
+      {overdue && (
+        <>
+          {" "}
+          <span className="rounded-full bg-coral-red/15 px-2 py-0.5 text-[11px] font-medium text-coral-red">
+            vencida
+          </span>
+        </>
       )}
-    </>
+    </span>
   )
 }
 
@@ -118,19 +139,25 @@ export function InstallmentTableRows({
     switch (col) {
       case "date":
         return (
-          <TableCell key={col} className="text-muted-foreground tabular-nums">
+          <TableCell key={col} className="text-xs text-muted-foreground tabular-nums">
             {formatIsoForDisplay(row.dueDate)}
           </TableCell>
         )
       case "description":
         return (
-          <TableCell key={col} className="text-muted-foreground pl-6">
+          <TableCell key={col} className="pl-6">
             <CuotaLabel row={row} today={today} />
           </TableCell>
         )
       case "amount":
         return (
-          <TableCell key={col} className="tabular-nums text-right">
+          <TableCell
+            key={col}
+            className={cn(
+              "tabular-nums text-right text-sm",
+              row.paid ? "text-muted-foreground" : "font-medium text-foreground",
+            )}
+          >
             {formatMoney(row.amountCents, currency)}
           </TableCell>
         )
@@ -155,11 +182,11 @@ export function InstallmentTableRows({
   return (
     <>
       {rows.map((row) => (
-        // Fondo propio y sin cambio en hover: estas filas cuelgan de la de
-        // arriba y no son clickeables, así que no pueden ofrecer el mismo
-        // resalte que una fila de movimiento que sí abre algo.
-        <TableRow key={row.id} className="bg-muted/30 hover:bg-muted/30">
-          <TableCell />
+        <TableRow
+          key={row.id}
+          className="border-white/[0.04] bg-white/[0.015] hover:bg-white/[0.025]"
+        >
+          <TableCell className="border-l-2 border-white/[0.08]" />
           {columns.map((col) => cell(col, row))}
           <TableCell />
         </TableRow>
@@ -169,33 +196,47 @@ export function InstallmentTableRows({
 }
 
 /**
- * Las mismas cuotas fuera de una tabla: los vencimientos del dashboard, donde
- * cada ítem es un `<li>` y no hay columnas contra las cuales alinear. Es el
- * formato que tenía antes esta pantalla, y el único lugar que todavía lo usa.
+ * Las mismas cuotas fuera de una tabla (tarjetas móviles y dashboard):
+ * cada cuota se presenta en una fila limpia dentro de un contenedor sutil.
  */
 export function InstallmentRows({ rows, currency, today, description, kind, cardId }: Props) {
   return (
-    <ul className="mt-2 space-y-1 border-t pt-2">
-      {rows.map((row) => (
-        <li
-          key={row.id}
-          className="flex flex-col items-start justify-between gap-2 text-sm sm:flex-row sm:items-center"
-        >
-          <span className="text-muted-foreground">
-            <CuotaLabel row={row} today={today} /> · vence {formatIsoForDisplay(row.dueDate)}
-          </span>
-          <span className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-start">
-            <span className="tabular-nums">{formatMoney(row.amountCents, currency)}</span>
-            <PaymentControl
-              row={row}
-              today={today}
-              description={description}
-              kind={kind}
-              cardId={cardId}
-            />
-          </span>
-        </li>
-      ))}
+    <ul className="divide-y divide-white/[0.05] overflow-hidden rounded-lg border border-white/[0.06] bg-white/[0.02]">
+      {rows.map((row) => {
+        const overdue = !row.paid && isOverdue(row.dueDate, today)
+        return (
+          <li key={row.id} className="space-y-2 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <CuotaLabel row={row} today={today} />
+              <span
+                className={cn(
+                  "shrink-0 text-sm tabular-nums",
+                  row.paid ? "text-muted-foreground" : "font-medium text-foreground",
+                )}
+              >
+                {formatMoney(row.amountCents, currency)}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 pl-5">
+              <span
+                className={cn(
+                  "text-xs tabular-nums",
+                  overdue ? "text-coral-red" : "text-muted-foreground",
+                )}
+              >
+                Vence {formatIsoForDisplay(row.dueDate)}
+              </span>
+              <PaymentControl
+                row={row}
+                today={today}
+                description={description}
+                kind={kind}
+                cardId={cardId}
+              />
+            </div>
+          </li>
+        )
+      })}
     </ul>
   )
 }

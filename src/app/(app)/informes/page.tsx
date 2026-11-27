@@ -209,8 +209,6 @@ export default async function InformesPage({ searchParams }: Props) {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-paper">Informes</h1>
-
       <ReportControls query={reportQuery} />
 
       {!(isFlow && reportQuery.granularity === "semanal") ? (

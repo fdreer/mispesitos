@@ -60,8 +60,6 @@ function AjustesSkeleton() {
 export default function AjustesPage() {
   return (
     <div className="max-w-md space-y-6">
-      <h1 className="text-2xl font-semibold text-paper">Ajustes</h1>
-
       <Card size="sm">
         <CardContent>
           <Suspense fallback={<AjustesSkeleton />}>

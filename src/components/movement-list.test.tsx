@@ -130,8 +130,7 @@ describe("MovementList", () => {
 
     const movimiento = celdas(filas[0])
     expect(movimiento[1]).toBe("11/08/2026")
-    expect(movimiento[2]).toContain("Proyecto")
-    expect(movimiento[2]).toContain("Cuota 1/2 · vence hoy")
+    expect(movimiento[2]).toBe("Proyecto")
     expect(movimiento[3]).toBe("Freelance")
     expect(movimiento[4]).toBe("$ 2.000,00")
 
@@ -161,7 +160,7 @@ describe("MovementList", () => {
     fireEvent.click(within(container.querySelector("table")!).getByText("Proyecto"))
 
     const filas = [...container.querySelectorAll("tbody tr")]
-    expect(celdas(filas[1])[2]).toBe("Cuota 1 · vencida")
+    expect(celdas(filas[1])[2]).toBe("Cuota 1 vencida")
     expect(celdas(filas[2])[2]).toBe("Cuota 2")
   })
 

@@ -28,11 +28,6 @@ import {
 } from "@/server/queries"
 import { requireSettings } from "@/server/session"
 
-const TITLES: Record<"income" | "expense", string> = {
-  income: "Ingresos",
-  expense: "Egresos",
-}
-
 type Kind = "income" | "expense"
 
 type Props = {
@@ -94,6 +89,11 @@ async function BarraDeFiltros({
       cards={cards}
       showPaymentMethod={kind === "expense"}
       layout="toolbar"
+      mobileAction={
+        <Suspense fallback={<BotonNuevoSkeleton />}>
+          <BotonNuevo kind={kind} />
+        </Suspense>
+      }
       trailing={
         <>
           <MovementColumnsMenu kind={kind} />
@@ -180,16 +180,6 @@ export function MovementScreen({ kind, searchParams }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-semibold text-paper">{TITLES[kind]}</h1>
-        {/* En escritorio "Nuevo" vive a la derecha de la barra de filtros. */}
-        <div className="md:hidden">
-          <Suspense fallback={<BotonNuevoSkeleton />}>
-            <BotonNuevo kind={kind} />
-          </Suspense>
-        </div>
-      </div>
-
       <Suspense fallback={<MovementFiltersSkeleton layout="toolbar" />}>
         <BarraDeFiltros kind={kind} query={query} today={today} />
       </Suspense>

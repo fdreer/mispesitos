@@ -44,14 +44,10 @@ function CategoriasSkeleton() {
 
 export default function CategoriasPage() {
   return (
-    <div className="max-w-2xl space-y-6">
-      <h1 className="text-2xl font-semibold text-paper">Categorías</h1>
-
-      <div className="space-y-4">
-        <Suspense fallback={<CategoriasSkeleton />}>
-          <CategoriasBody />
-        </Suspense>
-      </div>
+    <div className="max-w-2xl space-y-4">
+      <Suspense fallback={<CategoriasSkeleton />}>
+        <CategoriasBody />
+      </Suspense>
     </div>
   )
 }

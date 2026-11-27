@@ -602,22 +602,7 @@ export function MovementCell({ column, ...ctx }: { column: ColumnId } & Movement
       return <DateCell movement={m} />
 
     case "description":
-      return (
-        <>
-          {m.description}
-          {total > 1 && ctx.hidden.has("installments") && (
-            <span className="text-muted-foreground"> · {total} cuotas</span>
-          )}
-          {ctx.nextText && ctx.hidden.has("nextDue") && (
-            <span className="block text-xs text-muted-foreground">{ctx.nextText}</span>
-          )}
-          {ctx.cardName && (ctx.kind === "income" || ctx.hidden.has("paymentMethod")) && (
-            <span className="block">
-              <CardLabel name={ctx.cardName} />
-            </span>
-          )}
-        </>
-      )
+      return m.description
 
     case "category":
       return (
