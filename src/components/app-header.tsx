@@ -103,7 +103,8 @@ export function AppHeader() {
   }
 
   return (
-    <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-1 border-b border-graphite bg-background/85 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/70 sm:px-4 lg:px-3">
+    <header className="sticky top-0 z-20 shrink-0 border-b border-graphite bg-background/85 pt-[env(safe-area-inset-top)] backdrop-blur supports-[backdrop-filter]:bg-background/70">
+      <div className="flex h-12 items-center gap-1 px-3 sm:px-4 lg:px-3">
       <div className="hidden items-center gap-0.5 lg:flex">
         <button
           type="button"
@@ -176,6 +177,7 @@ export function AppHeader() {
           })}
         </ol>
       </nav>
+      </div>
     </header>
   )
 }
