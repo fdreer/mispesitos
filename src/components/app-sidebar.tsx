@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { useState } from "react"
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import {
   ArrowLeftRight,
   BarChart3,
@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   LogOut,
   MoreHorizontal,
+  PanelLeft,
   Plus,
   Settings,
   Tags,
@@ -30,16 +31,55 @@ import {
 import { isMoreMenuActive, isRouteActive, openQuickAddSheet } from "@/lib/mobile-nav"
 import { cn } from "@/lib/utils"
 
-const LINKS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/ingresos", label: "Ingresos", icon: TrendingUp },
-  { href: "/egresos", label: "Egresos", icon: TrendingDown },
-  { href: "/tarjetas", label: "Tarjetas", icon: CreditCard },
-  { href: "/informes", label: "Informes", icon: BarChart3 },
-  { href: "/cambios", label: "Cambios", icon: ArrowLeftRight },
-  { href: "/categorias", label: "Categorías", icon: Tags },
-  { href: "/ajustes", label: "Ajustes", icon: Settings },
-]
+const SIDEBAR_STORAGE_KEY = "mispesitos:sidebar-expanded"
+const SIDEBAR_EVENT = "mispesitos:sidebar-change"
+
+function subscribeSidebarExpanded(callback: () => void) {
+  window.addEventListener("storage", callback)
+  window.addEventListener(SIDEBAR_EVENT, callback)
+  return () => {
+    window.removeEventListener("storage", callback)
+    window.removeEventListener(SIDEBAR_EVENT, callback)
+  }
+}
+
+function getSidebarExpandedSnapshot() {
+  try {
+    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true"
+  } catch {
+    return false
+  }
+}
+
+function getSidebarExpandedServerSnapshot() {
+  return false
+}
+
+const NAV_GROUPS = [
+  {
+    label: "Principal",
+    items: [
+      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/ingresos", label: "Ingresos", icon: TrendingUp },
+      { href: "/egresos", label: "Egresos", icon: TrendingDown },
+    ],
+  },
+  {
+    label: "Finanzas",
+    items: [
+      { href: "/tarjetas", label: "Tarjetas", icon: CreditCard },
+      { href: "/cambios", label: "Cambios", icon: ArrowLeftRight },
+      { href: "/informes", label: "Informes", icon: BarChart3 },
+    ],
+  },
+  {
+    label: "Configuración",
+    items: [
+      { href: "/categorias", label: "Categorías", icon: Tags },
+      { href: "/ajustes", label: "Ajustes", icon: Settings },
+    ],
+  },
+] as const
 
 const MORE_LINKS = [
   { href: "/tarjetas", label: "Tarjetas", icon: CreditCard },
@@ -49,60 +89,82 @@ const MORE_LINKS = [
   { href: "/ajustes", label: "Ajustes", icon: Settings },
 ]
 
-const RAIL_COLLAPSED = "justify-center gap-0 px-0"
-const RAIL_EXPANDED = cn(
-  "group-hover/rail:justify-start group-hover/rail:gap-2.5 group-hover/rail:px-2.5",
-  "group-focus-within/rail:justify-start group-focus-within/rail:gap-2.5 group-focus-within/rail:px-2.5",
-)
-const RAIL_LABEL = cn(
-  "max-w-0 overflow-hidden opacity-0 transition-all duration-200 ease-in-out",
-  "group-hover/rail:max-w-32 group-hover/rail:opacity-100",
-  "group-focus-within/rail:max-w-32 group-focus-within/rail:opacity-100",
-)
-
-const ITEM_BASE =
-  "flex items-center rounded-lg py-2 text-[13px] whitespace-nowrap transition-all"
-
-function Brand({ rail }: { rail: boolean }) {
+function MobileBrand() {
   return (
-    <div
-      className={cn(
-        "flex items-center overflow-hidden transition-all",
-        rail ? cn("h-14 border-b border-graphite", RAIL_COLLAPSED, RAIL_EXPANDED) : "gap-2",
-      )}
-    >
-      <img src="/brand/mark.svg" alt="Mis Pesitos" className="h-8 w-auto shrink-0" />
-      <span className={rail ? RAIL_LABEL : "font-heading text-sm font-medium text-paper"}>Mis Pesitos</span>
+    <div className="flex items-center gap-2 overflow-hidden">
+      <img src="/brand/mark.svg" alt="Mis Pesitos" className="h-7 w-auto shrink-0" />
+      <span className="font-heading text-sm font-medium text-paper">Mis Pesitos</span>
     </div>
   )
 }
 
-function DesktopNavLinks({ pathname }: { pathname: string }) {
+function DesktopNavLinks({
+  pathname,
+  expanded,
+}: {
+  pathname: string
+  expanded: boolean
+}) {
   return (
-    <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-0.5 px-2">
-      {LINKS.map((link) => {
-        const active = isRouteActive(pathname, link.href)
-        const Icon = link.icon
-        return (
-          <Link
-            key={link.href}
-            href={link.href}
-            onClick={(e) => {
-              e.currentTarget.blur()
-            }}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              ITEM_BASE,
-              RAIL_COLLAPSED,
-              RAIL_EXPANDED,
-              active ? "bg-accent text-paper" : "text-mist hover:bg-accent/50 hover:text-paper",
-            )}
-          >
-            <Icon className="size-4 shrink-0" />
-            <span className={RAIL_LABEL}>{link.label}</span>
-          </Link>
-        )
-      })}
+    <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-2.5 px-2.5">
+      {NAV_GROUPS.map((group, groupIndex) => (
+        <div key={group.label} className="flex flex-col gap-0.5">
+          <div className="relative flex h-5 items-center px-3">
+            <span
+              aria-hidden={!expanded}
+              className={cn(
+                "text-[11px] font-medium tracking-wider whitespace-nowrap text-ash uppercase transition-opacity duration-200 ease-out",
+                expanded ? "opacity-100 delay-75" : "pointer-events-none opacity-0",
+              )}
+            >
+              {group.label}
+            </span>
+            {groupIndex > 0 ? (
+              <div
+                aria-hidden
+                className={cn(
+                  "absolute left-1/2 w-5 -translate-x-1/2 border-t border-graphite transition-opacity duration-200 ease-out",
+                  expanded ? "pointer-events-none opacity-0" : "opacity-100 delay-75",
+                )}
+              />
+            ) : null}
+          </div>
+
+          {group.items.map((link) => {
+            const active = isRouteActive(pathname, link.href)
+            const Icon = link.icon
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                title={expanded ? undefined : link.label}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "group relative flex h-9 items-center justify-start gap-3 overflow-hidden rounded-lg px-[15px] text-[13px] whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  active
+                    ? "bg-accent font-medium text-paper"
+                    : "text-fog hover:bg-accent/50 hover:text-paper",
+                )}
+              >
+                <Icon
+                  className={cn(
+                    "size-[17px] shrink-0 transition-colors",
+                    active ? "text-paper" : "text-fog group-hover:text-paper",
+                  )}
+                />
+                <span
+                  className={cn(
+                    "truncate transition-opacity duration-200 ease-out",
+                    expanded ? "opacity-100 delay-75" : "opacity-0",
+                  )}
+                >
+                  {link.label}
+                </span>
+              </Link>
+            )
+          })}
+        </div>
+      ))}
     </nav>
   )
 }
@@ -116,12 +178,43 @@ export function AppSidebar({ onQuickAdd }: Props = {}) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const expanded = useSyncExternalStore(
+    subscribeSidebarExpanded,
+    getSidebarExpandedSnapshot,
+    getSidebarExpandedServerSnapshot,
+  )
 
   const [lastPathname, setLastPathname] = useState(pathname)
   if (pathname !== lastPathname) {
     setLastPathname(pathname)
     setMoreOpen(false)
   }
+
+  const toggleExpanded = useCallback(() => {
+    const next = !getSidebarExpandedSnapshot()
+    try {
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next))
+    } catch {
+      // Ignore storage access errors
+    }
+    window.dispatchEvent(new Event(SIDEBAR_EVENT))
+  }, [])
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+        const target = e.target as HTMLElement | null
+        const tag = target?.tagName
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) {
+          return
+        }
+        e.preventDefault()
+        toggleExpanded()
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [toggleExpanded])
 
   async function handleSignOut() {
     setPending(true)
@@ -134,6 +227,7 @@ export function AppSidebar({ onQuickAdd }: Props = {}) {
   }
 
   const salir = pending ? "Saliendo…" : "Salir"
+  const cerrarSesion = pending ? "Saliendo…" : "Cerrar sesión"
   const moreActive = isMoreMenuActive(pathname)
 
   function handleQuickAdd() {
@@ -219,7 +313,7 @@ export function AppSidebar({ onQuickAdd }: Props = {}) {
               <div aria-hidden className="mx-auto mt-2.5 h-1 w-10 rounded-full bg-smoke" />
               <SheetHeader className="border-b border-graphite px-4 py-3">
                 <SheetTitle className="flex items-center gap-2 text-sm">
-                  <Brand rail={false} />
+                  <MobileBrand />
                 </SheetTitle>
                 <SheetDescription className="sr-only">
                   Otras secciones y opciones de cuenta
@@ -264,34 +358,69 @@ export function AppSidebar({ onQuickAdd }: Props = {}) {
         </div>
       </nav>
 
-      <aside className="sticky top-0 z-30 isolate hidden h-screen w-14 shrink-0 self-start lg:block">
-        <div
-          className={cn(
-            "group/rail absolute inset-y-0 left-0 z-30 flex w-14 flex-col overflow-hidden",
-            "border-r border-graphite bg-carbon transition-[width] duration-200 ease-in-out",
-            "hover:w-56 hover:shadow-xl focus-within:w-56 focus-within:shadow-xl",
-          )}
-        >
-          <Brand rail />
-          <div className="flex-1 pt-3">
-            <DesktopNavLinks pathname={pathname} />
-          </div>
-
-          <div className="px-2 pb-4">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={(e) => {
-                e.currentTarget.blur()
-                handleSignOut()
-              }}
-              disabled={pending}
-              className={cn("w-full text-fog", RAIL_COLLAPSED, RAIL_EXPANDED)}
+      <aside
+        data-expanded={expanded}
+        className={cn(
+          "sticky top-0 z-30 hidden h-screen shrink-0 self-start flex-col overflow-hidden border-r border-graphite bg-carbon transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] lg:flex",
+          expanded ? "w-60" : "w-[68px]",
+        )}
+      >
+        <div className="flex h-14 shrink-0 items-center justify-between gap-1 border-b border-graphite px-2">
+          <Link
+            href="/dashboard"
+            title={expanded ? undefined : "Mis Pesitos"}
+            className="flex min-w-0 items-center gap-2.5 overflow-hidden rounded-lg p-1 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <img src="/brand/mark.svg" alt="Mis Pesitos" className="h-6 w-auto shrink-0" />
+            <span
+              aria-hidden={!expanded}
+              className={cn(
+                "truncate font-heading text-sm font-semibold tracking-tight whitespace-nowrap text-paper transition-opacity duration-200 ease-out",
+                expanded ? "opacity-100 delay-75" : "pointer-events-none opacity-0",
+              )}
             >
-              <LogOut className="size-4 shrink-0" />
-              <span className={RAIL_LABEL}>{salir}</span>
-            </Button>
-          </div>
+              Mis Pesitos
+            </span>
+          </Link>
+
+          <button
+            type="button"
+            onClick={toggleExpanded}
+            aria-expanded={expanded}
+            aria-label={expanded ? "Contraer barra lateral" : "Expandir barra lateral"}
+            title={
+              expanded ? "Contraer barra lateral (Ctrl+B)" : "Expandir barra lateral (Ctrl+B)"
+            }
+            className="flex size-7 shrink-0 items-center justify-center rounded-lg text-fog transition-colors hover:bg-accent/60 hover:text-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <PanelLeft className="size-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-x-hidden overflow-y-auto py-3">
+          <DesktopNavLinks pathname={pathname} expanded={expanded} />
+        </div>
+
+        <div className="shrink-0 border-t border-graphite p-2.5">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={handleSignOut}
+            disabled={pending}
+            title={expanded ? undefined : cerrarSesion}
+            aria-label={cerrarSesion}
+            className="h-9 w-full justify-start gap-3 overflow-hidden rounded-lg px-[15px] text-[13px] whitespace-nowrap text-fog transition-colors hover:bg-coral-red/10 hover:text-coral-red"
+          >
+            <LogOut className="size-[17px] shrink-0" />
+            <span
+              className={cn(
+                "truncate transition-opacity duration-200 ease-out",
+                expanded ? "opacity-100 delay-75" : "opacity-0",
+              )}
+            >
+              {cerrarSesion}
+            </span>
+          </Button>
         </div>
       </aside>
     </>

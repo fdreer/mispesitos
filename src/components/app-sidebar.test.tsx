@@ -16,6 +16,7 @@ vi.mock("next/navigation", () => ({
 
 afterEach(() => {
   cleanup()
+  window.localStorage.clear()
   mockPathname = "/dashboard"
 })
 
@@ -30,6 +31,35 @@ describe("AppSidebar", () => {
     expect(railLogo.compareDocumentPosition(dashboard) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     )
+  })
+
+  it("permite expandir y contraer la barra lateral en escritorio y persiste el estado", () => {
+    const { container } = render(<AppSidebar />)
+    const rail = container.querySelector("aside")!
+
+    expect(rail.getAttribute("data-expanded")).toBe("false")
+    expect(rail.className).toContain("w-[68px]")
+
+    const expandBtn = within(rail).getByRole("button", { name: "Expandir barra lateral" })
+    expect(expandBtn.getAttribute("aria-expanded")).toBe("false")
+
+    fireEvent.click(expandBtn)
+
+    expect(rail.getAttribute("data-expanded")).toBe("true")
+    expect(rail.className).toContain("w-60")
+    expect(window.localStorage.getItem("mispesitos:sidebar-expanded")).toBe("true")
+    expect(within(rail).getByText("Principal")).toBeTruthy()
+    expect(within(rail).getByText("Finanzas")).toBeTruthy()
+    expect(within(rail).getByText("Configuración")).toBeTruthy()
+
+    const collapseBtn = within(rail).getByRole("button", { name: "Contraer barra lateral" })
+    expect(collapseBtn.getAttribute("aria-expanded")).toBe("true")
+
+    fireEvent.click(collapseBtn)
+
+    expect(rail.getAttribute("data-expanded")).toBe("false")
+    expect(rail.className).toContain("w-[68px]")
+    expect(window.localStorage.getItem("mispesitos:sidebar-expanded")).toBe("false")
   })
 
   it("renderiza la barra inferior móvil con Inicio, Egresos, +, Ingresos y Más", () => {
