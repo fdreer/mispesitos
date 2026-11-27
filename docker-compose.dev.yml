@@ -1,0 +1,5 @@
+# Override para desarrollo local: expone Postgres en 127.0.0.1:5432 para `npm run dev`.
+services:
+  db:
+    ports:
+      - "127.0.0.1:5432:5432"

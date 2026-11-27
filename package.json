@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev -p 3100",
+    "dev:docker": "node scripts/dev-docker.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
