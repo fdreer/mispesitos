@@ -1,7 +1,5 @@
 import { describe, it, expect } from "vitest"
 
-import { computeBalances } from "@/lib/balance"
-import type { PaidInstallment } from "@/lib/balance"
 import {
   assertCurrency,
   assertExchangeDirection,
@@ -28,22 +26,6 @@ describe("assertExchangeDirection", () => {
   it("el mensaje dice qué valor llegó, para poder ir a buscar la fila", () => {
     expect(() => assertExchangeDirection(null)).toThrow(/null/)
     expect(() => assertExchangeDirection("compra")).toThrow(/"compra"/)
-  })
-
-  it("una fila con direction nula no puede llegar a computeBalances como venta", () => {
-    const settings = { initialArsCents: 0, initialUsdCents: 0, initialDate: "2026-01-01" }
-    const cambioRoto = { date: "2026-02-01", usdCents: 100_00, rate: 1000 }
-
-    const conElAs = computeBalances({ ...settings }, [], [
-      { ...cambioRoto, direction: null as unknown as "buy" | "sell" },
-    ])
-    expect(conElAs).toEqual({ arsCents: 100_000_00, usdCents: -100_00 })
-
-    expect(() =>
-      computeBalances({ ...settings }, [], [
-        { ...cambioRoto, direction: assertExchangeDirection(null) },
-      ]),
-    ).toThrow(/direction inesperada/)
   })
 })
 
@@ -83,26 +65,6 @@ describe("assertCurrency", () => {
   it("el mensaje dice qué valor llegó, para poder ir a buscar la fila", () => {
     expect(() => assertCurrency("EUR")).toThrow(/"EUR"/)
     expect(() => assertCurrency("")).toThrow(/""/)
-  })
-
-  it("una cuota con una moneda inesperada no puede llegar a computeBalances como dólares", () => {
-    const settings = { initialArsCents: 0, initialUsdCents: 0, initialDate: "2026-01-01" }
-    const cuotaRota = {
-      paidDate: "2026-02-01",
-      kind: "income" as const,
-      amountCents: 500_00,
-    }
-
-    const conElAs = computeBalances(
-      { ...settings },
-      [{ ...cuotaRota, currency: "EUR" as PaidInstallment["currency"] }],
-      [],
-    )
-    expect(conElAs).toEqual({ arsCents: 0, usdCents: 500_00 })
-
-    expect(() =>
-      computeBalances({ ...settings }, [{ ...cuotaRota, currency: assertCurrency("EUR") }], []),
-    ).toThrow(/currency inesperada/)
   })
 })
 

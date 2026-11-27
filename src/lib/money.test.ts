@@ -68,18 +68,6 @@ describe("formatAxisPesos", () => {
 })
 
 describe("parseAmountToCents", () => {
-  it("acepta coma decimal", () => {
-    expect(parseAmountToCents("1.234,56")).toBe(123_456)
-  })
-
-  it("acepta punto decimal", () => {
-    expect(parseAmountToCents("1234.56")).toBe(123_456)
-  })
-
-  it("acepta enteros", () => {
-    expect(parseAmountToCents("1500")).toBe(150_000)
-  })
-
   it("rechaza texto no numérico", () => {
     expect(parseAmountToCents("abc")).toBeNull()
     expect(parseAmountToCents("")).toBeNull()

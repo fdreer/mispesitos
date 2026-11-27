@@ -87,7 +87,7 @@ describe("CategoryManager", () => {
     expect(screen.queryByText(/Las archivadas no aparecen al cargar/)).toBeNull()
   })
 
-  it("archivar bien refresca la pantalla", async () => {
+  it("archivar manda el id de esa categoría", async () => {
     montar([categoria("c1", "Supermercado")])
 
     await elegirDelMenu("Supermercado", "Archivar")

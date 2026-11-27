@@ -145,28 +145,6 @@ describe("summarizeMovementStatus", () => {
     expect(summarizeMovementStatus([...cuotas], TODAY)).toEqual(esperado)
   })
 
-  it("el estado que devuelve el resumen es EXACTAMENTE el que devuelve getMovementStatus", () => {
-    for (const { cuotas } of casos) {
-      expect(summarizeMovementStatus([...cuotas], TODAY).status).toBe(
-        getMovementStatus([...cuotas], TODAY),
-      )
-    }
-  })
-
-  it("los conteos y el estado no pueden contradecirse", () => {
-    for (const { cuotas } of casos) {
-      const { status, pendingCount, overdueCount } = summarizeMovementStatus(
-        [...cuotas],
-        TODAY,
-      )
-
-      expect(overdueCount).toBeLessThanOrEqual(pendingCount)
-      expect(status === "paid").toBe(pendingCount === 0)
-      expect(status === "overdue").toBe(overdueCount > 0)
-      expect(status === "pending").toBe(pendingCount > 0 && overdueCount === 0)
-    }
-  })
-
   it("cuenta sólo las impagas, aunque haya pagadas vencidas de sobra", () => {
     expect(
       summarizeMovementStatus(

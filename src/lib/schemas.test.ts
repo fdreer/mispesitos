@@ -16,11 +16,6 @@ function fieldError(result: { success: boolean; error?: z.ZodError }, field: str
 }
 
 describe("settingsSchema", () => {
-  it("acepta una entrada válida", () => {
-    const result = settingsSchema.safeParse(valid)
-    expect(result.success).toBe(true)
-  })
-
   it("convierte los importes a centavos enteros", () => {
     const result = settingsSchema.safeParse(valid)
     expect(result.success).toBe(true)

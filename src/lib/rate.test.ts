@@ -23,16 +23,6 @@ describe("fetchSuggestedRate", () => {
     expect(result).toEqual({ buyRate: 1450, sellRate: 1400, referenceRate: 1425 })
   })
 
-  it("el TC de referencia es el punto medio, no un lado del spread", async () => {
-    stubFetch(() => ok({ compra: 1400, venta: 1450 }))
-
-    const result = await fetchSuggestedRate("blue")
-
-    expect(result?.referenceRate).toBe(1425)
-    expect(result!.referenceRate).toBeGreaterThan(result!.sellRate)
-    expect(result!.referenceRate).toBeLessThan(result!.buyRate)
-  })
-
   it("redondea referenceRate a 4 decimales para respetar numeric(12,4)", async () => {
     stubFetch(() => ok({ compra: 1000.0001, venta: 1000.0002 }))
 

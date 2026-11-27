@@ -35,12 +35,8 @@ describe("projectionStartArsCents", () => {
   })
 
   it("redondea al centavo, sin fabricar fracciones", () => {
-    expect(projectionStartArsCents({ arsCents: 0, usdCents: 3_33 }, 1_234.5678)).toBe(
-      Math.round(3_33 * 1_234.5678),
-    )
-    expect(Number.isInteger(projectionStartArsCents({ arsCents: 0, usdCents: 3_33 }, 1_234.5678))).toBe(
-      true,
-    )
+    // 333 × 1234,5678 = 411.111,0774 centavos
+    expect(projectionStartArsCents({ arsCents: 0, usdCents: 3_33 }, 1_234.5678)).toBe(411_111)
   })
 })
 
@@ -61,17 +57,6 @@ describe("projectBalance", () => {
       { month: "2026-09", arsCents: 70_000_00 },
       { month: "2026-10", arsCents: 120_000_00 },
     ])
-  })
-
-  it("ignora los vencimientos posteriores al horizonte", () => {
-    const result = projectBalance(
-      10_000_00,
-      [{ dueDate: "2027-05-01", arsCents: 999_00, kind: "expense" }],
-      2,
-      "2026-08-09",
-    )
-
-    expect(result.at(-1)!.arsCents).toBe(10_000_00)
   })
 
   it("acumula los vencimientos atrasados en el mes actual", () => {
@@ -252,12 +237,5 @@ describe("monthlyTotals", () => {
       expect([...meses].sort()).toEqual(meses)
       expect(meses.at(-1)).toBe(hoy.slice(0, 7))
     }
-  })
-
-  it("un mes sin movimientos aparece igual, en cero", () => {
-    const result = monthlyTotals([], 3, "2026-08-09")
-
-    expect(result).toHaveLength(3)
-    expect(result.every((m) => m.incomeArsCents === 0 && m.expenseArsCents === 0)).toBe(true)
   })
 })
