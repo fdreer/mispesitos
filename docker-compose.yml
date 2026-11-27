@@ -1,54 +1,110 @@
-# Mis Pesitos self-hosted: Postgres + preparación de la base + app.
+# Mis Pesitos self-hosted: secretos + Postgres + preparación de la base + app.
 #
-# Instalación rápida (sin crear .env):
 #   docker compose up -d
 #   Abrí http://localhost:3000 y creá la cuenta de administrador.
 #
-# Si lo publicás con un dominio propio, creá un `.env` (ver .env.example)
-# al menos con BETTER_AUTH_URL=https://pesitos.tudominio.com
+# No hace falta ningún .env ni ningún secreto: las contraseñas de la base se
+# generan al azar en el primer arranque (volumen `secrets`) y el secreto de
+# sesiones en el volumen `appdata`. El único valor que conviene definir al
+# publicarla con un dominio es BETTER_AUTH_URL (ver .env.example).
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
 
 services:
+  # Corre en cada `up` y termina: genera las contraseñas que falten y no toca
+  # las que ya existen. Sin red. Root sólo para dejar los dueños correctos.
+  secrets:
+    image: ghcr.io/fdreer/mispesitos:${MISPESITOS_VERSION:-latest}
+    command: ["node", "scripts/init-secrets.mjs"]
+    user: "0:0"
+    network_mode: none
+    restart: "no"
+    logging: *logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    environment:
+      # Opcionales: si se definen en .env, mandan sobre las generadas.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      APP_USER_PASSWORD: ${APP_USER_PASSWORD:-}
+    volumes:
+      - secrets:/secrets
+
   db:
     image: postgres:17-alpine
     restart: unless-stopped
+    logging: *logging
+    security_opt:
+      - no-new-privileges:true
     environment:
       POSTGRES_DB: mispesitos
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mispesitos_postgres_local_only}
+      # Se aplica sólo al crear el volumen `pgdata`; después la mantiene
+      # `migrate` (ver README).
+      POSTGRES_PASSWORD_FILE: /secrets/postgres-password
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - secrets:/secrets:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d mispesitos"]
       interval: 5s
       timeout: 5s
       retries: 20
+    depends_on:
+      secrets:
+        condition: service_completed_successfully
 
   # Corre en cada `up`, es idempotente y termina: crea los roles que faltan,
   # aplica migraciones nuevas y fija la contraseña de app_user.
   migrate:
-    image: ghcr.io/fdreer/mispesitos:latest
+    image: ghcr.io/fdreer/mispesitos:${MISPESITOS_VERSION:-latest}
     command: ["node", "scripts/db-setup.mjs"]
     restart: "no"
-    environment:
-      MIGRATION_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-mispesitos_postgres_local_only}@db:5432/mispesitos
-      APP_USER_PASSWORD: ${APP_USER_PASSWORD:-mispesitos_app_user_local_only}
+    logging: *logging
+    <<: *hardening
+    volumes:
+      - secrets:/secrets:ro
     depends_on:
       db:
         condition: service_healthy
 
   app:
-    image: ghcr.io/fdreer/mispesitos:latest
+    image: ghcr.io/fdreer/mispesitos:${MISPESITOS_VERSION:-latest}
     restart: unless-stopped
+    logging: *logging
+    <<: *hardening
+    # tini como PID 1: reenvía SIGTERM a Node y recoge procesos huérfanos.
+    init: true
     environment:
-      # La app conecta como app_user (sin BYPASSRLS), nunca como postgres.
-      DATABASE_URL: postgresql://app_user:${APP_USER_PASSWORD:-mispesitos_app_user_local_only}@db:5432/mispesitos
-      # Si BETTER_AUTH_SECRET queda vacía, se genera automáticamente en /app/data/auth-secret.
+      # La app arma DATABASE_URL como app_user (sin BYPASSRLS), nunca como
+      # postgres, con la contraseña de /secrets/app-user-password.
+      # Si BETTER_AUTH_SECRET queda vacía, se genera en /app/data/auth-secret.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
     volumes:
       - appdata:/app/data
+      - secrets:/secrets:ro
     ports:
-      - "${APP_PORT:-3000}:3000"
+      # Por defecto sólo escucha en 127.0.0.1: el reverse proxy del mismo host
+      # llega igual, y el puerto no queda abierto a internet (Docker se saltea
+      # ufw/firewalld al publicar puertos). Para exponerlo en la LAN sin proxy:
+      # APP_BIND_ADDRESS=0.0.0.0
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-3000}:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null 2>&1 || exit 1"]
       interval: 30s
@@ -62,3 +118,4 @@ services:
 volumes:
   pgdata:
   appdata:
+  secrets:

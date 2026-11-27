@@ -7,8 +7,9 @@ dólares, y un dashboard con saldo, deudas y flujo proyectado.
 Docker Compose y Postgres propio). No es un servicio abierto: quien la instala
 crea la primera cuenta, que queda como administradora, y el resto entra sólo por
 invitación. Cada persona lleva sus propias finanzas y nadie ve las de otro,
-tampoco el admin. Ver [Instalación rápida (Docker)](#instalación-rápida-docker)
-y [Acceso privado e invitaciones](#acceso-privado-e-invitaciones).
+tampoco el admin. Ver [Instalación rápida (Docker)](#instalación-rápida-docker),
+[Desplegar en un servidor](#desplegar-en-un-servidor) y
+[Acceso privado e invitaciones](#acceso-privado-e-invitaciones).
 
 - Diseño: `docs/superpowers/specs/2026-08-09-mis-pesitos-design.md`
 - Sistema visual: `docs/superpowers/specs/2026-08-10-linear-design-system-design.md`
@@ -60,57 +61,211 @@ falta para señalar estado.
 
 ## Instalación rápida (Docker)
 
-Necesitás Docker con Compose (Windows, macOS o Linux). Levanta Postgres 17,
-prepara la base y arranca la app **sin crear ningún `.env`**:
+Corre en cualquier PC con Docker: Windows y macOS con Docker Desktop, Linux con
+Docker Engine y Compose v2. La imagen es multi-arquitectura (`amd64` y `arm64`,
+incluidas las Mac con Apple Silicon) y pública, así que no hace falta loguearse
+en ningún registro.
 
-1. Descargá `docker-compose.yml` y corré:
+1. Descargá `docker-compose.yml` en una carpeta propia y corré:
    ```bash
    docker compose up -d
    ```
-2. Abrí `http://localhost:3000` y creá la cuenta de administrador.
+2. Abrí `http://localhost:3000` y creá la cuenta de administrador con el correo
+   y la contraseña que quieras.
 
-Si lo publicás con un dominio propio (detrás de Caddy, Nginx o Traefik), creá un
-`.env` a partir de `.env.example` al menos con `BETTER_AUTH_URL` (ej.
-`https://pesitos.midominio.com`): con ella se arman los links de invitación y se
-valida el origen. Si no definís `BETTER_AUTH_SECRET`, se genera automáticamente
-en el volumen `appdata` en el primer arranque.
+**No hay que configurar ningún secreto**, ni para probar ni para dejarla en un
+servidor. En el primer arranque se generan al azar, únicas por instalación:
 
-Para actualizar a la última versión:
+| Secreto | Dónde queda |
+|---|---|
+| Contraseña de `postgres` (dueño de la base) | volumen `secrets` |
+| Contraseña de `app_user` (con la que conecta la app) | volumen `secrets` |
+| Secreto de firma de sesiones (`BETTER_AUTH_SECRET`) | volumen `appdata` |
+
+Qué corre:
+
+- **`secrets`**: corre `scripts/init-secrets.mjs` y termina. Genera las
+  contraseñas que falten y no toca las existentes. Sin red; corre como root sólo
+  para dejar cada archivo legible por quien lo usa (`0440`, carpeta `0750`).
+- **`db`**: Postgres 17 con los datos en el volumen `pgdata`. No publica ningún
+  puerto: sólo lo ven los otros servicios.
+- **`migrate`**: corre `scripts/db-setup.mjs` y termina. Crea los roles de RLS
+  (`anon` y `authenticated`), aplica las migraciones de `./drizzle` y fija la
+  contraseña de `app_user`. Es idempotente y corre en cada `up`.
+- **`app`**: la build `standalone` de Next, conectada como `app_user` (nunca
+  como `postgres`), con healthcheck en `/api/health`. Publica el puerto
+  `APP_PORT` (3000) **sólo en `127.0.0.1`** salvo que definas
+  `APP_BIND_ADDRESS`.
+
+`app` y `migrate` corren como usuario sin privilegios, sin capabilities de Linux
+y con `no-new-privileges`; los logs rotan (3 × 10 MB).
+
+## Desplegar en un servidor
+
+"Servidor" es cualquier máquina que quede prendida y a la que se entre desde
+otros dispositivos: una PC de la casa, una Raspberry Pi o un VPS. El deploy es
+el mismo `docker compose up -d` de arriba; lo único que cambia es cómo la
+exponés, y eso queda a tu elección.
+
+### 1. La imagen
+
+`ghcr.io/fdreer/mispesitos` se publica desde GitHub Actions sólo si pasan lint,
+tipos y tests unitarios, para `linux/amd64` y `linux/arm64`. Tags: `latest`
+(último push a `main`), `sha-<commit>` y `X.Y.Z` (tags `vX.Y.Z`).
+`docker compose pull` baja sola la variante de tu arquitectura.
+
+### 2. Preferencias (`.env`, opcional)
+
+Todo tiene un valor por defecto que funciona. Si querés cambiar algo, creá un
+`.env` junto al `docker-compose.yml` (ver `.env.example`):
+
+- **`BETTER_AUTH_URL`**: la URL desde la que entra el navegador, exacta (esquema,
+  dominio y puerto). El valor por defecto es `http://localhost:3000`; si entrás
+  por otra (un dominio, la IP de la PC en la red), poné esa. Si no coincide,
+  better-auth rechaza los requests con `INVALID_ORIGIN`, las cookies no salen
+  `Secure` con HTTPS y los links de invitación apuntan mal.
+- **`APP_PORT`** / **`APP_BIND_ADDRESS`**: puerto e interfaz donde escucha.
+- **`MISPESITOS_VERSION`**: fijar un tag en vez de seguir `latest`.
+
+**Creá la cuenta de administrador apenas levante.** Hasta entonces, el primero
+que abra la URL se queda con el admin.
+
+Instalaciones anteriores a la generación automática, que arrancaron con la
+contraseña fija de `postgres` que traía el compose: `migrate` la detecta y la
+rota sola a la generada en el próximo `up`; no hay que hacer nada.
+
+### 3. Reverse proxy y HTTPS
+
+La app escucha en `127.0.0.1:3000` del host. Si no usás proxy y querés entrar
+desde otros dispositivos de la red, poné `APP_BIND_ADDRESS=0.0.0.0` y
+`BETTER_AUTH_URL=http://<ip-de-la-pc>:3000`; sin HTTPS, sólo dentro de tu red.
+Ojo en Linux: con `0.0.0.0` Docker abre el puerto saltándose `ufw` y
+`firewalld`.
+
+El proxy tiene que pasar el `Host` original (lo usan better-auth y la
+verificación de origen de las Server Actions) y **un único** `X-Forwarded-For`
+con la IP del cliente: el rate limit de better-auth descarta una cadena de varias
+IPs (el primer valor puede estar falsificado) y entonces todos los clientes
+comparten un mismo cupo de intentos de login.
+
+**Caddy** (HTTPS automático; ya hace todo lo anterior por defecto):
+
+```caddy
+pesitos.midominio.com {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	reverse_proxy 127.0.0.1:3000
+}
+```
+
+**Nginx** (con el certificado ya emitido, p. ej. con certbot):
+
+```nginx
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name pesitos.midominio.com;
+    # ssl_certificate / ssl_certificate_key ...
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    client_max_body_size 2m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # $remote_addr y no $proxy_add_x_forwarded_for: un solo valor, no falsificable.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        # Streaming de Next (loading/Suspense).
+        proxy_buffering off;
+    }
+}
+```
+
+Si el proxy corre en otra máquina, publicá con `APP_BIND_ADDRESS=<IP privada>` y
+limitá ese puerto en el firewall del proveedor a la IP del proxy.
+
+### 4. Actualizar
 
 ```bash
 docker compose pull && docker compose up -d
 ```
 
-Qué corre:
+`migrate` aplica las migraciones nuevas antes de que arranque la app nueva. Las
+migraciones no tienen vuelta atrás automática, así que **hacé un backup antes**.
+Para no recibir cada push a `main`, fijá `MISPESITOS_VERSION` a un tag
+(`sha-abc1234` o `1.2.0`) y cambialo a mano; volver a una imagen anterior sólo
+es seguro si la nueva no trajo migraciones.
 
-- **`db`**: Postgres 17 con los datos en el volumen `pgdata`.
-- **`migrate`**: corre `scripts/db-setup.mjs` y termina. Crea los roles de RLS
-  (`anon` y `authenticated`), aplica las migraciones de `./drizzle` y fija la
-  contraseña de `app_user`. Es idempotente y corre en cada `up`, así que
-  actualizar es simplemente `docker compose pull && docker compose up -d`.
-- **`app`**: la build `standalone` de Next, conectada como `app_user` (nunca
-  como `postgres`), en el puerto `APP_PORT` (3000 por defecto) y con healthcheck
-  en `/api/health`.
-
-Para HTTPS poné adelante el reverse proxy que uses (Caddy, Nginx, Traefik). Si
-es Nginx, desactivá el buffering de respuestas para que el streaming de Next
-funcione.
-
-**Backups.** Un volcado de la base:
+**No borres sólo el volumen `secrets`** (`docker compose down -v` borra todos, y
+eso está bien): con la base todavía en `pgdata`, las contraseñas nuevas no
+coincidirían y `migrate` fallaría. Si pasa, se arregla desde adentro del
+contenedor, que entra sin contraseña por el socket local:
 
 ```bash
-docker compose exec db pg_dump -U postgres -Fc mispesitos > mispesitos-$(date +%F).dump
+docker compose exec db cat /secrets/postgres-password
+docker compose exec db psql -U postgres -c "ALTER ROLE postgres PASSWORD '<el valor de arriba>'"
+docker compose up -d
 ```
 
-y para restaurarlo en una base vacía:
+Postgres 17 → 18 (o cualquier cambio de versión mayor) **no** se hace cambiando
+el tag de `db`: el volumen no es compatible. Hay que volcar, crear un volumen
+nuevo y restaurar.
+
+### 5. Backups
+
+La base. El volcado se escribe dentro del contenedor y se copia afuera con
+`docker compose cp`, así funciona igual en Windows, macOS y Linux (redirigir con
+`>` la salida binaria de `docker compose exec` la puede corromper: con una TTY
+en Linux y siempre en Windows PowerShell, que la re-codifica):
 
 ```bash
-docker compose exec -T db pg_restore -U postgres -d mispesitos --clean --if-exists < archivo.dump
+docker compose exec db pg_dump -U postgres -Fc -f /tmp/mispesitos.dump mispesitos
+docker compose cp db:/tmp/mispesitos.dump ./mispesitos.dump
+```
+
+El volcado es todo lo que hace falta: las contraseñas del volumen `secrets` no
+se respaldan, porque una instalación nueva genera las suyas. (Si querés que las
+sesiones abiertas sobrevivan a una reinstalación, guardá también
+`/app/data/auth-secret` del volumen `appdata`.) Copiá los volcados **fuera** de
+la máquina; un `cron` diario con retención alcanza:
+
+```cron
+15 3 * * * cd /opt/mispesitos && docker compose exec -T db pg_dump -U postgres -Fc -f /tmp/m.dump mispesitos && docker compose cp db:/tmp/m.dump backups/mispesitos-$(date +\%F).dump && find backups -name '*.dump' -mtime +30 -delete
+```
+
+(En Windows, lo mismo con el Programador de tareas.)
+
+Para restaurar en una instalación nueva: levantala primero con
+`docker compose up -d` (así `migrate` crea los roles `app_user`,
+`authenticated` y `anon`, que `pg_dump` no incluye, con las contraseñas nuevas)
+y después:
+
+```bash
+docker compose stop app
+docker compose cp ./mispesitos.dump db:/tmp/restore.dump
+docker compose exec db pg_restore -U postgres -d mispesitos --clean --if-exists /tmp/restore.dump
+docker compose start app
+```
+
+Probá la restauración al menos una vez antes de confiar en los backups.
+
+### 6. Comprobar que quedó bien
+
+```bash
+docker compose ps                  # db y app "healthy"; migrate "exited (0)"
+docker compose logs migrate        # ✓ Roles… ✓ Migraciones… ✓ app_user…
+curl -fsS https://pesitos.midominio.com/api/health
+curl -sI https://pesitos.midominio.com | grep -i strict-transport
+ss -tlnp | grep 3000               # tiene que decir 127.0.0.1:3000, no 0.0.0.0
 ```
 
 *(Si preferís desplegarlo con un Postgres externo o en otra plataforma de Node,
 `pnpm db:setup` funciona contra cualquier Postgres 15+ y la app corre en
-cualquier hosting Node 24+ con las variables de `.env.example`.)*
+cualquier hosting Node 24+ con las variables de `.env.example`: o con
+`pnpm build && pnpm start`, o compilando con `NEXT_OUTPUT=standalone` y corriendo
+`.next/standalone/server.js`.)*
 
 ## Acceso privado e invitaciones
 

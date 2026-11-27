@@ -12,7 +12,7 @@ Este documento concentra las decisiones técnicas, invariantes de dominio, regla
 - Un guard en tiempo de ejecución (`src/lib/rls-guard.ts`, invocado en el primer `withUser()`) consulta `pg_roles` y aborta con excepción si el rol de `DATABASE_URL` tiene `BYPASSRLS` o `SUPERUSER`.
 
 ### Puesta a punto idempotente (`scripts/db-setup.mjs`)
-El script se ejecuta en cada arranque (también en Docker Compose) y realiza tres pasos:
+El script se ejecuta en cada `docker compose up` (servicio `migrate`) y con `pnpm db:setup`, y realiza tres pasos:
 1. Crea los roles `anon` y `authenticated` (`NOLOGIN`) si no existen; son el destino de `SET LOCAL ROLE authenticated` dentro de `withUser()`.
 2. Aplica las migraciones de `./drizzle` usando el migrador de `drizzle-orm` (sin requerir `drizzle-kit` en la imagen de producción).
 3. Si está definida `APP_USER_PASSWORD`, habilita `LOGIN` y asigna esa contraseña a `app_user`. Como `ALTER ROLE` no admite parámetros preparados, la contraseña se restringe a un alfabeto seguro sin necesidad de escape (p. ej. `openssl rand -hex 24`).
@@ -66,6 +66,26 @@ El script se ejecuta en cada arranque (también en Docker Compose) y realiza tre
 
 ### Next.js y Docker (`next.config.ts`)
 - La imagen de Docker compila con `NEXT_OUTPUT=standalone` para generar `.next/standalone/server.js` con el mínimo de `node_modules`. Fuera de Docker no se activa porque `next start` no sirve builds standalone.
+
+### Imagen y Docker Compose (`Dockerfile`, `docker-compose.yml`)
+- Una sola imagen para `secrets`, `app` y `migrate`. En la etapa `deps` se instala con `--node-linker=hoisted` porque con los symlinks de pnpm el trazado standalone deja afuera dependencias que Next resuelve en runtime; por la misma razón se llama a `next build` directo y no a `pnpm build`. `drizzle-orm` y `postgres` se copian aparte: los scripts de `scripts/` corren fuera de Next, y ni el migrador entra en el trazado ni el driver queda en `node_modules` (Next lo empaqueta dentro de sus chunks). Sin `postgres`, `migrate` falla con `ERR_MODULE_NOT_FOUND`.
+- El runtime corre como `node`, y el entrypoint genera `BETTER_AUTH_SECRET` en `/app/data/auth-secret` (volumen `appdata`) si no llega por entorno.
+
+### Secretos sin configuración (`scripts/init-secrets.mjs`)
+- El servicio `secrets` corre antes que `db` y deja en el volumen `secrets` `postgres-password` (dueño `1000`, grupo `70`) y `app-user-password` (`1000:1000`), ambos `0440`, carpeta `1000:70` `0750`. `70` es el usuario `postgres` de la imagen oficial y `1000` el `node` de la nuestra: cada contenedor lee sólo lo suyo. Corre como root sin red y con sólo `CHOWN`, `DAC_OVERRIDE` y `FOWNER`, que necesita para reescribir y re-adueñar archivos que ya no son suyos.
+- Prioridad: variable de entorno (`POSTGRES_PASSWORD`, `APP_USER_PASSWORD`) > archivo existente > generada (`randomBytes(24)` en hex). Correrlo de nuevo no cambia nada.
+- `db` usa `POSTGRES_PASSWORD_FILE`; `migrate` y el entrypoint de `app` arman sus URLs con `DB_HOST`/`DB_PORT`/`DB_NAME` (por defecto `db:5432/mispesitos`) si no reciben `MIGRATION_DATABASE_URL`/`DATABASE_URL`, que siguen mandando (desarrollo local).
+- Migración de instalaciones viejas: si la contraseña generada falla con `28P01`, `db-setup.mjs` prueba la fija que traía el compose (`mispesitos_postgres_local_only`) y, si entra, hace `ALTER ROLE postgres` a la nueva. La de `app_user` se reaplica igual que siempre.
+- Los `ALTER ROLE` escapan el literal (`'` → `''`), así que una contraseña de `postgres` elegida por el usuario puede tener cualquier carácter; la URL la lleva con `encodeURIComponent`. La de `app_user` mantiene el alfabeto restringido porque el entrypoint la mete en la URL sin escapar.
+- En el compose, `app` y `migrate` llevan `cap_drop: ALL` y `no-new-privileges`; `app` usa `init: true` (tini) para que el `SIGTERM` de `docker compose stop` llegue a Node. `db` no lleva `cap_drop` porque el entrypoint de Postgres necesita `chown`/`setuid`.
+- El puerto de `app` se publica en `127.0.0.1` por defecto (`APP_BIND_ADDRESS`): Docker inserta sus reglas de iptables antes que `ufw`, así que un `0.0.0.0` queda expuesto aunque el firewall diga lo contrario.
+- Los logs rotan (`json-file`, 3 × 10 MB) para que un servidor chico no se llene el disco.
+- `MISPESITOS_VERSION` elige el tag de la imagen; en un servidor conviene fijarlo y no seguir `latest`.
+
+### CI (`.github/workflows/docker.yml`)
+- El job `verify` (lint, typecheck, tests unitarios) es requisito de todo lo demás: no se publica `latest` con el código roto. En PRs se compila la imagen sin publicarla.
+- La imagen es multi-arquitectura sin QEMU: `build` compila `linux/amd64` en `ubuntu-latest` y `linux/arm64` en `ubuntu-24.04-arm` (runners ARM nativos, gratis en repos públicos), sube cada una por digest, y `merge` arma el manifiesto con los tags (`latest`, `sha-*`, semver). El lockfile ya trae los binarios `linux-*-musl` de las dependencias nativas (SWC, Tailwind oxide, sharp), así que el `Dockerfile` no cambia por arquitectura. Si el repo vuelve a ser privado, los runners ARM dejan de ser gratuitos.
+- No corre `pnpm test:db` porque necesita un Postgres con los roles; si se suma, con un `services: postgres` del workflow.
 
 ### ESLint (`eslint.config.mjs`)
 - Se ignoran `coverage/` (generado por `pnpm test:coverage`) y worktrees locales de agentes para que el linter no analice archivos generados ni copias auxiliares.

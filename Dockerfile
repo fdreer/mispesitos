@@ -1,8 +1,9 @@
 # Mis Pesitos — imagen self-hosted única.
 #
 # Por defecto arranca la app (server.js de la build standalone de Next).
-# Para correr las migraciones de la base se invoca la misma imagen con:
-#   node scripts/db-setup.mjs (ver servicio `migrate` en docker-compose.yml).
+# La misma imagen cubre los otros dos pasos de docker-compose.yml:
+#   node scripts/init-secrets.mjs  genera las contraseñas (servicio `secrets`)
+#   node scripts/db-setup.mjs      roles, migraciones y app_user (servicio `migrate`)
 
 FROM node:24-alpine AS base
 WORKDIR /app
@@ -43,10 +44,14 @@ ENV NODE_ENV=production \
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
-# El migrador de drizzle no entra en el trazado de la build standalone.
+# Los scripts de scripts/ corren fuera de Next: ni el migrador de drizzle ni el
+# driver `postgres` (que Next empaqueta dentro de sus chunks) quedan en el
+# node_modules de la build standalone.
 COPY --from=deps --chown=node:node /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
+COPY --from=deps --chown=node:node /app/node_modules/postgres ./node_modules/postgres
 COPY --chown=node:node drizzle ./drizzle
 COPY --chown=node:node scripts/db-setup.mjs ./scripts/db-setup.mjs
+COPY --chown=node:node scripts/init-secrets.mjs ./scripts/init-secrets.mjs
 COPY --chown=node:node scripts/docker-entrypoint.sh ./docker-entrypoint.sh
 RUN sed -i 's/\r$//' ./docker-entrypoint.sh && chmod +x ./docker-entrypoint.sh && mkdir -p /app/data && chown node:node /app/data
 USER node

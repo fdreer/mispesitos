@@ -225,22 +225,38 @@ más, un selector en `/categorias`, y decidir qué pasa con las que ya existen.
 
 ## 4. Antes de desplegar
 
-Cuatro cosas que fallan en producción y no en desarrollo:
+La guía paso a paso está en el README ("Desplegar en un servidor"). Lo que falla
+en producción y no en desarrollo:
 
-1. **Cargar las dos cadenas de conexión.** Si `DATABASE_URL` queda apuntando al
-   rol dueño en vez de a `app_user`, el aislamiento entre usuarios desaparece y
-   nada falla a la vista. Hay un guard que tira, pero recién en la primera
-   consulta. Ver la sección correspondiente del README.
-2. **Aplicarle la contraseña a `app_user`** después de `pnpm db:migrate`. Es un
-   paso manual: la migración crea el rol sin contraseña a propósito, para no dejar
-   un secreto commiteado. Sin ese paso la app no conecta, y el error no se
-   distingue de "la base está caída".
-3. **`BETTER_AUTH_URL` con el dominio real** cuando se publica detrás de un
-   reverse proxy. Si no coincide exacto con el esquema y dominio desde el que
-   entra el navegador, better-auth rechaza los requests con `INVALID_ORIGIN` y
-   los links de invitación salen con la URL equivocada.
-4. **No correr `pnpm test:db` contra producción.** Siembra y borra filas con ids
+1. **Los secretos.** En Docker Compose no hay nada que hacer: `secrets` genera
+   las contraseñas de la base en el primer `up` y el entrypoint el secreto de
+   sesiones. Lo único que rompe es borrar el volumen `secrets` y conservar
+   `pgdata` (ver README → Actualizar).
+2. **Las dos cadenas de conexión fuera de Docker.** En Docker las arman
+   `db-setup.mjs` y el entrypoint; fuera, si `DATABASE_URL` queda apuntando al
+   rol dueño en vez de a `app_user`, el aislamiento entre usuarios desaparece.
+   Hay un guard que tira, pero recién en la primera consulta.
+3. **La contraseña de `app_user` fuera de Docker.** Hay que correr
+   `pnpm db:setup` con `APP_USER_PASSWORD` (o el `ALTER ROLE` manual del README).
+   Sin eso la app no conecta, y el error no se distingue de "la base está caída".
+4. **`BETTER_AUTH_URL` con el dominio real** detrás del reverse proxy. Si no
+   coincide exacto con el esquema y dominio del navegador, better-auth rechaza
+   los requests con `INVALID_ORIGIN` y los links de invitación salen mal.
+5. **El reverse proxy tiene que mandar un solo `X-Forwarded-For`.** Con una
+   cadena (`$proxy_add_x_forwarded_for` de Nginx) better-auth no resuelve la IP y
+   el rate limit de login pasa a ser un cupo compartido por todos.
+6. **No correr `pnpm test:db` contra producción.** Siembra y borra filas con ids
    fijos sobre una base real.
+
+Pendiente de infraestructura, sin resolver:
+
+- **El rate limit de better-auth vive en memoria.** Se reinicia con cada deploy y
+  no se comparte entre réplicas; alcanza para una sola instancia.
+- **Sin Content-Security-Policy.** `next.config.ts` manda `nosniff`,
+  `X-Frame-Options`, `Referrer-Policy` y `Permissions-Policy`; HSTS queda en el
+  reverse proxy. Una CSP estricta con Next necesita nonces por request.
+- **`/api/health` no mira la base.** Confirma que el proceso responde; si Postgres
+  se cae, el contenedor sigue "healthy".
 
 ---
 
