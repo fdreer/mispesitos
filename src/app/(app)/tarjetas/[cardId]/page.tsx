@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
-import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react"
+import { ArrowLeft, ChevronLeft, ChevronRight, Info } from "lucide-react"
 import { z } from "zod"
 
 import { CardArchiveButton } from "@/components/cards/card-archive-button"
@@ -11,14 +11,21 @@ import {
   UnpayStatementButton,
   type StatementForActions,
 } from "@/components/cards/statement-actions"
-import { StatementStatus } from "@/components/cards/statement-status"
+import { CardSwatch, CreditUsage, MoneyStack, StatLabel } from "@/components/cards/card-ui"
+import {
+  relativeDay,
+  StatementBadge,
+  statementState,
+  type StatementState,
+} from "@/components/cards/statement-status"
 import { CategoryBadge } from "@/components/category-badge"
 import { Badge } from "@/components/ui/badge"
 import { buttonVariants } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card } from "@/components/ui/card"
 import { computeBalances } from "@/lib/balance"
 import {
   addPeriods,
+  availableCredit,
   cardColor,
   cardOverview,
   effectiveStatementRate,
@@ -37,7 +44,12 @@ import {
 } from "@/lib/movement-asserts"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import { cn } from "@/lib/utils"
-import { getCard, listStatementInstallments, listStatementSummaries } from "@/server/card-queries"
+import {
+  getCard,
+  listStatementInstallments,
+  listStatementSummaries,
+  listUnpaidCardInstallments,
+} from "@/server/card-queries"
 import {
   listCategories,
   listExchanges,
@@ -60,10 +72,11 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
   const card = await getCard(user.id, cardId)
   if (!card) notFound()
 
-  const [statements, categories, officialRate] = await Promise.all([
+  const [statements, categories, officialRate, unpaid] = await Promise.all([
     listStatementSummaries(user.id, card.id),
     listCategories(user.id, "expense", true),
     resolveOfficialRate(user.id, settings),
+    card.creditLimitCents !== null ? listUnpaidCardInstallments(user.id) : Promise.resolve([]),
   ])
   const { open, current } = cardOverview(card, statements, today)
 
@@ -135,124 +148,114 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
       : null
   const officialSellRate = officialRate?.venta ?? null
 
+  const color = cardColor(card)
+  const available = availableCredit(
+    card.creditLimitCents,
+    unpaid.filter((i) => i.cardId === card.id),
+    officialSellRate,
+  )
+  const stateByPeriod = new Map<string, StatementState>(
+    statements.map((s) => [s.period, statementState(s, today)]),
+  )
+  const isOpen = statement.closingDate >= today
+  const state = statementState(statement, today)
+  const showUsdNote =
+    usdPaidArsCents !== null ||
+    (statement.paidDate === null && statement.totals.usdCents > 0 && officialSellRate !== null)
+
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
+      <div className="space-y-4">
         <Link
           href="/tarjetas"
-          className="text-muted-foreground inline-flex items-center gap-1 text-sm hover:text-foreground"
+          className="text-muted-foreground inline-flex items-center gap-1 text-xs hover:text-foreground"
         >
-          <ArrowLeft className="size-4" aria-hidden />
+          <ArrowLeft className="size-3.5" aria-hidden />
           Tarjetas
         </Link>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="flex items-center gap-2 text-2xl font-semibold text-paper">
-            <span
-              aria-hidden
-              className="inline-block size-3 rounded-full"
-              style={{ backgroundColor: cardColor(card) }}
-            />
-            {card.name}
-            {card.archived && <Badge variant="outline">Archivada</Badge>}
-          </h1>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h1 className="flex items-center gap-2.5 text-2xl font-semibold text-paper">
+              <CardSwatch color={color} className="h-4 w-6" />
+              {card.name}
+              {card.archived && <Badge variant="secondary">Archivada</Badge>}
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              Cierra el {card.closingDay} y vence el {card.dueDay} de cada mes
+            </p>
+          </div>
           <div className="flex items-center gap-1">
             <CardDialog card={card} />
             <CardArchiveButton id={card.id} name={card.name} archived={card.archived} />
           </div>
         </div>
-        <p className="text-muted-foreground text-sm">
-          Cierra el {card.closingDay} y vence el {card.dueDay} de cada mes
-          {card.creditLimitCents !== null &&
-            ` · límite ${formatMoney(card.creditLimitCents, "ARS", 0)}`}
-        </p>
+        {available !== null && card.creditLimitCents !== null && (
+          <div className="max-w-md">
+            <CreditUsage
+              limitCents={card.creditLimitCents}
+              availableCents={available.arsCents}
+              unconvertedUsdCents={available.unconvertedUsdCents}
+              color={color}
+            />
+          </div>
+        )}
       </div>
 
-      <nav aria-label="Resúmenes" className="flex items-center gap-2">
+      <nav aria-label="Resúmenes" className="flex items-center gap-1">
         <Link
           href={`/tarjetas/${card.id}?periodo=${addPeriods(period, -1)}`}
           aria-label="Resumen anterior"
-          className={buttonVariants({ variant: "outline", size: "icon" })}
+          className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
         >
           <ChevronLeft />
         </Link>
-        <ul className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto py-1">
-          {periods.map((p) => (
-            <li key={p} className="shrink-0">
-              <Link
-                href={`/tarjetas/${card.id}?periodo=${p}`}
-                aria-current={p === period ? "page" : undefined}
-                className={cn(
-                  "inline-flex h-8 items-center rounded-full border px-3 text-xs",
-                  p === period
-                    ? "border-foreground bg-accent text-foreground"
-                    : "border-border text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {formatPeriod(p)}
-              </Link>
-            </li>
-          ))}
+        <ul className="flex min-w-0 gap-0.5 overflow-x-auto rounded-lg border border-white/[0.06] bg-white/[0.02] p-0.5 [scrollbar-width:none]">
+          {periods.map((p) => {
+            const pState = stateByPeriod.get(p)
+            const active = p === period
+            return (
+              <li key={p} className="shrink-0">
+                <Link
+                  href={`/tarjetas/${card.id}?periodo=${p}`}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors",
+                    active
+                      ? "bg-white/[0.08] text-paper shadow-sm"
+                      : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
+                  )}
+                >
+                  {pState && STATE_DOT[pState] && (
+                    <span aria-hidden className={cn("size-1.5 rounded-full", STATE_DOT[pState])} />
+                  )}
+                  {formatPeriod(p)}
+                  {pState && STATE_LABEL[pState] && (
+                    <span className="sr-only"> ({STATE_LABEL[pState]})</span>
+                  )}
+                </Link>
+              </li>
+            )
+          })}
         </ul>
         <Link
           href={`/tarjetas/${card.id}?periodo=${addPeriods(period, 1)}`}
           aria-label="Resumen siguiente"
-          className={buttonVariants({ variant: "outline", size: "icon" })}
+          className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
         >
           <ChevronRight />
         </Link>
       </nav>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Resumen de {formatPeriod(statement.period)}</CardTitle>
-          <p className="text-sm">
-            <StatementStatus statement={statement} today={today} />
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-4">
-            <div>
-              <dt className="text-muted-foreground text-xs">Cierre</dt>
-              <dd className="tabular-nums">{formatIsoForDisplay(statement.closingDate)}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground text-xs">Vencimiento</dt>
-              <dd className="tabular-nums">{formatIsoForDisplay(statement.dueDate)}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground text-xs">En pesos</dt>
-              <dd className="font-semibold tabular-nums">
-                {formatMoney(statement.totals.arsCents, "ARS")}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground text-xs">En dólares</dt>
-              <dd className="font-semibold tabular-nums">
-                {formatMoney(statement.totals.usdCents, "USD")}
-              </dd>
-            </div>
-          </dl>
-
-          {statement.paidDate === null &&
-            statement.totals.usdCents > 0 &&
-            officialSellRate !== null && (
-              <p className="text-muted-foreground text-xs tabular-nums">
-                {formatMoney(statement.totals.usdCents, "USD")} ≈{" "}
-                {formatMoney(convertToArs(statement.totals.usdCents, officialSellRate), "ARS")} si
-                lo pagás en pesos (oficial vendedor de hoy).
-              </p>
-            )}
-
-          {usdPaidArsCents !== null && (
-            <p className="text-muted-foreground text-xs tabular-nums">
-              Los dólares se pagaron con pesos: {formatMoney(usdPaidArsCents, "ARS")}
-              {effRate !== null &&
-                ` (TC efectivo ${formatMoney(Math.round(effRate * 100), "ARS")})`}
-              .
-            </p>
-          )}
-
-          <div className="flex flex-wrap items-start gap-2">
+      <Card className="gap-0 py-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-5">
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-base font-medium text-paper">
+              Resumen de {formatPeriod(statement.period)}
+            </h2>
+            <StatementBadge statement={statement} today={today} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <StatementDatesButton statement={forActions} />
             {statement.paidDate ? (
               <UnpayStatementButton statement={forActions} />
             ) : (
@@ -264,35 +267,108 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
                 usdBalanceCents={usdBalanceCents}
               />
             )}
-            <StatementDatesButton statement={forActions} />
           </div>
+        </div>
 
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 px-5 py-5 sm:grid-cols-[1.4fr_1fr_1fr]">
+          <div className="col-span-2 space-y-1 sm:col-span-1">
+            <dt>
+              <StatLabel>{isOpen ? "Acumulado hasta hoy" : "Total del resumen"}</StatLabel>
+            </dt>
+            <dd>
+              <MoneyStack
+                arsCents={statement.totals.arsCents}
+                usdCents={statement.totals.usdCents}
+                size="xl"
+              />
+            </dd>
+          </div>
+          <div className="space-y-1">
+            <dt>
+              <StatLabel>Cierre</StatLabel>
+            </dt>
+            <dd className="text-sm text-paper tabular-nums">
+              {formatIsoForDisplay(statement.closingDate)}
+            </dd>
+            <dd className="text-muted-foreground text-xs">
+              {isOpen ? "cierra" : "cerró"} {relativeDay(statement.closingDate, today)}
+            </dd>
+          </div>
+          <div className="space-y-1">
+            <dt>
+              <StatLabel>Vencimiento</StatLabel>
+            </dt>
+            <dd className="text-sm text-paper tabular-nums">
+              {formatIsoForDisplay(statement.dueDate)}
+            </dd>
+            <dd
+              className={cn(
+                "text-xs",
+                state === "overdue" ? "text-coral-red" : "text-muted-foreground",
+              )}
+            >
+              {statement.dueDate >= today ? "vence" : "venció"}{" "}
+              {relativeDay(statement.dueDate, today)}
+            </dd>
+          </div>
+        </dl>
+
+        {showUsdNote && (
+          <div className="text-muted-foreground mx-5 mb-5 flex gap-2 rounded-lg bg-white/[0.03] px-3 py-2.5 text-xs tabular-nums">
+            <Info className="mt-px size-3.5 shrink-0" aria-hidden />
+            {usdPaidArsCents !== null ? (
+              <p>
+                Los {formatMoney(statement.totals.usdCents, "USD")} se pagaron con{" "}
+                <span className="text-foreground">{formatMoney(usdPaidArsCents, "ARS")}</span>
+                {effRate !== null &&
+                  ` (TC efectivo ${formatMoney(Math.round(effRate * 100), "ARS")})`}
+                .
+              </p>
+            ) : (
+              <p>
+                Si pagás los {formatMoney(statement.totals.usdCents, "USD")} en pesos serían{" "}
+                <span className="text-foreground">
+                  ≈ {formatMoney(convertToArs(statement.totals.usdCents, officialSellRate ?? 0), "ARS")}
+                </span>{" "}
+                al oficial vendedor de hoy.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="border-t border-white/[0.05]">
+          <div className="text-muted-foreground flex items-center justify-between px-5 pt-4 pb-2 text-xs">
+            <span>Compras · {installments.length}</span>
+            {installments.length > 0 && <span>Importe</span>}
+          </div>
           {installments.length === 0 ? (
-            <p className="text-muted-foreground border-t pt-4 text-sm">
-              No hay compras en este resumen.
+            <p className="text-muted-foreground px-5 pt-2 pb-6 text-sm">
+              {isOpen ? "Todavía no hay compras en este resumen." : "No hubo compras en este resumen."}
             </p>
           ) : (
-            <ul className="divide-y border-t">
+            <ul className="divide-y divide-white/[0.05] pb-1">
               {installments.map((i) => {
                 const label = i.categoryId ? labels.get(i.categoryId) : undefined
                 return (
-                  <li key={i.id} className="flex items-start justify-between gap-3 py-2.5">
+                  <li
+                    key={i.id}
+                    className="flex items-center justify-between gap-4 px-5 py-3 transition-colors hover:bg-white/[0.015]"
+                  >
                     <div className="min-w-0 space-y-1">
-                      <p className="truncate text-sm font-medium">
-                        {i.description}
+                      <p className="flex min-w-0 items-center gap-2 text-sm">
+                        <span className="truncate text-paper">{i.description}</span>
                         {i.total > 1 && (
-                          <span className="text-muted-foreground font-normal">
-                            {" "}
-                            · cuota {i.number}/{i.total}
+                          <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                            Cuota {i.number}/{i.total}
                           </span>
                         )}
                       </p>
-                      <p className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-                        Compra del {formatIsoForDisplay(i.date)}
+                      <p className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs tabular-nums">
+                        {formatIsoForDisplay(i.date)}
                         {label && <CategoryBadge {...label} />}
                       </p>
                     </div>
-                    <span className="shrink-0 text-sm tabular-nums">
+                    <span className="shrink-0 text-sm text-paper tabular-nums">
                       {formatMoney(i.amountCents, assertCurrency(i.currency))}
                     </span>
                   </li>
@@ -300,8 +376,20 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
               })}
             </ul>
           )}
-        </CardContent>
+        </div>
       </Card>
     </div>
   )
+}
+
+const STATE_DOT: Partial<Record<StatementState, string>> = {
+  overdue: "bg-coral-red",
+  due: "bg-ember-orange",
+  paid: "bg-pulse-green",
+}
+
+const STATE_LABEL: Partial<Record<StatementState, string>> = {
+  overdue: "vencido",
+  due: "a pagar",
+  paid: "pagado",
 }
