@@ -24,7 +24,6 @@ export default async function OnboardingPage() {
             defaults={{
               initialBalanceArs: "0",
               initialBalanceUsd: "0",
-              initialBalanceUsdRate: "0",
               initialBalanceDate: todayInAr(),
               preferredRate: "blue",
             }}

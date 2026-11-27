@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { AlertCircle, AlertTriangle } from "lucide-react"
+import { AlertCircle, AlertTriangle, CreditCard } from "lucide-react"
 
 import {
   BalanceAmount,
@@ -8,7 +8,6 @@ import {
 } from "@/components/dashboard/balance-cards"
 import { InfoHint } from "@/components/info-hint"
 import { CashflowChart } from "@/components/reports/report-charts"
-import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -18,93 +17,320 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { formatMoney, type Currency } from "@/lib/money"
-import type { CashflowReportView, CashflowRowKind } from "@/lib/reports-cashflow"
+import { formatPeriod } from "@/lib/cards"
+import { formatIsoForDisplay } from "@/lib/dates"
+import { formatMoney } from "@/lib/money"
+import { formatOfficialRateLabel } from "@/lib/rate"
+import type { CashflowReportView } from "@/lib/reports-cashflow"
 import { cn } from "@/lib/utils"
 
-function formatAmount(cents: number, currency: Currency): string {
-  return formatMoney(cents, currency, cents % 100 === 0 ? 0 : 2)
-}
-
-function KindBadge({ kind, beforeInitial }: { kind: CashflowRowKind; beforeInitial: boolean }) {
-  if (beforeInitial) {
-    return (
-      <Badge variant="outline" className="text-muted-foreground">
-        Sin datos
-      </Badge>
-    )
-  }
-  if (kind === "real") return <Badge variant="secondary">Real</Badge>
-  if (kind === "mixed") return <Badge variant="warning">En curso</Badge>
-  return (
-    <Badge variant="outline" className="border-dashed text-muted-foreground">
-      Proyectado
-    </Badge>
-  )
+function formatArs(cents: number): string {
+  return formatMoney(cents, "ARS", cents % 100 === 0 ? 0 : 2)
 }
 
 export function CashflowReport({ view }: { view: CashflowReportView }) {
   const {
-    displayCurrency,
     rows,
+    balances,
+    usdBalanceInArsCents,
+    officialRate,
+    missingRateForUsd,
     overdue,
     negativeAlert,
+    upcomingCards,
     currentBalanceCents,
     projectedEndBalanceCents,
   } = view
 
-  const validRows = rows.filter((r) => !r.beforeInitialBalance)
-  const periodNetCents = validRows.reduce((acc, r) => acc + r.netCents, 0)
-  const hasOverdue = overdue.expenseCents > 0 || overdue.incomeCents > 0
+  const periodNetCents = rows.reduce((acc, r) => acc + r.netCents, 0)
+  const hasOverdue =
+    overdue.expenseCount > 0 ||
+    overdue.incomeCount > 0
 
   return (
-    <div className="space-y-6">
-      {(hasOverdue || negativeAlert) && (
-        <div className="space-y-2.5">
-          {negativeAlert && (
-            <div
-              role="alert"
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-coral-red/40 bg-coral-red/10 px-4 py-3 text-sm text-foreground"
-            >
-              <span className="flex items-center gap-2 font-medium text-paper">
-                <AlertTriangle className="size-4 shrink-0 text-coral-red" aria-hidden />
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
+      <div className="min-w-0 space-y-6">
+        {(missingRateForUsd || negativeAlert) && (
+          <div className="space-y-2.5">
+            {missingRateForUsd && (
+              <div
+                role="status"
+                className="flex items-start gap-2 rounded-lg border border-ember-orange/40 bg-ember-orange/10 px-4 py-3 text-sm text-foreground"
+              >
+                <AlertCircle className="mt-0.5 size-4 shrink-0 text-ember-orange" aria-hidden />
                 <span>
-                  En {negativeAlert.periodLabel} te faltarían{" "}
-                  <span className="tabular-nums">
-                    {formatAmount(negativeAlert.shortageCents, displayCurrency)}
-                  </span>
-                  {negativeAlert.includesOverdue && (
-                    <span className="text-muted-foreground font-normal">
-                      {" "}
-                      (contando lo atrasado)
-                    </span>
-                  )}
+                  No pudimos obtener la cotización oficial del dólar y todavía no hay una guardada.
+                  Los importes en dólares no se incluyeron en esta proyección.
                 </span>
+              </div>
+            )}
+
+            {negativeAlert && (
+              <div
+                role="alert"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-coral-red/40 bg-coral-red/10 px-4 py-3 text-sm text-foreground"
+              >
+                <span className="flex items-center gap-2 font-medium text-paper">
+                  <AlertTriangle className="size-4 shrink-0 text-coral-red" aria-hidden />
+                  <span>
+                    En {negativeAlert.periodLabel} te faltarían{" "}
+                    <span className="tabular-nums">{formatArs(negativeAlert.shortageCents)}</span>
+                    {negativeAlert.includesOverdue && (
+                      <span className="text-muted-foreground font-normal">
+                        {" "}
+                        (contando lo atrasado)
+                      </span>
+                    )}
+                  </span>
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Card size="sm" className="gap-2 py-3">
+            <BalanceHeader
+              title="Punto de partida hoy"
+              hint="Saldo real en pesos más tu saldo en dólares valuado al oficial comprador."
+            />
+            <CardContent>
+              <BalanceAmount>{formatMoney(currentBalanceCents, "ARS", 0)}</BalanceAmount>
+            </CardContent>
+          </Card>
+
+          <Card size="sm" className="gap-2 py-3">
+            <BalanceHeader title="Neto proyectado" />
+            <CardContent>
+              <BalanceAmount>{formatMoney(periodNetCents, "ARS", 0)}</BalanceAmount>
+              <BalanceNote>
+                {rows.length} {view.granularity === "semanal" ? "semanas" : "meses"}
+              </BalanceNote>
+            </CardContent>
+          </Card>
+
+          <Card size="sm" className="gap-2 py-3">
+            <BalanceHeader
+              title="Saldo al cierre del período"
+              hint="Saldo proyectado al final del último período visible, sin descontar cuotas atrasadas."
+            />
+            <CardContent>
+              <BalanceAmount>{formatMoney(projectedEndBalanceCents, "ARS", 0)}</BalanceAmount>
+              {rows.at(-1) && <BalanceNote>{rows.at(-1)!.label}</BalanceNote>}
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-1.5 text-base">
+              Neto y saldo acumulado
+              <InfoHint label="Cómo se calcula el flujo de caja">
+                Arranca desde hoy con tu saldo real en pesos más tus dólares valuados al oficial
+                comprador. Los cobros pendientes en dólares se valuán al oficial comprador y los
+                egresos pendientes en dólares (incluidos resúmenes de tarjeta) al oficial vendedor.
+                Lo atrasado se muestra aparte.
+              </InfoHint>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {rows.length === 0 ? (
+              <p className="text-muted-foreground py-8 text-center text-sm">
+                No hay períodos para mostrar en el rango elegido.
+              </p>
+            ) : (
+              <CashflowChart rows={rows} />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle className="text-base">
+              {view.granularity === "semanal" ? "Evolución semanal" : "Evolución mensual"}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="sticky left-0 z-10 min-w-32 bg-card">Período</TableHead>
+                  <TableHead className="text-right">Saldo inicial</TableHead>
+                  <TableHead className="text-right">Entradas</TableHead>
+                  <TableHead className="text-right">Salidas</TableHead>
+                  <TableHead className="text-right">Neto</TableHead>
+                  <TableHead className="text-right">Saldo final</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow key={row.key}>
+                    <TableCell className="sticky left-0 z-10 bg-card font-medium text-foreground">
+                      {row.label}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatArs(row.initialCents)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatArs(row.inflowsCents)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatArs(row.outflowsCents)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatArs(row.netCents)}
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        "text-right font-medium tabular-nums",
+                        row.closingCents < 0 && "text-coral-red",
+                      )}
+                    >
+                      {formatArs(row.closingCents)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Panel lateral */}
+      <aside className="space-y-4">
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Saldos de hoy
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-muted-foreground">En pesos</span>
+              <span className="font-semibold tabular-nums">
+                {formatMoney(balances.arsCents, "ARS", 0)}
               </span>
             </div>
-          )}
-
-          {hasOverdue && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ember-orange/40 bg-ember-orange/10 px-4 py-3 text-sm">
-              <span className="flex items-center gap-2 text-foreground">
-                <AlertCircle className="size-4 shrink-0 text-ember-orange" aria-hidden />
-                <span className="font-medium text-paper">
-                  Atrasado:{" "}
-                  <span className="tabular-nums">
-                    {overdue.expenseCents > 0
-                      ? formatAmount(overdue.expenseCents, displayCurrency)
-                      : formatAmount(overdue.incomeCents, displayCurrency)}
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-muted-foreground">En dólares</span>
+              <span className="text-right">
+                <span className="block font-semibold tabular-nums">
+                  {formatMoney(balances.usdCents, "USD")}
+                </span>
+                {usdBalanceInArsCents !== null && balances.usdCents !== 0 && (
+                  <span className="block text-xs text-muted-foreground tabular-nums">
+                    ≈ {formatMoney(usdBalanceInArsCents, "ARS", 0)}
                   </span>
-                </span>
-                <span className="text-muted-foreground text-xs">
-                  {overdue.expenseCount > 0 &&
-                    `${overdue.expenseCount} ${overdue.expenseCount === 1 ? "cuota vencida a pagar" : "cuotas vencidas a pagar"}`}
-                  {overdue.expenseCount > 0 && overdue.incomeCount > 0 && " · "}
-                  {overdue.incomeCount > 0 &&
-                    `${overdue.incomeCount} ${overdue.incomeCount === 1 ? "cobro vencido" : "cobros vencidos"} (${formatAmount(overdue.incomeCents, displayCurrency)})`}
-                </span>
+                )}
               </span>
-              <span className="flex items-center gap-3 text-xs">
+            </div>
+            <div className="border-t pt-3 text-xs text-muted-foreground">
+              {officialRate ? (
+                <>
+                  <p className="font-medium text-foreground">
+                    Dólar {formatOfficialRateLabel(officialRate.fetchedAt)}
+                    {officialRate.stale && " (guardada)"}
+                  </p>
+                  <p className="tabular-nums">
+                    Compra {formatMoney(Math.round(officialRate.compra * 100), "ARS")} · Venta{" "}
+                    {formatMoney(Math.round(officialRate.venta * 100), "ARS")}
+                  </p>
+                </>
+              ) : (
+                <p>Sin cotización oficial disponible.</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+              <CreditCard className="size-4" aria-hidden />
+              Próximos vencimientos de tarjetas
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {upcomingCards.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No tenés resúmenes pendientes.</p>
+            ) : (
+              <ul className="divide-y text-sm">
+                {upcomingCards.slice(0, 6).map((c) => (
+                  <li key={c.id} className="py-2 first:pt-0 last:pb-0">
+                    <Link
+                      href={`/tarjetas/${c.cardId}?periodo=${c.period}`}
+                      className="block space-y-0.5 hover:underline"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium text-foreground">
+                          {c.cardName} · {formatPeriod(c.period)}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                          {formatIsoForDisplay(c.dueDate).slice(0, 5)}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        {c.arsCents > 0 && formatArs(c.arsCents)}
+                        {c.arsCents > 0 && c.usdCents > 0 && " · "}
+                        {c.usdCents > 0 && (
+                          <>
+                            {formatMoney(c.usdCents, "USD")}
+                            {c.usdInArsCents !== null && ` ≈ ${formatArs(c.usdInArsCents)}`}
+                          </>
+                        )}
+                      </p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        {hasOverdue && (
+          <Card size="sm" className="border-ember-orange/40 bg-ember-orange/10">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-1.5 text-sm font-medium text-paper">
+                <AlertCircle className="size-4 text-ember-orange" aria-hidden />
+                Atrasado
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-xs">
+              {overdue.expenseCount > 0 && (
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-muted-foreground">
+                    {overdue.expenseCount}{" "}
+                    {overdue.expenseCount === 1 ? "pago vencido" : "pagos vencidos"}
+                  </span>
+                  <span className="font-medium text-paper tabular-nums">
+                    {overdue.expenseCents > 0 && formatArs(overdue.expenseCents)}
+                    {overdue.unconvertedUsdExpenseCents > 0 && (
+                      <>
+                        {overdue.expenseCents > 0 ? " + " : ""}
+                        {formatMoney(overdue.unconvertedUsdExpenseCents, "USD")}
+                      </>
+                    )}
+                  </span>
+                </div>
+              )}
+              {overdue.incomeCount > 0 && (
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-muted-foreground">
+                    {overdue.incomeCount}{" "}
+                    {overdue.incomeCount === 1 ? "cobro vencido" : "cobros vencidos"}
+                  </span>
+                  <span className="font-medium text-paper tabular-nums">
+                    {overdue.incomeCents > 0 && formatArs(overdue.incomeCents)}
+                    {overdue.unconvertedUsdIncomeCents > 0 && (
+                      <>
+                        {overdue.incomeCents > 0 ? " + " : ""}
+                        {formatMoney(overdue.unconvertedUsdIncomeCents, "USD")}
+                      </>
+                    )}
+                  </span>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-3 pt-1">
                 {overdue.expenseCount > 0 && (
                   <Link
                     href="/egresos?status=overdue"
@@ -121,150 +347,11 @@ export function CashflowReport({ view }: { view: CashflowReportView }) {
                     Ver cobros vencidos
                   </Link>
                 )}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Card size="sm" className="gap-2 py-3">
-          <BalanceHeader
-            title="Saldo real hoy"
-            hint="Saldo inicial más movimientos pagados y cambios de dólares hasta hoy."
-          />
-          <CardContent>
-            <BalanceAmount>{formatMoney(currentBalanceCents, displayCurrency, 0)}</BalanceAmount>
-          </CardContent>
-        </Card>
-
-        <Card size="sm" className="gap-2 py-3">
-          <BalanceHeader title="Neto del período" />
-          <CardContent>
-            <BalanceAmount>{formatMoney(periodNetCents, displayCurrency, 0)}</BalanceAmount>
-            <BalanceNote>
-              {validRows.length} {view.granularity === "semanal" ? "semanas" : "meses"}
-            </BalanceNote>
-          </CardContent>
-        </Card>
-
-        <Card size="sm" className="gap-2 py-3">
-          <BalanceHeader
-            title="Saldo al cierre del período"
-            hint="Saldo proyectado al final del último período visible, sin descontar cuotas atrasadas."
-          />
-          <CardContent>
-            <BalanceAmount>
-              {formatMoney(projectedEndBalanceCents, displayCurrency, 0)}
-            </BalanceAmount>
-            {rows.at(-1) && <BalanceNote>{rows.at(-1)!.label}</BalanceNote>}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-1.5 text-base">
-            Neto y saldo acumulado
-            <InfoHint label="Cómo se calcula el flujo de caja">
-              Los períodos pasados muestran lo efectivamente pagado y los cambios de dólares. El mes
-              en curso suma lo ya percibido más lo pendiente por vencer hasta fin de mes. Los
-              períodos futuros proyectan cuotas impagas (incluidos resúmenes de tarjeta). Lo atrasado
-              se muestra aparte.
-            </InfoHint>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {validRows.length === 0 ? (
-            <p className="text-muted-foreground py-8 text-center text-sm">
-              Este período es anterior a la fecha de tu saldo inicial.
-            </p>
-          ) : (
-            <CashflowChart rows={rows} currency={displayCurrency} />
-          )}
-        </CardContent>
-      </Card>
-
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle className="text-base">
-            {view.granularity === "semanal" ? "Evolución semanal" : "Evolución mensual"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="sticky left-0 z-10 min-w-32 bg-card">Período</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Saldo inicial</TableHead>
-                <TableHead className="text-right">Entradas</TableHead>
-                <TableHead className="text-right">Salidas</TableHead>
-                <TableHead className="text-right">Neto</TableHead>
-                <TableHead className="text-right">Saldo final</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => {
-                const isProjected = row.kind !== "real" && !row.beforeInitialBalance
-                return (
-                  <TableRow
-                    key={row.key}
-                    className={cn(
-                      row.beforeInitialBalance && "text-muted-foreground opacity-50",
-                      isProjected && "border-dashed bg-muted/15 text-muted-foreground",
-                    )}
-                  >
-                    <TableCell
-                      className={cn(
-                        "sticky left-0 z-10 bg-card font-medium",
-                        isProjected ? "text-muted-foreground" : "text-foreground",
-                      )}
-                    >
-                      {row.label}
-                    </TableCell>
-                    <TableCell>
-                      <KindBadge kind={row.kind} beforeInitial={row.beforeInitialBalance} />
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {row.beforeInitialBalance
-                        ? "—"
-                        : formatAmount(row.initialCents, displayCurrency)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {row.beforeInitialBalance
-                        ? "—"
-                        : formatAmount(row.inflowsCents, displayCurrency)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {row.beforeInitialBalance
-                        ? "—"
-                        : formatAmount(row.outflowsCents, displayCurrency)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {row.beforeInitialBalance
-                        ? "—"
-                        : formatAmount(row.netCents, displayCurrency)}
-                    </TableCell>
-                    <TableCell
-                      className={cn(
-                        "text-right font-medium tabular-nums",
-                        !row.beforeInitialBalance &&
-                          row.closingCents < 0 &&
-                          "text-coral-red",
-                      )}
-                    >
-                      {row.beforeInitialBalance
-                        ? "—"
-                        : formatAmount(row.closingCents, displayCurrency)}
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </aside>
     </div>
   )
 }

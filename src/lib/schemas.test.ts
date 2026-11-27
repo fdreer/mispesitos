@@ -2,12 +2,11 @@ import { describe, it, expect } from "vitest"
 import type { z } from "zod"
 
 import { buildInstallments } from "@/lib/installments"
-import { movementSchema, settingsSchema } from "@/lib/schemas"
+import { exchangeSchema, movementSchema, settingsSchema } from "@/lib/schemas"
 
 const valid = {
   initialBalanceArsCents: "100000",
   initialBalanceUsdCents: "500",
-  initialBalanceUsdRate: "1450",
   initialBalanceDate: "2026-08-10",
   preferredRate: "blue",
 }
@@ -38,32 +37,10 @@ describe("settingsSchema", () => {
     expect(result.success).toBe(false)
   })
 
-  it("rechaza dólares mayores a cero con TC en cero", () => {
-    const result = settingsSchema.safeParse({ ...valid, initialBalanceUsdRate: "0" })
-    expect(result.success).toBe(false)
-    expect(fieldError(result, "initialBalanceUsdRate")).toBeDefined()
-  })
-
-  it("rechaza dólares mayores a cero con TC vacío", () => {
-    const result = settingsSchema.safeParse({ ...valid, initialBalanceUsdRate: "" })
-    expect(result.success).toBe(false)
-    expect(fieldError(result, "initialBalanceUsdRate")).toBeDefined()
-  })
-
-  it("acepta dólares en cero con TC en cero, sin que el campo estorbe", () => {
-    const result = settingsSchema.safeParse({
-      ...valid,
-      initialBalanceUsdCents: "0",
-      initialBalanceUsdRate: "0",
-    })
-    expect(result.success).toBe(true)
-  })
-
   it("sigue admitiendo un saldo inicial en cero", () => {
     const result = settingsSchema.safeParse({
       initialBalanceArsCents: "0",
       initialBalanceUsdCents: "0",
-      initialBalanceUsdRate: "0",
       initialBalanceDate: "2026-08-10",
       preferredRate: "blue",
     })
@@ -75,50 +52,6 @@ describe("settingsSchema", () => {
     const result = settingsSchema.safeParse({ ...valid, initialBalanceDate: "10/08/2026" })
     expect(result.success).toBe(false)
     expect(fieldError(result, "initialBalanceDate")).toBeDefined()
-  })
-
-  it("lee el TC del saldo inicial escrito como se escribe acá", () => {
-    const result = settingsSchema.safeParse({ ...valid, initialBalanceUsdRate: "1.450" })
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    expect(result.data.initialBalanceUsdRate).toBe(1450)
-  })
-
-  it("rechaza un TC del saldo inicial que no entra en la columna", () => {
-    for (const tipeado of ["100000000", "100.000.000"]) {
-      const result = settingsSchema.safeParse({ ...valid, initialBalanceUsdRate: tipeado })
-      expect(result.success).toBe(false)
-      expect(fieldError(result, "initialBalanceUsdRate")?.message).toBe(
-        "El tipo de cambio no puede pasar de 99.999.999,9999.",
-      )
-    }
-  })
-
-  it("rechaza un TC del saldo inicial con más de cuatro decimales", () => {
-    const result = settingsSchema.safeParse({ ...valid, initialBalanceUsdRate: "1450,75259" })
-    expect(result.success).toBe(false)
-    expect(fieldError(result, "initialBalanceUsdRate")?.message).toBe(
-      "El tipo de cambio admite hasta cuatro decimales.",
-    )
-  })
-
-  it("la cota no le come el cero al saldo inicial sin dólares", () => {
-    const result = settingsSchema.safeParse({
-      ...valid,
-      initialBalanceUsdCents: "0",
-      initialBalanceUsdRate: "0",
-    })
-    expect(result.success).toBe(true)
-  })
-
-  it("acepta el TC del saldo inicial más grande y más preciso que la columna guarda", () => {
-    const result = settingsSchema.safeParse({
-      ...valid,
-      initialBalanceUsdRate: "99.999.999,9999",
-    })
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    expect(result.data.initialBalanceUsdRate).toBe(99_999_999.9999)
   })
 
   it("rechaza una preferencia de dólar que no está en la lista", () => {
@@ -135,13 +68,22 @@ const validMovement = {
   date: "2026-08-10",
   currency: "ARS",
   amountCents: "1500",
-  rate: "1",
   installments: [{ amountCents: 150000, dueDate: "2026-08-10" }],
 }
 
 describe("movementSchema", () => {
   it("acepta un movimiento de contado en pesos válido", () => {
     const result = movementSchema.safeParse(validMovement)
+    expect(result.success).toBe(true)
+  })
+
+  it("acepta un movimiento en dólares sin tipo de cambio", () => {
+    const result = movementSchema.safeParse({
+      ...validMovement,
+      currency: "USD",
+      amountCents: "100",
+      installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
+    })
     expect(result.success).toBe(true)
   })
 
@@ -173,117 +115,6 @@ describe("movementSchema", () => {
       installments: plan.map((i) => ({ amountCents: i.amountCents, dueDate: i.dueDate })),
     })
     expect(result.success).toBe(true)
-  })
-
-  it("rechaza un movimiento en pesos con un tipo de cambio distinto de 1", () => {
-    const result = movementSchema.safeParse({ ...validMovement, rate: "2" })
-    expect(result.success).toBe(false)
-    expect(fieldError(result, "rate")).toBeDefined()
-  })
-
-  it("acepta un movimiento en dólares con tipo de cambio mayor a cero", () => {
-    const result = movementSchema.safeParse({
-      ...validMovement,
-      currency: "USD",
-      rate: "900",
-      amountCents: "100",
-      installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
-    })
-    expect(result.success).toBe(true)
-  })
-
-  it("lee el TC de un movimiento con el mismo formato que el importe", () => {
-    const usd = {
-      ...validMovement,
-      currency: "USD",
-      amountCents: "100",
-      installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
-    }
-
-    for (const [tipeado, esperado] of [
-      ["1.450", 1450],
-      ["1.450,50", 1450.5],
-      ["1450,50", 1450.5],
-      ["1450.50", 1450.5],
-    ] as const) {
-      const result = movementSchema.safeParse({ ...usd, rate: tipeado })
-      expect(result.success).toBe(true)
-      if (result.success) expect(result.data.rate).toBe(esperado)
-    }
-  })
-
-  it("rechaza como TC los literales que Number() entiende pero nadie tipea", () => {
-    const usd = {
-      ...validMovement,
-      currency: "USD",
-      amountCents: "100",
-      installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
-    }
-
-    for (const tipeado of ["1e3", "0x10", "Infinity", "mil"]) {
-      const result = movementSchema.safeParse({ ...usd, rate: tipeado })
-      expect(result.success).toBe(false)
-      expect(fieldError(result, "rate")).toBeDefined()
-    }
-  })
-
-  it("rechaza un movimiento en dólares con TC cero", () => {
-    const result = movementSchema.safeParse({
-      ...validMovement,
-      currency: "USD",
-      rate: "0",
-      amountCents: "100",
-      installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
-    })
-    expect(result.success).toBe(false)
-    expect(fieldError(result, "rate")).toBeDefined()
-  })
-
-  it("rechaza un movimiento en dólares con TC negativo", () => {
-    const result = movementSchema.safeParse({
-      ...validMovement,
-      currency: "USD",
-      rate: "-5",
-      amountCents: "100",
-      installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
-    })
-    expect(result.success).toBe(false)
-    expect(fieldError(result, "rate")).toBeDefined()
-  })
-
-  const usdConTc = (rate: string) => ({
-    ...validMovement,
-    currency: "USD",
-    rate,
-    amountCents: "100",
-    installments: [{ amountCents: 10_000, dueDate: "2026-08-10" }],
-  })
-
-  it("rechaza un TC con más dígitos enteros de los que entran en la columna", () => {
-    for (const tipeado of ["100000000", "100.000.000", "999999999,5"]) {
-      const result = movementSchema.safeParse(usdConTc(tipeado))
-      expect(result.success).toBe(false)
-      expect(fieldError(result, "rate")?.message).toBe(
-        "El tipo de cambio no puede pasar de 99.999.999,9999.",
-      )
-    }
-  })
-
-  it("rechaza un TC con más de cuatro decimales, que la base redondearía en silencio", () => {
-    for (const tipeado of ["1450,75259", "1,00001", "0,123456"]) {
-      const result = movementSchema.safeParse(usdConTc(tipeado))
-      expect(result.success).toBe(false)
-      expect(fieldError(result, "rate")?.message).toBe(
-        "El tipo de cambio admite hasta cuatro decimales.",
-      )
-    }
-  })
-
-  it("acepta el TC más grande y más preciso que la columna sí guarda", () => {
-    const result = movementSchema.safeParse(usdConTc("99.999.999,9999"))
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    expect(result.data.rate).toBe(99_999_999.9999)
   })
 
   it("rechaza un movimiento sin cuotas", () => {
@@ -359,7 +190,6 @@ describe("movementSchema", () => {
       date: "2026-08-10",
       currency: "ARS",
       amountCents: String(total / 100),
-      rate: "1",
       installments,
     })
 
@@ -374,7 +204,6 @@ describe("movementSchema", () => {
       date: "2026-08-10",
       currency: "ARS",
       amountCents: "0",
-      rate: "1",
       installments: [{ amountCents: 0, dueDate: "2026-08-10" }],
     })
 
@@ -395,7 +224,6 @@ describe("movementSchema", () => {
       date: "2026-08-10",
       currency: "ARS",
       amountCents: "121",
-      rate: "1",
       installments,
     })
 
@@ -410,5 +238,53 @@ describe("movementSchema", () => {
     })
     expect(result.success).toBe(false)
     expect(fieldError(result, "installments.0.amountCents")).toBeDefined()
+  })
+})
+
+describe("exchangeSchema", () => {
+  const base = { direction: "buy", date: "2026-08-10", usdCents: "100", rate: "1450" }
+
+  it("lee el TC con el mismo formato que el importe", () => {
+    for (const [tipeado, esperado] of [
+      ["1.450", 1450],
+      ["1.450,50", 1450.5],
+      ["1450,50", 1450.5],
+      ["1450.50", 1450.5],
+    ] as const) {
+      const result = exchangeSchema.safeParse({ ...base, rate: tipeado })
+      expect(result.success).toBe(true)
+      if (result.success) expect(result.data.rate).toBe(esperado)
+    }
+  })
+
+  it("rechaza literales no válidos, cero o negativos como TC", () => {
+    for (const tipeado of ["1e3", "0x10", "Infinity", "mil", "0", "-5"]) {
+      const result = exchangeSchema.safeParse({ ...base, rate: tipeado })
+      expect(result.success).toBe(false)
+      expect(fieldError(result, "rate")).toBeDefined()
+    }
+  })
+
+  it("rechaza un TC con más dígitos o decimales de los que entran en la columna", () => {
+    for (const tipeado of ["100000000", "100.000.000", "999999999,5"]) {
+      const result = exchangeSchema.safeParse({ ...base, rate: tipeado })
+      expect(result.success).toBe(false)
+      expect(fieldError(result, "rate")?.message).toBe(
+        "El tipo de cambio no puede pasar de 99.999.999,9999.",
+      )
+    }
+    for (const tipeado of ["1450,75259", "1,00001", "0,123456"]) {
+      const result = exchangeSchema.safeParse({ ...base, rate: tipeado })
+      expect(result.success).toBe(false)
+      expect(fieldError(result, "rate")?.message).toBe(
+        "El tipo de cambio admite hasta cuatro decimales.",
+      )
+    }
+  })
+
+  it("acepta el TC más grande y más preciso que la columna sí guarda", () => {
+    const result = exchangeSchema.safeParse({ ...base, rate: "99.999.999,9999" })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.rate).toBe(99_999_999.9999)
   })
 })

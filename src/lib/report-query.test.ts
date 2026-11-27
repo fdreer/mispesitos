@@ -9,13 +9,17 @@ import {
 } from "@/lib/report-query"
 
 describe("parseReportQuery", () => {
-  it("una URL vacía cae en Ingresos vs Gastos, Todo en pesos y mensual", () => {
+  it("una URL vacía cae en Ingresos vs Gastos, ARS y mensual", () => {
     const q = parseReportQuery({})
     expect(q.tab).toBe("ingresos-gastos")
-    expect(q.currency).toBe("todo")
+    expect(q.currency).toBe("ARS")
     expect(q.granularity).toBe("mensual")
     expect(q.filters.currency).toBe("all")
     expect(q.filters.status).toBe("all")
+  })
+
+  it("un enlace viejo con moneda=todo cae en el default (ARS)", () => {
+    expect(parseReportQuery({ moneda: "todo" }).currency).toBe("ARS")
   })
 
   it("lee tab, moneda y granularidad válidos, e ignora los inventados", () => {
@@ -31,7 +35,7 @@ describe("parseReportQuery", () => {
       parseReportQuery({ tab: "otra", moneda: "EUR", granularidad: "anual" }),
     ).toMatchObject({
       tab: "ingresos-gastos",
-      currency: "todo",
+      currency: "ARS",
       granularity: "mensual",
     })
   })
@@ -72,17 +76,17 @@ describe("buildReportHref y reportExtraParams", () => {
     expect(buildReportHref(base)).toBe("/informes")
   })
 
-  it("conserva moneda y período al cambiar de pestaña y limpia los filtros de P&L al ir a Flujo", () => {
+  it("en Flujo no lleva moneda en la URL y limpia los filtros de P&L", () => {
     const pnl = parseReportQuery({
-      moneda: "ARS",
+      moneda: "USD",
       categoryId: "hogar",
       search: "luz",
-      from: "2026-01-01",
-      to: "2026-12-31",
+      from: "2026-11-26",
+      to: "2027-03-31",
     })
 
     expect(buildReportHref(pnl, { tab: "flujo" })).toBe(
-      "/informes?tab=flujo&moneda=ARS&from=2026-01-01&to=2026-12-31",
+      "/informes?tab=flujo&from=2026-11-26&to=2027-03-31",
     )
   })
 })
@@ -96,11 +100,19 @@ describe("rangos efectivos por defecto", () => {
     })
   })
 
-  it("Flujo de caja mensual usa últimos 3 meses cerrados + mes actual + próximos 6 meses", () => {
+  it("Flujo de caja mensual arranca hoy y proyecta 6 meses", () => {
     expect(effectiveCashflowRange("", "", "mensual", "2026-11-26")).toEqual({
-      from: "2026-08-01",
+      from: "2026-11-26",
       to: "2027-05-31",
       isDefault: true,
+    })
+  })
+
+  it("Flujo de caja mensual recorta a hoy si la URL pide una fecha pasada", () => {
+    expect(effectiveCashflowRange("2026-01-01", "2027-02-28", "mensual", "2026-11-26")).toEqual({
+      from: "2026-11-26",
+      to: "2027-02-28",
+      isDefault: false,
     })
   })
 

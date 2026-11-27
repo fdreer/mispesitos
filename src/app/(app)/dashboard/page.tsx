@@ -8,13 +8,14 @@ import { InfoHint } from "@/components/info-hint"
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { buildDashboardView } from "@/lib/dashboard-view"
 import { todayInAr } from "@/lib/dates"
-import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
+import { formatMoney } from "@/lib/money"
 import {
   listCategories,
   listExchanges,
   listPaidInstallments,
   listPendingInstallments,
 } from "@/server/queries"
+import { resolveOfficialRate } from "@/server/rate"
 import { requireSettings } from "@/server/session"
 
 const HORIZON_MONTHS = 6
@@ -40,43 +41,18 @@ function ChartCardHeader({
   )
 }
 
-/**
- * Todo lo que hay debajo del título. Va aparte, detrás de un Suspense, para
- * que el título salga en el primer flush en vez de esperar a las cuatro
- * consultas y a la cotización (que sola puede tardar 3s, ver TIMEOUT_MS en
- * @/lib/rate).
- *
- * A diferencia de /ingresos y /egresos, acá NO se puede transmitir bloque por
- * bloque: `buildDashboardView` es un solo cálculo que necesita las cuatro
- * consultas juntas —los saldos de las tarjetas alimentan el primer punto de la
- * proyección, y la torta y las barras salen de las mismas cuotas pagadas—,
- * así que partirlo en cuatro Suspense sería partir también esa función, y las
- * cuatro partes terminarían esperando lo mismo igual. Un solo límite, con un
- * esqueleto que promete la grilla de verdad, es todo lo que esta pantalla
- * puede ganar sin rehacer el cálculo.
- */
 async function DashboardBody() {
   const { user, settings } = await requireSettings()
   const today = todayInAr()
 
-  /*
-   * La torta y las barras salen de las cuotas pagadas (criterio de lo
-   * percibido, ver @/lib/dashboard-view), que ya vienen enteras para el saldo:
-   * no hace falta traer movimientos aparte.
-   */
-  const [paid, exchanges, pending, expenseCategories, rate] = await Promise.all([
+  const [paid, exchanges, pending, expenseCategories, officialRate] = await Promise.all([
     listPaidInstallments(user.id),
     listExchanges(user.id),
     listPendingInstallments(user.id),
-    // "expense" + archivadas incluidas: la torta de egresos por categoría
-    // tiene que poder resolver el nombre de un movimiento viejo cuya
-    // categoría ya se archivó.
     listCategories(user.id, "expense", true),
-    fetchSuggestedRate(settings.preferredRate as RatePreference),
+    resolveOfficialRate(user.id, settings),
   ])
 
-  // Todo el armado vive en @/lib/dashboard-view, que es puro y está testeado.
-  // Acá sólo se traen las filas y se pinta lo que sale.
   const view = buildDashboardView({
     today,
     settings: {
@@ -84,9 +60,7 @@ async function DashboardBody() {
       initialBalanceUsdCents: settings.initialBalanceUsdCents,
       initialBalanceDate: settings.initialBalanceDate,
     },
-    // El TC de VENTA: lo que se recibiría si se vendiera hoy la tenencia. No es
-    // el mismo que precargan los formularios (referenceRate).
-    todayRate: rate?.sellRate ?? null,
+    officialRate,
     paid,
     exchanges: exchanges.map((e) => ({
       date: e.date,
@@ -106,7 +80,7 @@ async function DashboardBody() {
         arsCents={view.arsCents}
         usdCents={view.usdCents}
         consolidatedArsCents={view.consolidatedArsCents}
-        rate={view.todayRate}
+        officialRate={view.officialRate}
         paymentsThisMonth={view.paymentsThisMonth}
         paymentsNextMonth={view.paymentsNextMonth}
       />
@@ -130,15 +104,15 @@ async function DashboardBody() {
               </Link>
             }
           >
-            Arranca de tu saldo de hoy consolidado en pesos y le va aplicando las cuotas
-            pendientes por su vencimiento. El primer punto ya tiene descontado lo que vence
-            este mes y lo que está atrasado: no es tu saldo de hoy.
+            Usa el mismo cálculo que el informe de Flujo de caja: arranca de tu saldo en pesos más
+            tus dólares al oficial comprador y aplica los pendientes desde hoy hacia adelante (ingresos
+            en USD al comprador, egresos en USD al vendedor). Lo atrasado queda aparte.
           </ChartCardHeader>
           <CardContent>
             {view.projection === null ? (
               <p className="text-muted-foreground py-8 text-center text-sm">
-                Hoy no pudimos traer la cotización del dólar, así que no podemos consolidar tu
-                saldo en pesos para arrancar la proyección. Probá de nuevo en un rato.
+                Hoy no pudimos traer la cotización oficial del dólar y todavía no hay una guardada,
+                así que no podemos consolidar los dólares en la proyección. Probá de nuevo en un rato.
               </p>
             ) : (
               <ProjectionChart data={view.projection} />
@@ -148,9 +122,8 @@ async function DashboardBody() {
 
         <Card size="sm">
           <ChartCardHeader title="Gastos de este mes, por categoría">
-            Suma lo que pagaste este mes, por la fecha de pago de cada cuota, igual que
-            &ldquo;Cobrado y pagado este mes&rdquo;. Un televisor de $1.200.000 en 12 cuotas
-            suma $100.000 en cada mes en que pagás una.
+            Suma lo que pagaste este mes, por la fecha de pago de cada cuota, separado por moneda.
+            Un resumen de tarjeta pagado con pesos cuenta en pesos; pagado con dólares, en dólares.
           </ChartCardHeader>
           <CardContent>
             <CategoryPie data={view.pie} />
@@ -160,10 +133,23 @@ async function DashboardBody() {
 
       <Card size="sm">
         <ChartCardHeader title={`Cobrado y pagado en los últimos ${HISTORY_MONTHS} meses`}>
-          Con el mismo criterio que la torta: cada cuota cobrada o pagada, en el mes de su
-          fecha de pago. Lo pendiente no entra hasta que lo marcás pagado.
+          Con el mismo criterio que la torta: cada cuota cobrada o pagada, en el mes de su fecha de
+          pago, sin mezclar monedas. Lo pendiente no entra hasta que lo marcás pagado.
         </ChartCardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground tabular-nums">
+            Este mes · Ingresos:{" "}
+            <span className="font-medium text-foreground">
+              {formatMoney(view.monthIncomeArsCents, "ARS", 0)}
+              {view.monthIncomeUsdCents > 0 && ` · ${formatMoney(view.monthIncomeUsdCents, "USD")}`}
+            </span>
+            {" · "}Gastos:{" "}
+            <span className="font-medium text-foreground">
+              {formatMoney(view.monthExpenseArsCents, "ARS", 0)}
+              {view.monthExpenseUsdCents > 0 &&
+                ` · ${formatMoney(view.monthExpenseUsdCents, "USD")}`}
+            </span>
+          </p>
           <MonthlyBars data={view.bars} />
         </CardContent>
       </Card>
@@ -171,29 +157,15 @@ async function DashboardBody() {
   )
 }
 
-/**
- * La misma grilla que arma `DashboardBody`, en gris. Los altos son los que
- * salen del contenido real (tarjeta chica, tarjeta de vencimientos, y las de
- * gráfico con su `ChartContainer` de 220px más el encabezado), así que cuando
- * llegan los datos el contenido no empuja nada hacia abajo.
- *
- * `aria-hidden`: es andamiaje, no información. Quien no ve la pantalla no
- * gana nada con que le lean cuatro cajas vacías.
- */
 function DashboardSkeleton() {
   return (
     <div className="space-y-6" aria-hidden>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => (
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {[0, 1, 2, 3, 4].map((i) => (
           <div key={i} className="h-[116px] animate-pulse rounded-xl bg-white/[0.03]" />
         ))}
       </div>
-      {/* La única que no tiene alto fijo: crece con la cantidad de
-          vencimientos. 150px es lo que mide con uno. */}
       <div className="h-[150px] animate-pulse rounded-xl bg-white/[0.03]" />
-      {/* Las tres de gráfico miden lo mismo desde que el criterio de cálculo
-          dejó de imprimirse arriba del gráfico y pasó al ícono de ayuda: antes
-          cada una era más alta según cuántos renglones ocupaba su explicación. */}
       <div className="grid gap-4 lg:grid-cols-2">
         {[0, 1].map((i) => (
           <div key={i} className="h-[288px] animate-pulse rounded-xl bg-white/[0.03]" />
@@ -204,10 +176,6 @@ function DashboardSkeleton() {
   )
 }
 
-/**
- * Sin `async`: el título sale sin esperar a nada (ver `DashboardBody` para
- * por qué el resto no se puede partir más).
- */
 export default function DashboardPage() {
   return (
     <div className="space-y-6">

@@ -23,7 +23,6 @@ export type QuickAddData = {
   cards: CardOption[]
   expenseSuggestions: DescriptionSuggestion[]
   incomeSuggestions: DescriptionSuggestion[]
-  suggestedRate: number | null
   today: IsoDate
 }
 
@@ -38,7 +37,6 @@ export function QuickAddSheet({
   cards,
   expenseSuggestions,
   incomeSuggestions,
-  suggestedRate,
   today,
   open: controlledOpen,
   onOpenChange,
@@ -89,7 +87,6 @@ export function QuickAddSheet({
           categories={categories}
           cards={kind === "expense" ? cards : []}
           suggestions={suggestions}
-          suggestedRate={suggestedRate}
           today={today}
           onSaved={() => setOpen(false)}
         />

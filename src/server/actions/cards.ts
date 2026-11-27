@@ -17,7 +17,7 @@ import { CATEGORY_COLOR_KEYS } from "@/lib/category-color"
 import { todayInAr } from "@/lib/dates"
 import { isCheckViolation, isUniqueViolation } from "@/lib/db-errors"
 import { logDbError } from "@/lib/log-db-error"
-import { cardSchema, positiveRate, statementDatesSchema } from "@/lib/schemas"
+import { amountCents, cardSchema, positiveRate, statementDatesSchema } from "@/lib/schemas"
 import { failure, success, type ActionResult } from "@/server/actions/result"
 import { requireUser } from "@/server/session"
 
@@ -235,15 +235,41 @@ export async function payStatement(
   if (!parsed.success) return failure("Ese resumen no existe.")
   const mode: StatementPaymentMode = parsed.data.mode
 
-  let usdRate: number | null = null
-  const rawRate = String(formData.get("usdPaidRate") ?? "")
-  if (mode === "ars" && rawRate !== "") {
-    const rate = positiveRate.safeParse(rawRate)
-    if (!rate.success) {
-      const message = rate.error.issues[0]?.message ?? "Escribí un tipo de cambio válido."
-      return failure(message, { usdPaidRate: [message] })
+  let usdPaidArsCents: number | null = null
+  const rawUsdPaidArs = String(formData.get("usdPaidArs") ?? "")
+  if (mode === "ars" && rawUsdPaidArs !== "") {
+    const ars = amountCents.refine((c) => c > 0, "El importe tiene que ser mayor a cero.").safeParse(rawUsdPaidArs)
+    if (!ars.success) {
+      const message = ars.error.issues[0]?.message ?? "Escribí un importe en pesos válido."
+      return failure(message, { usdPaidArs: [message] })
     }
-    usdRate = rate.data
+    usdPaidArsCents = ars.data
+  }
+
+  let exchangeToCreate: { usdCents: number; rate: number } | null = null
+  if (mode === "usd" && formData.get("registerExchange") === "true") {
+    const rawUsd = String(formData.get("exchangeUsd") ?? "")
+    const rawRate = String(formData.get("exchangeRate") ?? "")
+    const parsedUsd = amountCents
+      .refine((c) => c > 0, "Poné una cantidad mayor a cero.")
+      .safeParse(rawUsd)
+    const parsedRate = positiveRate.safeParse(rawRate)
+    const fieldErrors: Record<string, string[]> = {}
+    if (!parsedUsd.success) {
+      fieldErrors.exchangeUsd = [parsedUsd.error.issues[0]?.message ?? "Poné una cantidad válida."]
+    }
+    if (!parsedRate.success) {
+      fieldErrors.exchangeRate = [
+        parsedRate.error.issues[0]?.message ?? "Escribí un tipo de cambio válido.",
+      ]
+    }
+    if (Object.keys(fieldErrors).length > 0) {
+      return failure("Revisá los datos de la compra de dólares.", fieldErrors)
+    }
+    exchangeToCreate = {
+      usdCents: parsedUsd.data!,
+      rate: parsedRate.data!,
+    }
   }
 
   try {
@@ -268,23 +294,39 @@ export async function payStatement(
         .innerJoin(movement, eq(installment.movementId, movement.id))
         .where(and(eq(installment.statementId, statement.id), eq(installment.userId, user.id)))
 
+      const totals = statementTotals(cuotas)
       const resolved = resolveStatementPayment({
         closingDate: statement.closingDate,
-        totals: statementTotals(cuotas),
+        totals,
         requestedDate: parsed.data.paidDate,
         today: todayInAr(),
         mode,
-        usdRate,
+        usdPaidArsCents,
       })
       if (!resolved.ok) {
         return failure(resolved.message, resolved.field ? { [resolved.field]: [resolved.message] } : undefined)
+      }
+
+      if (exchangeToCreate && totals.usdCents > 0) {
+        await tx.insert(movement).values({
+          id: randomUUID(),
+          userId: user.id,
+          kind: "exchange",
+          description: "Compra de dólares",
+          categoryId: null,
+          date: resolved.paidDate,
+          currency: "USD",
+          amountCents: exchangeToCreate.usdCents,
+          rate: String(exchangeToCreate.rate),
+          direction: "buy",
+        })
       }
 
       await tx
         .update(cardStatement)
         .set({
           paidDate: resolved.paidDate,
-          usdPaidRate: resolved.usdPaidRate === null ? null : String(resolved.usdPaidRate),
+          usdPaidArsCents: resolved.usdPaidArsCents,
         })
         .where(and(eq(cardStatement.id, statement.id), eq(cardStatement.userId, user.id)))
       await tx
@@ -312,7 +354,7 @@ export async function unpayStatement(statementId: string): Promise<ActionResult>
     const result = await withUser(user.id, async (tx) => {
       const updated = await tx
         .update(cardStatement)
-        .set({ paidDate: null, usdPaidRate: null })
+        .set({ paidDate: null, usdPaidArsCents: null })
         .where(and(eq(cardStatement.id, parsed.data), eq(cardStatement.userId, user.id)))
         .returning({ id: cardStatement.id })
       if (updated.length === 0) return failure("Ese resumen no existe.")

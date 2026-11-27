@@ -17,18 +17,14 @@ import {
   type MovementQuery,
 } from "@/lib/movement-query"
 import { BASE_PATHS } from "@/lib/movement-routes"
-import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import { cn } from "@/lib/utils"
 import {
   listCardOptions,
   listDescriptionSuggestions,
-  type CardOption,
-  type DescriptionSuggestion,
 } from "@/server/card-queries"
 import {
   listCategories,
   queryMovementsView,
-  type Category,
 } from "@/server/queries"
 import { requireSettings } from "@/server/session"
 
@@ -44,36 +40,8 @@ type Props = {
   searchParams: Record<string, string | string[] | undefined>
 }
 
-async function MovementFormDialogWithRate({
-  kind,
-  categories,
-  cards,
-  suggestions,
-  today,
-  ratePreference,
-}: {
-  kind: Kind
-  categories: Category[]
-  cards: CardOption[]
-  suggestions: DescriptionSuggestion[]
-  today: IsoDate
-  ratePreference: RatePreference
-}) {
-  const rate = await fetchSuggestedRate(ratePreference)
-  return (
-    <MovementFormDialog
-      kind={kind}
-      categories={categories}
-      cards={cards}
-      suggestions={suggestions}
-      suggestedRate={rate?.referenceRate ?? null}
-      today={today}
-    />
-  )
-}
-
 async function BotonNuevo({ kind }: { kind: Kind }) {
-  const { user, settings } = await requireSettings()
+  const { user } = await requireSettings()
   const today = todayInAr()
   const [categories, cards, suggestions] = await Promise.all([
     listCategories(user.id, kind, true),
@@ -82,27 +50,13 @@ async function BotonNuevo({ kind }: { kind: Kind }) {
   ])
 
   return (
-    <Suspense
-      fallback={
-        <MovementFormDialog
-          kind={kind}
-          categories={categories}
-          cards={cards}
-          suggestions={suggestions}
-          suggestedRate={null}
-          today={today}
-        />
-      }
-    >
-      <MovementFormDialogWithRate
-        kind={kind}
-        categories={categories}
-        cards={cards}
-        suggestions={suggestions}
-        today={today}
-        ratePreference={settings.preferredRate as RatePreference}
-      />
-    </Suspense>
+    <MovementFormDialog
+      kind={kind}
+      categories={categories}
+      cards={cards}
+      suggestions={suggestions}
+      today={today}
+    />
   )
 }
 

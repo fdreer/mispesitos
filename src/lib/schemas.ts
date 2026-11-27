@@ -48,22 +48,12 @@ export const positiveRate = typedRate.refine((rate) => rate > 0, {
   message: "El tipo de cambio tiene que ser mayor a cero.",
 })
 
-export const settingsSchema = z
-  .object({
-    initialBalanceArsCents: amountCents,
-    initialBalanceUsdCents: amountCents,
-    initialBalanceUsdRate: exchangeRate,
-    initialBalanceDate: isoDate,
-    preferredRate: ratePreference,
-  })
-  .refine(
-    (data) => data.initialBalanceUsdCents === 0 || data.initialBalanceUsdRate > 0,
-    {
-      message:
-        "Si cargaste un saldo inicial en dólares, decinos a qué tipo de cambio los compraste.",
-      path: ["initialBalanceUsdRate"],
-    },
-  )
+export const settingsSchema = z.object({
+  initialBalanceArsCents: amountCents,
+  initialBalanceUsdCents: amountCents,
+  initialBalanceDate: isoDate,
+  preferredRate: ratePreference,
+})
 
 export const currency = z.enum(["ARS", "USD"])
 
@@ -83,15 +73,10 @@ export const movementSchema = z
     date: isoDate,
     currency: currency,
     amountCents: amountCents.refine((c) => c > 0, "El importe tiene que ser mayor a cero."),
-    rate: positiveRate,
     installments: z
       .array(installmentInput)
       .min(1, "Tiene que haber al menos una cuota.")
       .max(MAX_INSTALLMENTS, `No se pueden cargar más de ${MAX_INSTALLMENTS} cuotas.`),
-  })
-  .refine((m) => m.currency === "USD" || m.rate === 1, {
-    message: "Un movimiento en pesos siempre lleva tipo de cambio 1.",
-    path: ["rate"],
   })
   // La invariante vive en @/lib/installments, que es donde se reparte el total.
   // Reimplementarla acá la dejaría en dos lugares que pueden divergir en silencio.

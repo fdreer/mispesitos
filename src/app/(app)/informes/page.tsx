@@ -4,7 +4,13 @@ import { MovementFilters, MovementFiltersSkeleton } from "@/components/movement-
 import { CashflowReport } from "@/components/reports/cashflow-report"
 import { PnlReport } from "@/components/reports/pnl-report"
 import { ReportControls } from "@/components/reports/report-controls"
+import { computeBalances } from "@/lib/balance"
 import { addMonthsClamped, formatIsoForDisplay, monthKey, todayInAr, type IsoDate } from "@/lib/dates"
+import {
+  assertCurrency,
+  assertExchangeDirection,
+  assertInstallmentMovementKind,
+} from "@/lib/movement-asserts"
 import { hayFiltrosActivos } from "@/lib/movement-query"
 import {
   effectiveCashflowRange,
@@ -23,6 +29,7 @@ import {
   listPaidInstallmentsForReport,
   listPendingInstallments,
 } from "@/server/queries"
+import { resolveOfficialRate } from "@/server/rate"
 import { requireSettings } from "@/server/session"
 
 type Props = {
@@ -76,7 +83,7 @@ async function BarraDeFiltros({
       showCategory={!isFlow}
       showAmount={!isFlow}
       showPeriod
-      periodPlaceholder={isFlow ? "Últimos 3 m. + próx. 6 m." : "Últimos 12 meses"}
+      periodPlaceholder={isFlow ? "Próximos 6 meses" : "Últimos 12 meses"}
       extraParams={reportExtraParams(reportQuery)}
     />
   )
@@ -99,32 +106,45 @@ async function InformeBody({
       today,
     )
 
-    const [paid, exchanges, pending] = await Promise.all([
+    const [paid, exchanges, pending, officialRate] = await Promise.all([
       listPaidInstallments(user.id),
       listExchanges(user.id),
       listPendingInstallments(user.id),
+      resolveOfficialRate(user.id, settings),
     ])
+
+    const balances = computeBalances(
+      {
+        initialArsCents: settings.initialBalanceArsCents,
+        initialUsdCents: settings.initialBalanceUsdCents,
+        initialDate: settings.initialBalanceDate,
+      },
+      paid
+        .filter((p) => p.paidDate <= today)
+        .map((p) => ({
+          paidDate: p.paidDate,
+          currency: assertCurrency(p.currency),
+          kind: assertInstallmentMovementKind(p.kind),
+          amountCents: p.amountCents,
+        })),
+      exchanges
+        .filter((e) => e.date <= today)
+        .map((e) => ({
+          date: e.date,
+          direction: assertExchangeDirection(e.direction),
+          usdCents: e.amountCents,
+          rate: Number(e.rate),
+        })),
+    )
 
     const view = buildCashflowReport({
       today,
       from: range.from,
       to: range.to,
       granularity: reportQuery.granularity,
-      currencyMode: reportQuery.currency,
-      settings: {
-        initialBalanceArsCents: settings.initialBalanceArsCents,
-        initialBalanceUsdCents: settings.initialBalanceUsdCents,
-        initialBalanceUsdRate: settings.initialBalanceUsdRate,
-        initialBalanceDate: settings.initialBalanceDate,
-      },
-      paid,
-      exchanges: exchanges.map((e) => ({
-        date: e.date,
-        amountCents: e.amountCents,
-        rate: e.rate,
-        direction: e.direction,
-      })),
+      balances,
       pending,
+      officialRate,
     })
 
     return <CashflowReport view={view} />
@@ -153,7 +173,6 @@ async function InformeBody({
   const view = buildPnlReport({
     from: range.from,
     to: range.to,
-    currencyMode: reportQuery.currency,
     categories,
     paidInstallments: paid,
   })
@@ -161,7 +180,7 @@ async function InformeBody({
   return (
     <PnlReport
       view={view}
-      currencyMode={reportQuery.currency}
+      initialCurrency={reportQuery.currency}
       filters={reportQuery.filters}
       hasActiveFilters={hayFiltrosActivos(reportQuery.filters)}
     />

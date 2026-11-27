@@ -40,7 +40,6 @@ const EDIT_TITLES: Record<"income" | "expense", string> = {
 type Props = {
   kind: "income" | "expense"
   categories: Category[]
-  suggestedRate: number | null
   today: IsoDate
   movement?: MovementWithInstallments
   cards?: CardOption[]
@@ -53,7 +52,6 @@ type Props = {
 export function MovementFormDialog({
   kind,
   categories,
-  suggestedRate,
   today,
   movement,
   cards,
@@ -89,7 +87,6 @@ export function MovementFormDialog({
         <MovementForm
           kind={kind}
           categories={categories}
-          suggestedRate={suggestedRate}
           today={today}
           movement={movement}
           cards={cards}

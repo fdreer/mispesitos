@@ -29,14 +29,10 @@ import {
   movement,
   userSettings,
 } from "@/db/schema"
-import { perceivedPayment } from "@/lib/cards"
+import { perceivedPayments } from "@/lib/cards"
 import type { IsoDate } from "@/lib/dates"
 import { parseAmountToCents } from "@/lib/money"
-import {
-  assertExchangeDirection,
-  assertInstallmentMovementKind,
-  assertPaidDate,
-} from "@/lib/movement-asserts"
+import { assertPaidDate } from "@/lib/movement-asserts"
 import {
   type FilterTotals,
   type StatusCounts,
@@ -48,7 +44,6 @@ import {
   type MovementQuery,
   type Page,
 } from "@/lib/movement-query"
-import { buildUsdPositionEvents, type PositionEvent } from "@/lib/position"
 
 export type Settings = typeof userSettings.$inferSelect
 
@@ -214,7 +209,7 @@ function movementOrderBy(
         : tieBreak
     case "amount":
       return [
-        sql`case when ${movement.currency} = 'ARS' then ${movement.amountCents}::numeric else round(${movement.amountCents}::numeric * ${movement.rate}) end ${dir}`,
+        sql`${movement.amountCents} ${dir}`,
         ...tieBreak,
       ]
     case "description":
@@ -460,27 +455,16 @@ export async function listPaidInstallments(userId: string) {
         amountCents: installment.amountCents,
         currency: movement.currency,
         kind: movement.kind,
-        // Para la torta del dashboard, que suma cuotas pagadas por categoría
-        // (criterio de lo percibido, §0 del plan v2).
         categoryId: movement.categoryId,
-        // Necesario para consolidar a pesos con el TC del propio movimiento.
-        rate: movement.rate,
-        // El TC al que se pagó en pesos la parte en dólares del resumen, si
-        // fue así (decisión 7.1 del plan v2). Null sin tarjeta.
-        usdPaidRate: cardStatement.usdPaidRate,
+        statementId: installment.statementId,
+        usdPaidArsCents: cardStatement.usdPaidArsCents,
       })
       .from(installment)
       .innerJoin(movement, eq(installment.movementId, movement.id))
       .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
       .where(and(eq(installment.userId, userId), eq(installment.paid, true)))
 
-    // El filtro `paid = true` ya está arriba: acá es donde vive el saber que
-    // convierte `paidDate` de `string | null` a `IsoDate`.
-    //
-    // Y acá, en un solo lugar, una cuota en dólares cuyo resumen se pagó con
-    // pesos pasa a contar como pesos (`perceivedPayment`): el saldo, la torta
-    // y las barras salen de esta lista y ninguno tiene que saber de tarjetas.
-    return rows.map((r) => perceivedPayment({ ...r, paidDate: assertPaidDate(r.paidDate) }))
+    return perceivedPayments(rows.map((r) => ({ ...r, paidDate: assertPaidDate(r.paidDate) })))
   })
 }
 
@@ -495,10 +479,9 @@ export type ReportPaidFilters = {
 }
 
 /**
- * Cuotas pagadas para el informe de Ingresos vs Gastos (§3.1 del plan v2),
- * acotadas por `paid_date` más los filtros de la barra compartida (categoría,
- * tarjeta, importes, buscador). Pasa por `perceivedPayment` igual que
- * `listPaidInstallments`.
+ * Cuotas pagadas para el informe de Ingresos vs Gastos, acotadas por
+ * `paid_date` más los filtros de la barra compartida. Pasa por
+ * `perceivedPayments` igual que `listPaidInstallments`.
  */
 export async function listPaidInstallmentsForReport(
   userId: string,
@@ -527,15 +510,27 @@ export async function listPaidInstallmentsForReport(
         currency: movement.currency,
         kind: movement.kind,
         categoryId: movement.categoryId,
-        rate: movement.rate,
-        usdPaidRate: cardStatement.usdPaidRate,
+        statementId: installment.statementId,
+        usdPaidArsCents: cardStatement.usdPaidArsCents,
+        statementUsdCents: sql<string | null>`case when ${cardStatement.usdPaidArsCents} is null then null else (
+          select coalesce(sum(i2.amount_cents), 0)
+          from ${installment} i2
+          join ${movement} m2 on m2.id = i2.movement_id
+          where i2.statement_id = ${cardStatement.id} and m2.currency = 'USD'
+        ) end`,
       })
       .from(installment)
       .innerJoin(movement, eq(installment.movementId, movement.id))
       .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
       .where(and(...conditions))
 
-    return rows.map((r) => perceivedPayment({ ...r, paidDate: assertPaidDate(r.paidDate) }))
+    return perceivedPayments(
+      rows.map((r) => ({
+        ...r,
+        paidDate: assertPaidDate(r.paidDate),
+        statementUsdCents: r.statementUsdCents === null ? null : Number(r.statementUsdCents),
+      })),
+    )
   })
 }
 
@@ -551,7 +546,6 @@ export async function listPendingInstallments(userId: string) {
         movementId: movement.id,
         description: movement.description,
         currency: movement.currency,
-        rate: movement.rate,
         kind: movement.kind,
         // Para que el dashboard muestre un resumen de tarjeta como un solo
         // renglón y no cada cuota suelta (§1.4 del plan v2).
@@ -570,15 +564,8 @@ export async function listPendingInstallments(userId: string) {
 }
 
 /**
- * Cambios de divisa, para saldo y posición. Trae TODOS, sin piso de fecha: los
+ * Cambios de divisa, para saldo y /cambios. Trae TODOS, sin piso de fecha: los
  * dos llamadores necesitan la lista completa y cada uno decide el corte.
- * `computeBalances` (@/lib/balance) lo aplica en memoria para el dashboard, y
- * /cambios parte la lista en dos —las que mueven sus tarjetas y las anteriores
- * al saldo inicial, que muestra aparte para que se puedan ver y borrar—.
- *
- * Un corte por fecha en el WHERE le sacaría a los dos esa decisión, y en
- * /cambios dejaba las operaciones anteriores al saldo inicial invisibles en
- * toda la app.
  */
 export async function listExchanges(userId: string) {
   return withUser(userId, (tx) =>
@@ -588,99 +575,4 @@ export async function listExchanges(userId: string) {
       .where(and(eq(movement.userId, userId), eq(movement.kind, "exchange")))
       .orderBy(asc(movement.date)),
   )
-}
-
-/**
- * Todo lo que toca la tenencia de dólares: el saldo inicial, los cambios y
- * las cuotas pagadas en USD. Sección 5.5 del spec — toda salida realiza
- * resultado, se venda o se gaste.
- *
- * Filtra cambios y cuotas por `date >= initialBalanceDate` en la propia
- * consulta (no trae todo y filtra en memoria): evita traerse historia vieja
- * irrelevante para la posición. El armado de eventos en sí —sembrar el saldo
- * inicial, repetir ese mismo corte de fecha como garantía propia, y
- * convertir el `numeric` de la base a number— es la parte pura
- * `buildUsdPositionEvents` (@/lib/position), separada acá justamente para
- * poder probarla sin tocar la base.
- */
-export async function listUsdPositionEvents(userId: string): Promise<PositionEvent[]> {
-  // Por `getSettings` y no por un select propio: /cambios ya la pidió —el
-  // layout de (app) y la página pasan por `requireSettings()`—, así que el
-  // memo de request la resuelve sin volver a la base. Antes esta función abría
-  // su propia transacción para leer la misma fila.
-  const row = await getSettings(userId)
-
-  // requireSettings() exige onboarding completo antes de llegar acá: en la
-  // práctica esta fila siempre existe. Sin ella no hay saldo inicial que
-  // sembrar ni piso de fecha que aplicar.
-  if (!row) return []
-
-  const settings = {
-    usdCents: row.initialBalanceUsdCents,
-    rate: row.initialBalanceUsdRate,
-    date: row.initialBalanceDate,
-  }
-
-  return withUser(userId, async (tx) => {
-    const exchanges = await tx
-      .select({
-        date: movement.date,
-        usdCents: movement.amountCents,
-        rate: movement.rate,
-        direction: movement.direction,
-      })
-      .from(movement)
-      .where(
-        and(
-          eq(movement.userId, userId),
-          eq(movement.kind, "exchange"),
-          gte(movement.date, settings.date),
-        ),
-      )
-
-    const usdInstallments = await tx
-      .select({
-        date: installment.paidDate,
-        usdCents: installment.amountCents,
-        rate: movement.rate,
-        kind: movement.kind,
-      })
-      .from(installment)
-      .innerJoin(movement, eq(installment.movementId, movement.id))
-      .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
-      .where(
-        and(
-          eq(installment.userId, userId),
-          eq(installment.paid, true),
-          eq(movement.currency, "USD"),
-          gte(installment.paidDate, settings.date),
-          // Una compra en dólares con tarjeta cuyo resumen se pagó con pesos
-          // no tocó la tenencia de dólares (decisión 7.1 del plan v2): para
-          // la posición, esa cuota no existe.
-          isNull(cardStatement.usdPaidRate),
-        ),
-      )
-
-    return buildUsdPositionEvents(
-      settings,
-      exchanges.map((e) => ({
-        date: e.date,
-        usdCents: e.usdCents,
-        rate: e.rate,
-        direction: assertExchangeDirection(e.direction),
-      })),
-      usdInstallments.map((i) => ({
-        // Mismo invariante que en `listPaidInstallments`, y por el mismo helper:
-        // la consulta ya filtró `paid = true`, y con `paid = true` la CHECK
-        // `installment_paid_date_required_when_paid` (migración 0009) exige
-        // `paid_date`. El `!` que había acá se apoyaba además en que el `gte`
-        // de arriba nunca matchea un nulo: el día que ese filtro se relajara,
-        // en vez de fallar el assert entraba un `undefined` a ordenar.
-        date: assertPaidDate(i.date),
-        usdCents: i.usdCents,
-        rate: i.rate,
-        kind: assertInstallmentMovementKind(i.kind),
-      })),
-    )
-  })
 }

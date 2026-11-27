@@ -207,23 +207,17 @@ export function statementTotals(
 export type StatementPaymentMode = "usd" | "ars"
 
 export type StatementPaymentResult =
-  | { ok: true; paidDate: IsoDate; usdPaidRate: number | null }
-  | { ok: false; message: string; field?: "paidDate" | "usdPaidRate" }
+  | { ok: true; paidDate: IsoDate; usdPaidArsCents: number | null }
+  | { ok: false; message: string; field?: "paidDate" | "usdPaidArs" }
 
 /**
- * Lo que se guarda al pagar un resumen (§1.3).
+ * Lo que se guarda al pagar un resumen.
  *
  * - La fecha: la misma regla que una cuota suelta (`resolvePaidDate`): hoy por
- *   defecto, nunca futura. Y además no antes del cierre: un resumen que
- *   todavía no cerró puede recibir compras, y una compra que entra en un
- *   resumen pagado se rechaza; pagarlo antes de tiempo dejaría la tarjeta sin
- *   resumen donde cargar las compras de hoy.
- * - La parte en dólares (decisión 7.1): con dólares no guarda TC; con pesos,
- *   el TC es obligatorio. Si el resumen no tiene dólares, el modo no importa
- *   y no se guarda TC aunque llegue.
- *
- * Sin cuotas no hay nada que pagar: marcar pagado un resumen vacío no mueve
- * plata y sólo bloquearía las compras que todavía pueden caer ahí.
+ *   defecto, nunca futura. Y además no antes del cierre.
+ * - La parte en dólares: con dólares no guarda total en pesos; con pesos, el
+ *   total en pesos debitado (`usdPaidArsCents`) es obligatorio y positivo. Si
+ *   el resumen no tiene dólares, el modo no importa y se guarda null.
  */
 export function resolveStatementPayment(input: {
   closingDate: IsoDate
@@ -231,7 +225,7 @@ export function resolveStatementPayment(input: {
   requestedDate: IsoDate | undefined
   today: IsoDate
   mode: StatementPaymentMode
-  usdRate: number | null
+  usdPaidArsCents: number | null
 }): StatementPaymentResult {
   if (input.totals.count === 0) {
     return { ok: false, message: "Este resumen no tiene cuotas: no hay nada que pagar." }
@@ -239,7 +233,6 @@ export function resolveStatementPayment(input: {
 
   const resolved = resolvePaidDate(true, input.requestedDate, input.today)
   if (!resolved.ok) return { ok: false, message: resolved.message, field: "paidDate" }
-  // `resolvePaidDate` con `paid = true` siempre devuelve una fecha.
   const paidDate = resolved.paidDate!
 
   if (paidDate < input.closingDate) {
@@ -251,65 +244,157 @@ export function resolveStatementPayment(input: {
   }
 
   if (input.totals.usdCents === 0 || input.mode === "usd") {
-    return { ok: true, paidDate, usdPaidRate: null }
+    return { ok: true, paidDate, usdPaidArsCents: null }
   }
 
-  if (input.usdRate === null || !(input.usdRate > 0)) {
+  if (input.usdPaidArsCents === null || !(input.usdPaidArsCents > 0)) {
     return {
       ok: false,
-      message: "Decinos a qué tipo de cambio pagaste los dólares.",
-      field: "usdPaidRate",
+      message: "Escribí el total en pesos debitado por los dólares.",
+      field: "usdPaidArs",
     }
   }
-  return { ok: true, paidDate, usdPaidRate: input.usdRate }
+  return { ok: true, paidDate, usdPaidArsCents: input.usdPaidArsCents }
 }
 
 /**
- * Cómo cuenta una cuota pagada para el saldo y los informes (decisión 7.1).
- *
- * Si es en dólares y su resumen se pagó con pesos, para todo lo percibido es
- * un pago EN PESOS: `round(usd × TC del pago)`, por la única función de
- * conversión (`convertToArs`). La cuota en la base no se toca —sigue siendo
- * una compra en dólares, y desmarcar el resumen vuelve todo atrás—: la
- * traducción ocurre al leer, en un solo lugar.
- *
- * El `rate` que sale es "1", el de cualquier cuota en pesos, para que los que
- * consolidan con el TC del movimiento (la torta, las barras) no la conviertan
- * de nuevo.
+ * Reparte `totalCents` entre `weights` en proporción a cada peso usando el
+ * método de resto mayor (Hamilton), de modo que la suma devuelta sea
+ * exactamente `totalCents`.
  */
-export function perceivedPayment<
-  T extends { currency: string; amountCents: number; rate: string; usdPaidRate: string | null },
->(row: T): Omit<T, "usdPaidRate"> {
-  const { usdPaidRate, ...rest } = row
-  if (row.currency !== "USD" || usdPaidRate === null) return rest
-  return {
-    ...rest,
-    currency: "ARS" satisfies Currency,
-    amountCents: convertToArs(row.amountCents, Number(usdPaidRate)),
-    rate: "1",
+export function allocateProportional(totalCents: number, weights: readonly number[]): number[] {
+  if (weights.length === 0) return []
+  const totalWeight = weights.reduce((acc, w) => acc + w, 0)
+  if (totalWeight <= 0 || totalCents <= 0) return weights.map(() => 0)
+
+  const parts = weights.map((weight, index) => {
+    const exact = (totalCents * weight) / totalWeight
+    const floor = Math.floor(exact)
+    return { index, floor, remainder: exact - floor }
+  })
+
+  const leftover = totalCents - parts.reduce((acc, p) => acc + p.floor, 0)
+  const byRemainder = [...parts].sort((a, b) =>
+    b.remainder !== a.remainder ? b.remainder - a.remainder : a.index - b.index,
+  )
+  for (let i = 0; i < leftover; i++) {
+    byRemainder[i].floor += 1
   }
+
+  return parts.map((p) => p.floor)
+}
+
+/**
+ * Tipo de cambio efectivo (pesos por dólar) al que se pagó un resumen en pesos.
+ */
+export function effectiveStatementRate(usdPaidArsCents: number, usdCents: number): number | null {
+  if (usdCents <= 0 || usdPaidArsCents <= 0) return null
+  return usdPaidArsCents / usdCents
+}
+
+/**
+ * Traduce cuotas pagadas a lo percibido: las cuotas en dólares cuyo resumen
+ * se pagó con pesos (`usdPaidArsCents !== null`) pasan a contar como pesos,
+ * repartiendo `usdPaidArsCents` en proporción a su importe con resto mayor
+ * para que la suma cierre al centavo.
+ *
+ * Si se pasa `statementUsdCents` mayor a la suma del subconjunto recibido (por
+ * ejemplo en un informe filtrado por categoría), el remanente entra como un
+ * peso extra para que las cuotas filtradas reciban sólo su proporción real.
+ */
+export function perceivedPayments<
+  T extends {
+    statementId: string | null
+    currency: string
+    amountCents: number
+    usdPaidArsCents: number | null
+    statementUsdCents?: number | null
+  },
+>(rows: readonly T[]): Omit<T, "usdPaidArsCents" | "statementUsdCents">[] {
+  const convertedByIndex = new Map<number, number>()
+  const groups = new Map<
+    string,
+    { usdPaidArsCents: number; statementUsdCents: number | null; items: { index: number; amountCents: number }[] }
+  >()
+
+  rows.forEach((row, index) => {
+    if (row.currency !== "USD" || row.usdPaidArsCents === null || row.statementId === null) return
+    let group = groups.get(row.statementId)
+    if (!group) {
+      group = {
+        usdPaidArsCents: row.usdPaidArsCents,
+        statementUsdCents: row.statementUsdCents ?? null,
+        items: [],
+      }
+      groups.set(row.statementId, group)
+    }
+    group.items.push({ index, amountCents: row.amountCents })
+  })
+
+  for (const group of groups.values()) {
+    const weights = group.items.map((item) => item.amountCents)
+    const groupSum = weights.reduce((acc, w) => acc + w, 0)
+    const extra =
+      group.statementUsdCents !== null && group.statementUsdCents > groupSum
+        ? group.statementUsdCents - groupSum
+        : 0
+    const shares = allocateProportional(
+      group.usdPaidArsCents,
+      extra > 0 ? [...weights, extra] : weights,
+    )
+    group.items.forEach((item, i) => {
+      convertedByIndex.set(item.index, shares[i])
+    })
+  }
+
+  return rows.map((row, index) => {
+    const cleaned = Object.fromEntries(
+      Object.entries(row).filter(([k]) => k !== "usdPaidArsCents" && k !== "statementUsdCents"),
+    ) as Omit<T, "usdPaidArsCents" | "statementUsdCents">
+    const converted = convertedByIndex.get(index)
+    if (converted === undefined) return cleaned
+    return {
+      ...cleaned,
+      currency: "ARS" satisfies Currency,
+      amountCents: converted,
+    }
+  })
+}
+
+export type AvailableCredit = {
+  arsCents: number
+  /** Sólo > 0 cuando no hubo cotización oficial para convertir los USD impagos. */
+  unconvertedUsdCents: number
 }
 
 /**
  * Lo que queda del límite: el límite menos todo lo que la tarjeta todavía
- * debe —cada cuota impaga, de este resumen y de los que vienen—, con lo que
- * está en dólares pasado a pesos con el TC de su compra. Es una estimación
- * para mostrar: el banco usa el TC del día, que acá no se sabe sin red.
- *
- * Null si la tarjeta no tiene límite cargado. Puede dar negativo, y se
- * muestra así: es exactamente la información que se quiere ver.
+ * debe —cada cuota impaga, de este resumen y de los que vienen—. La parte en
+ * dólares se convierte al oficial vendedor de hoy; sin cotización se informa
+ * aparte en `unconvertedUsdCents`.
  */
 export function availableCredit(
   limitCents: number | null,
-  unpaid: readonly { amountCents: number; currency: string; rate: string }[],
-): number | null {
+  unpaid: readonly { amountCents: number; currency: string }[],
+  officialSellRate: number | null,
+): AvailableCredit | null {
   if (limitCents === null) return null
-  const used = unpaid.reduce(
-    (total, i) =>
-      total + (i.currency === "USD" ? convertToArs(i.amountCents, Number(i.rate)) : i.amountCents),
-    0,
-  )
-  return limitCents - used
+  let arsUsed = 0
+  let usdUsed = 0
+  for (const i of unpaid) {
+    if (i.currency === "USD") usdUsed += i.amountCents
+    else arsUsed += i.amountCents
+  }
+  if (officialSellRate !== null && officialSellRate > 0) {
+    return {
+      arsCents: limitCents - arsUsed - convertToArs(usdUsed, officialSellRate),
+      unconvertedUsdCents: 0,
+    }
+  }
+  return {
+    arsCents: limitCents - arsUsed,
+    unconvertedUsdCents: usdUsed,
+  }
 }
 
 export type StatementSummary = StatementDates & {

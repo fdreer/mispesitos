@@ -1,11 +1,7 @@
 import { computeBalances } from "@/lib/balance"
-import {
-  monthlyTotals,
-  projectBalance,
-  projectionStartArsCents,
-} from "@/lib/dashboard"
+import { monthlyTotals } from "@/lib/dashboard"
 import { spendByParent, type SpendGroup, type TreeCategory } from "@/lib/category-tree"
-import { addMonthsClamped, isOverdue, monthKey, type IsoDate } from "@/lib/dates"
+import { addMonthsClamped, isOverdue, monthKey, monthRange, type IsoDate } from "@/lib/dates"
 import { convertToArs } from "@/lib/money"
 import {
   assertCurrency,
@@ -13,6 +9,8 @@ import {
   assertInstallmentMovementKind,
 } from "@/lib/movement-asserts"
 import type { MovementStatus } from "@/lib/movement-status"
+import type { OfficialRateSnapshot } from "@/lib/rate"
+import { buildCashflowReport } from "@/lib/reports-cashflow"
 
 type PaidRow = {
   paidDate: IsoDate
@@ -20,13 +18,12 @@ type PaidRow = {
   currency: string
   kind: string
   categoryId: string | null
-  rate: string
 }
 
 type ExchangeRow = {
   date: IsoDate
   amountCents: number
-  rate: string
+  rate: string | null
   direction: string | null
 }
 
@@ -38,7 +35,6 @@ type PendingRow = {
   movementId: string
   description: string
   currency: string
-  rate: string
   kind: string
   statementId?: string | null
   statementPeriod?: string | null
@@ -53,7 +49,7 @@ export type DashboardInput = {
     initialBalanceUsdCents: number
     initialBalanceDate: IsoDate
   }
-  todayRate: number | null
+  officialRate: OfficialRateSnapshot | null
   paid: PaidRow[]
   exchanges: ExchangeRow[]
   pending: PendingRow[]
@@ -92,29 +88,34 @@ export function isUpcomingStatement(item: UpcomingPayment): item is UpcomingStat
   return "type" in item && item.type === "statement"
 }
 
-type DashboardView = {
+export type MonthlyBarPoint = {
+  month: string
+  incomeCents: number
+  expenseCents: number
+}
+
+export type DashboardView = {
   arsCents: number
   usdCents: number
   consolidatedArsCents: number | null
   monthIncomeArsCents: number
+  monthIncomeUsdCents: number
   monthExpenseArsCents: number
-  paymentsThisMonth: { arsCents: number; count: number; overdueCount: number }
-  paymentsNextMonth: { arsCents: number; count: number }
+  monthExpenseUsdCents: number
+  paymentsThisMonth: { arsCents: number; usdCents: number; count: number; overdueCount: number }
+  paymentsNextMonth: { arsCents: number; usdCents: number; count: number }
   projection: { month: string; arsCents: number }[] | null
   upcomingPayments: UpcomingPayment[]
   upcomingReceivables: UpcomingItem[]
-  pie: SpendGroup[]
-  bars: { month: string; incomeArsCents: number; expenseArsCents: number }[]
-  todayRate: number | null
+  pie: { ars: SpendGroup[]; usd: SpendGroup[] }
+  bars: { ars: MonthlyBarPoint[]; usd: MonthlyBarPoint[] }
+  officialRate: OfficialRateSnapshot | null
 }
 
 const MAX_UPCOMING = 20
 
 export function buildDashboardView(input: DashboardInput): DashboardView {
-  const { today, settings, todayRate } = input
-
-  const toArs = (cents: number, currency: string, movementRate: string) =>
-    currency === "ARS" ? cents : convertToArs(cents, Number(movementRate))
+  const { today, settings, officialRate } = input
 
   const balances = computeBalances(
     {
@@ -137,35 +138,18 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
   )
 
   const consolidatedArsCents =
-    todayRate === null ? null : balances.arsCents + convertToArs(balances.usdCents, todayRate)
+    officialRate === null
+      ? null
+      : balances.arsCents + convertToArs(balances.usdCents, officialRate.compra)
 
   const thisMonth = monthKey(today)
   const nextMonth = monthKey(addMonthsClamped(today, 1))
   const firstDayNextMonth = `${nextMonth}-01`
   const firstDayAfterNextMonth = `${monthKey(addMonthsClamped(today, 2))}-01`
 
-  /*
-   * Criterio de lo percibido (§0 del plan v2): la tarjeta del mes, la torta y
-   * las barras cuentan lo mismo, cuotas PAGADAS por su `paidDate`. Un
-   * televisor de $1.200.000 en 12 cuotas suma $100.000 en cada mes en que se
-   * paga una, no $1.200.000 el día que se cargó.
-   *
-   * Y con el MISMO corte que hace `computeBalances`, y por el mismo motivo: lo
-   * pagado antes del saldo inicial ya está adentro de ese saldo. Sin este
-   * filtro, con un saldo inicial fechado a mitad de mes la tarjeta mostraba un
-   * cobro que el saldo de al lado no tenía en cuenta. Aplicado una sola vez
-   * acá, la torta y la barra del mes en curso suman exactamente lo que la
-   * tarjeta.
-   */
   const paidSinceStart = input.paid.filter((p) => p.paidDate >= settings.initialBalanceDate)
   const monthPaid = paidSinceStart.filter((p) => monthKey(p.paidDate) === thisMonth)
-  /*
-   * Lo que hay que pagar, contado por CONCEPTO: una cuota suelta es uno, y un
-   * resumen de tarjeta también es uno aunque tenga veinte cuotas adentro
-   * (§1.4 del plan v2). Todas las cuotas de un resumen vencen el mismo día,
-   * así que cae entero en un mes o en el otro. El importe se suma igual,
-   * cuota por cuota.
-   */
+
   const conceptos = (rows: PendingRow[]) =>
     new Set(rows.map((p) => p.statementId ?? `cuota:${p.id}`))
   const paymentsThisMonth = input.pending.filter(
@@ -175,45 +159,28 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
     (p) => p.kind === "expense" && monthKey(p.dueDate) === nextMonth,
   )
 
-  const projectionStart = projectionStartArsCents(balances, todayRate)
-  const projection =
-    projectionStart === null
-      ? null
-      : projectBalance(
-          projectionStart,
-          input.pending.map((p) => ({
-            dueDate: p.dueDate,
-            arsCents: toArs(p.amountCents, p.currency, p.rate),
-            kind: assertInstallmentMovementKind(p.kind),
-          })),
-          input.horizonMonths,
-          today,
-        )
+  const horizonEnd = monthRange(
+    monthKey(addMonthsClamped(`${thisMonth}-01`, Math.max(0, input.horizonMonths - 1))),
+  ).to
+  const cashflow = buildCashflowReport({
+    today,
+    from: today,
+    to: horizonEnd,
+    granularity: "mensual",
+    balances,
+    pending: input.pending,
+    officialRate,
+  })
+  const projection = cashflow.missingRateForUsd
+    ? null
+    : cashflow.rows.map((r) => ({ month: r.key, arsCents: r.closingCents }))
 
-  /*
-   * El estado del enlace se deriva del MOVIMIENTO entero, no de la cuota de la
-   * fila: es el mismo criterio que usa el filtro de /ingresos y /egresos. Un
-   * movimiento con una cuota atrasada y otra por vencer es "overdue" completo,
-   * así que la fila de la cuota que todavía no venció también tiene que llevar
-   * a esa lista — si no, el enlace deja al usuario en una lista donde el
-   * movimiento que venía a ver no está.
-   *
-   * Sale de `pending` y no de la lista de movimientos, y da exactamente lo
-   * mismo que `getMovementStatus`: un movimiento que aparece acá tiene al menos
-   * una cuota impaga, así que nunca es "paid"; y TODAS sus cuotas impagas están
-   * en esta lista, así que "hay alguna vencida" se responde sin mirar nada más.
-   * Es lo que permite que la página deje de traerse la historia entera.
-   */
   const overdueMovements = new Set(
     input.pending.filter((p) => isOverdue(p.dueDate, today)).map((p) => p.movementId),
   )
 
-  // Vencimientos: lo atrasado más los meses actual y siguiente completos.
   const inWindow = input.pending.filter((p) => p.dueDate < firstDayAfterNextMonth)
 
-  // Las cuotas con tarjeta se juntan en su resumen: un renglón por resumen,
-  // con el total por moneda. El estado es el del resumen: vencido si su
-  // vencimiento ya pasó.
   const statements = new Map<string, UpcomingStatement>()
   for (const p of inWindow) {
     if (!p.statementId || !p.cardId) continue
@@ -247,56 +214,79 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
       status: overdueMovements.has(p.movementId) ? "overdue" : "pending",
     }))
 
-  const pie = spendByParent(
+  const pieArs = spendByParent(
     monthPaid
-      .filter((p) => p.kind === "expense")
-      .map((p) => ({
-        categoryId: p.categoryId,
-        arsCents: toArs(p.amountCents, p.currency, p.rate),
-      })),
+      .filter((p) => p.kind === "expense" && assertCurrency(p.currency) === "ARS")
+      .map((p) => ({ categoryId: p.categoryId, arsCents: p.amountCents })),
+    input.expenseCategories,
+  )
+  const pieUsd = spendByParent(
+    monthPaid
+      .filter((p) => p.kind === "expense" && assertCurrency(p.currency) === "USD")
+      .map((p) => ({ categoryId: p.categoryId, arsCents: p.amountCents })),
     input.expenseCategories,
   )
 
-  const bars = monthlyTotals(
-    paidSinceStart.map((p) => ({
-      date: p.paidDate,
-      kind: assertInstallmentMovementKind(p.kind),
-      arsCents: toArs(p.amountCents, p.currency, p.rate),
-    })),
+  const barsArs = monthlyTotals(
+    paidSinceStart
+      .filter((p) => assertCurrency(p.currency) === "ARS")
+      .map((p) => ({
+        date: p.paidDate,
+        kind: assertInstallmentMovementKind(p.kind),
+        arsCents: p.amountCents,
+      })),
     input.historyMonths,
     today,
-  )
+  ).map((b) => ({ month: b.month, incomeCents: b.incomeArsCents, expenseCents: b.expenseArsCents }))
+
+  const barsUsd = monthlyTotals(
+    paidSinceStart
+      .filter((p) => assertCurrency(p.currency) === "USD")
+      .map((p) => ({
+        date: p.paidDate,
+        kind: assertInstallmentMovementKind(p.kind),
+        arsCents: p.amountCents,
+      })),
+    input.historyMonths,
+    today,
+  ).map((b) => ({ month: b.month, incomeCents: b.incomeArsCents, expenseCents: b.expenseArsCents }))
+
+  const sumByCurrency = (rows: readonly { amountCents: number; currency: string }[]) => {
+    let arsCents = 0
+    let usdCents = 0
+    for (const r of rows) {
+      if (assertCurrency(r.currency) === "USD") usdCents += r.amountCents
+      else arsCents += r.amountCents
+    }
+    return { arsCents, usdCents }
+  }
+
+  const monthIncome = sumByCurrency(monthPaid.filter((p) => p.kind === "income"))
+  const monthExpense = sumByCurrency(monthPaid.filter((p) => p.kind === "expense"))
+  const thisMonthSum = sumByCurrency(paymentsThisMonth)
+  const nextMonthSum = sumByCurrency(paymentsNextMonth)
 
   return {
     arsCents: balances.arsCents,
     usdCents: balances.usdCents,
     consolidatedArsCents,
-    monthIncomeArsCents: monthPaid
-      .filter((p) => p.kind === "income")
-      .reduce((a, p) => a + toArs(p.amountCents, p.currency, p.rate), 0),
-    monthExpenseArsCents: monthPaid
-      .filter((p) => p.kind === "expense")
-      .reduce((a, p) => a + toArs(p.amountCents, p.currency, p.rate), 0),
+    monthIncomeArsCents: monthIncome.arsCents,
+    monthIncomeUsdCents: monthIncome.usdCents,
+    monthExpenseArsCents: monthExpense.arsCents,
+    monthExpenseUsdCents: monthExpense.usdCents,
     paymentsThisMonth: {
-      arsCents: paymentsThisMonth.reduce(
-        (total, payment) => total + toArs(payment.amountCents, payment.currency, payment.rate),
-        0,
-      ),
+      arsCents: thisMonthSum.arsCents,
+      usdCents: thisMonthSum.usdCents,
       count: conceptos(paymentsThisMonth).size,
       overdueCount: conceptos(paymentsThisMonth.filter((payment) => isOverdue(payment.dueDate, today)))
         .size,
     },
     paymentsNextMonth: {
-      arsCents: paymentsNextMonth.reduce(
-        (total, payment) => total + toArs(payment.amountCents, payment.currency, payment.rate),
-        0,
-      ),
+      arsCents: nextMonthSum.arsCents,
+      usdCents: nextMonthSum.usdCents,
       count: conceptos(paymentsNextMonth).size,
     },
     projection,
-    // `pending` llega ordenado por vencimiento; al sumar los resúmenes hay
-    // que volver a ordenar. `sort` es estable: entre iguales queda el orden
-    // de la consulta.
     upcomingPayments: [
       ...upcoming.filter((item) => item.kind === "expense"),
       ...statements.values(),
@@ -304,8 +294,8 @@ export function buildDashboardView(input: DashboardInput): DashboardView {
       .sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0))
       .slice(0, MAX_UPCOMING),
     upcomingReceivables: upcoming.filter((item) => item.kind === "income").slice(0, MAX_UPCOMING),
-    pie,
-    bars,
-    todayRate,
+    pie: { ars: pieArs, usd: pieUsd },
+    bars: { ars: barsArs, usd: barsUsd },
+    officialRate,
   }
 }

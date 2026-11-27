@@ -25,6 +25,12 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {}, push: () => {} }),
 }))
 
+global.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 afterEach(cleanup)
 
 const RESUMEN: StatementForActions = {
@@ -40,8 +46,23 @@ const RESUMEN: StatementForActions = {
   count: 3,
 }
 
-function abrirPago(statement: StatementForActions, suggestedRate: number | null = null) {
-  render(<PayStatementButton statement={statement} today="2026-12-01" suggestedRate={suggestedRate} />)
+function abrirPago(
+  statement: StatementForActions,
+  opts: {
+    officialSellRate?: number | null
+    suggestedBuyRate?: number | null
+    usdBalanceCents?: number
+  } = {},
+) {
+  render(
+    <PayStatementButton
+      statement={statement}
+      today="2026-12-01"
+      officialSellRate={opts.officialSellRate ?? null}
+      suggestedBuyRate={opts.suggestedBuyRate ?? null}
+      usdBalanceCents={opts.usdBalanceCents ?? 0}
+    />,
+  )
   fireEvent.click(screen.getByRole("button", { name: "Pagar resumen" }))
 }
 
@@ -52,28 +73,48 @@ describe("PayStatementButton", () => {
     expect(screen.getByRole("button", { name: /^Fecha de pago: 01\/12\/2026$/ })).toBeTruthy()
   })
 
-  it("con dólares, pagar con pesos pide el TC y muestra cuántos pesos son", () => {
-    abrirPago({ ...RESUMEN, usdCents: 100_00 }, 1200)
+  it("con dólares, pagar con pesos precarga la estimación oficial y muestra el TC efectivo", () => {
+    abrirPago(
+      { ...RESUMEN, usdCents: 100_00 },
+      { officialSellRate: 1200, usdBalanceCents: 200_00 },
+    )
 
-    expect(screen.getByText("Salen de tu saldo en dólares.")).toBeTruthy()
+    expect(screen.getByText(/Saldo en dólares disponible/)).toBeTruthy()
     fireEvent.click(screen.getByRole("radio", { name: "Con pesos" }))
 
-    const tc = screen.getByLabelText<HTMLInputElement>("Tipo de cambio")
-    expect(tc.value).toBe("1200")
-    expect(screen.getByText(/son .*120\.000,00: salen de tu saldo en pesos/)).toBeTruthy()
+    const total = screen.getByLabelText<HTMLInputElement>(/Total en pesos debitado/)
+    expect(total.value).toBe("120.000")
+    expect(screen.getByText(/TC efectivo: .*1\.200,00 por dólar/)).toBeTruthy()
   })
 
-  it("manda el resumen, el modo y la fecha", async () => {
-    abrirPago({ ...RESUMEN, usdCents: 100_00 }, 1200)
+  it("con dólares y saldo insuficiente avisa y abre el bloque de compra de dólares", () => {
+    abrirPago(
+      { ...RESUMEN, usdCents: 100_00 },
+      { suggestedBuyRate: 1450, usdBalanceCents: 40_00 },
+    )
+
+    expect(screen.getByRole("alert").textContent).toContain("faltan")
+    expect(screen.getByLabelText<HTMLInputElement>("Dólares a comprar").value).toBe("60")
+    expect(screen.getByLabelText<HTMLInputElement>("Tipo de cambio").value).toBe("1450")
+
+    const datos = new FormData(document.querySelector("form")!)
+    expect(datos.get("registerExchange")).toBe("true")
+    expect(datos.get("exchangeUsd")).toBe("60")
+    expect(datos.get("exchangeRate")).toBe("1450")
+  })
+
+  it("manda el resumen, el modo, la fecha y el total en pesos", async () => {
+    abrirPago(
+      { ...RESUMEN, usdCents: 100_00 },
+      { officialSellRate: 1200, usdBalanceCents: 200_00 },
+    )
     fireEvent.click(screen.getByRole("radio", { name: "Con pesos" }))
 
-    const form = screen.getByRole("button", { name: "Pagar resumen", hidden: false }).closest("form")
     const datos = new FormData(document.querySelector("form")!)
     expect(datos.get("statementId")).toBe(RESUMEN.id)
     expect(datos.get("mode")).toBe("ars")
     expect(datos.get("paidDate")).toBe("2026-12-01")
-    expect(datos.get("usdPaidRate")).toBe("1200")
-    expect(form).toBeTruthy()
+    expect(datos.get("usdPaidArs")).toBe("120.000")
 
     await act(async () => {
       fireEvent.submit(document.querySelector("form")!)
@@ -83,14 +124,26 @@ describe("PayStatementButton", () => {
 
   it("un resumen sin cuotas no se puede pagar", () => {
     render(
-      <PayStatementButton statement={{ ...RESUMEN, count: 0 }} today="2026-12-01" suggestedRate={null} />,
+      <PayStatementButton
+        statement={{ ...RESUMEN, count: 0 }}
+        today="2026-12-01"
+        officialSellRate={null}
+        suggestedBuyRate={null}
+        usdBalanceCents={0}
+      />,
     )
     expect(screen.getByRole("button", { name: "Pagar resumen" }).hasAttribute("disabled")).toBe(true)
   })
 
   it("un resumen que todavía no cerró no se puede pagar", () => {
     render(
-      <PayStatementButton statement={{ ...RESUMEN, closingDate: "2026-12-20" }} today="2026-12-01" suggestedRate={null} />,
+      <PayStatementButton
+        statement={{ ...RESUMEN, closingDate: "2026-12-20" }}
+        today="2026-12-01"
+        officialSellRate={null}
+        suggestedBuyRate={null}
+        usdBalanceCents={0}
+      />,
     )
     const boton = screen.getByRole("button", { name: "Pagar resumen" })
     expect(boton.hasAttribute("disabled")).toBe(true)

@@ -7,9 +7,11 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import {
   BalanceAmount,
   BalanceHeader,
+  BalanceNote,
 } from "@/components/dashboard/balance-cards"
 import { InfoHint } from "@/components/info-hint"
 import { PnlChart } from "@/components/reports/report-charts"
+import { Segmented } from "@/components/segmented"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -55,13 +57,82 @@ function formatSavingsRate(pct: number | null): string {
   })}%`
 }
 
+function DualCurrencyCell({
+  arsCents,
+  usdCents,
+  arsVarPct,
+  usdVarPct,
+  showVariation,
+  href,
+  muted,
+}: {
+  arsCents: number
+  usdCents: number
+  arsVarPct?: number | null
+  usdVarPct?: number | null
+  showVariation?: boolean
+  href: string | null
+  muted?: boolean
+}) {
+  if (arsCents === 0 && usdCents === 0) {
+    return (
+      <>
+        <span className="text-muted-foreground">—</span>
+        {showVariation && (
+          <span className="text-muted-foreground block text-[11px] font-normal">—</span>
+        )}
+      </>
+    )
+  }
+
+  const content = (
+    <>
+      {(arsCents !== 0 || usdCents === 0) && (
+        <span className="block">{formatAmountCompact(arsCents, "ARS")}</span>
+      )}
+      {usdCents !== 0 && (
+        <span
+          className={cn(
+            "block",
+            arsCents !== 0 && "text-xs text-muted-foreground font-normal",
+          )}
+        >
+          {formatAmountCompact(usdCents, "USD")}
+        </span>
+      )}
+    </>
+  )
+
+  return (
+    <>
+      {href ? (
+        <Link
+          href={href}
+          className={cn(
+            "inline-block underline-offset-4 hover:underline",
+            muted ? "hover:text-foreground" : "hover:text-paper",
+          )}
+        >
+          {content}
+        </Link>
+      ) : (
+        content
+      )}
+      {showVariation && (
+        <span className="text-muted-foreground block text-[11px] font-normal">
+          {arsCents !== 0 || usdCents === 0 ? formatVar(arsVarPct ?? null) : formatVar(usdVarPct ?? null)}
+        </span>
+      )}
+    </>
+  )
+}
+
 function CategorySectionRows({
   kind,
   title,
   totalLabel,
   rows,
   view,
-  currencyMode,
   filters,
   expanded,
   toggle,
@@ -72,15 +143,16 @@ function CategorySectionRows({
   totalLabel: string
   rows: PnlParentRow[]
   view: PnlReportView
-  currencyMode: ReportCurrency
   filters: MovementQuery
   expanded: Set<string>
   toggle: (key: string) => void
   showVariation: boolean
 }) {
-  const { displayCurrency, months, effectiveFrom, effectiveTo, totalsByMonth, grandTotal } = view
-  const sectionTotalCents =
-    kind === "income" ? grandTotal.incomeCents : grandTotal.expenseCents
+  const { months, effectiveFrom, effectiveTo, totalsByMonth, grandTotal } = view
+  const sectionTotalArs =
+    kind === "income" ? grandTotal.ars.incomeCents : grandTotal.ars.expenseCents
+  const sectionTotalUsd =
+    kind === "income" ? grandTotal.usd.incomeCents : grandTotal.usd.expenseCents
 
   return (
     <>
@@ -142,61 +214,50 @@ function CategorySectionRows({
                 </TableCell>
 
                 {row.cells.map((cell) => {
+                  const hasValue = cell.arsCents !== 0 || cell.usdCents !== 0
                   const href =
-                    canLink && cell.amountCents > 0
+                    canLink && hasValue
                       ? buildPnlCellHref({
                           kind,
                           categoryIds: row.categoryIds,
                           month: cell.month,
                           effectiveFrom,
                           effectiveTo,
-                          currencyMode,
                           filters,
                         })
                       : null
 
                   return (
                     <TableCell key={cell.month} className="text-right tabular-nums">
-                      {cell.amountCents === 0 ? (
-                        <span className="text-muted-foreground">—</span>
-                      ) : href ? (
-                        <Link
-                          href={href}
-                          className="underline-offset-4 hover:text-paper hover:underline"
-                        >
-                          {formatAmountCompact(cell.amountCents, displayCurrency)}
-                        </Link>
-                      ) : (
-                        formatAmountCompact(cell.amountCents, displayCurrency)
-                      )}
-                      {showVariation && (
-                        <span className="text-muted-foreground block text-[11px]">
-                          {formatVar(cell.variationPct)}
-                        </span>
-                      )}
+                      <DualCurrencyCell
+                        arsCents={cell.arsCents}
+                        usdCents={cell.usdCents}
+                        arsVarPct={cell.arsVariationPct}
+                        usdVarPct={cell.usdVariationPct}
+                        showVariation={showVariation}
+                        href={href}
+                      />
                     </TableCell>
                   )
                 })}
 
                 <TableCell className="text-right font-medium tabular-nums">
-                  {canLink ? (
-                    <Link
-                      href={buildPnlCellHref({
-                        kind,
-                        categoryIds: row.categoryIds,
-                        month: null,
-                        effectiveFrom,
-                        effectiveTo,
-                        currencyMode,
-                        filters,
-                      })}
-                      className="underline-offset-4 hover:text-paper hover:underline"
-                    >
-                      {formatAmountCompact(row.totalCents, displayCurrency)}
-                    </Link>
-                  ) : (
-                    formatAmountCompact(row.totalCents, displayCurrency)
-                  )}
+                  <DualCurrencyCell
+                    arsCents={row.totalArsCents}
+                    usdCents={row.totalUsdCents}
+                    href={
+                      canLink
+                        ? buildPnlCellHref({
+                            kind,
+                            categoryIds: row.categoryIds,
+                            month: null,
+                            effectiveFrom,
+                            effectiveTo,
+                            filters,
+                          })
+                        : null
+                    }
+                  />
                 </TableCell>
               </TableRow>
 
@@ -210,15 +271,15 @@ function CategorySectionRows({
                         <span className="truncate">{child.name}</span>
                       </TableCell>
                       {child.cells.map((cell) => {
+                        const hasValue = cell.arsCents !== 0 || cell.usdCents !== 0
                         const href =
-                          childCanLink && cell.amountCents > 0
+                          childCanLink && hasValue
                             ? buildPnlCellHref({
                                 kind,
                                 categoryIds: child.categoryIds,
                                 month: cell.month,
                                 effectiveFrom,
                                 effectiveTo,
-                                currencyMode,
                                 filters,
                               })
                             : null
@@ -227,45 +288,36 @@ function CategorySectionRows({
                             key={cell.month}
                             className="text-right text-muted-foreground tabular-nums"
                           >
-                            {cell.amountCents === 0 ? (
-                              "—"
-                            ) : href ? (
-                              <Link
-                                href={href}
-                                className="underline-offset-4 hover:text-foreground hover:underline"
-                              >
-                                {formatAmountCompact(cell.amountCents, displayCurrency)}
-                              </Link>
-                            ) : (
-                              formatAmountCompact(cell.amountCents, displayCurrency)
-                            )}
-                            {showVariation && (
-                              <span className="block text-[11px] opacity-80">
-                                {formatVar(cell.variationPct)}
-                              </span>
-                            )}
+                            <DualCurrencyCell
+                              arsCents={cell.arsCents}
+                              usdCents={cell.usdCents}
+                              arsVarPct={cell.arsVariationPct}
+                              usdVarPct={cell.usdVariationPct}
+                              showVariation={showVariation}
+                              href={href}
+                              muted
+                            />
                           </TableCell>
                         )
                       })}
                       <TableCell className="text-right text-muted-foreground tabular-nums">
-                        {childCanLink ? (
-                          <Link
-                            href={buildPnlCellHref({
-                              kind,
-                              categoryIds: child.categoryIds,
-                              month: null,
-                              effectiveFrom,
-                              effectiveTo,
-                              currencyMode,
-                              filters,
-                            })}
-                            className="underline-offset-4 hover:text-foreground hover:underline"
-                          >
-                            {formatAmountCompact(child.totalCents, displayCurrency)}
-                          </Link>
-                        ) : (
-                          formatAmountCompact(child.totalCents, displayCurrency)
-                        )}
+                        <DualCurrencyCell
+                          arsCents={child.totalArsCents}
+                          usdCents={child.totalUsdCents}
+                          href={
+                            childCanLink
+                              ? buildPnlCellHref({
+                                  kind,
+                                  categoryIds: child.categoryIds,
+                                  month: null,
+                                  effectiveFrom,
+                                  effectiveTo,
+                                  filters,
+                                })
+                              : null
+                          }
+                          muted
+                        />
                       </TableCell>
                     </TableRow>
                   )
@@ -280,55 +332,52 @@ function CategorySectionRows({
           {totalLabel}
         </TableCell>
         {totalsByMonth.map((m) => {
-          const val = kind === "income" ? m.incomeCents : m.expenseCents
-          const varPct = kind === "income" ? m.incomeVarPct : m.expenseVarPct
+          const ars = kind === "income" ? m.incomeArsCents : m.expenseArsCents
+          const usd = kind === "income" ? m.incomeUsdCents : m.expenseUsdCents
+          const arsVar = kind === "income" ? m.incomeArsVarPct : m.expenseArsVarPct
+          const usdVar = kind === "income" ? m.incomeUsdVarPct : m.expenseUsdVarPct
+          const href =
+            ars !== 0 || usd !== 0
+              ? buildPnlCellHref({
+                  kind,
+                  categoryIds: filters.categoryIds,
+                  month: m.month,
+                  effectiveFrom,
+                  effectiveTo,
+                  filters,
+                })
+              : null
+
           return (
             <TableCell key={m.month} className="text-right tabular-nums">
-              {val === 0 ? (
-                <span className="text-muted-foreground">—</span>
-              ) : (
-                <Link
-                  href={buildPnlCellHref({
-                    kind,
-                    categoryIds: filters.categoryIds,
-                    month: m.month,
-                    effectiveFrom,
-                    effectiveTo,
-                    currencyMode,
-                    filters,
-                  })}
-                  className="underline-offset-4 hover:text-paper hover:underline"
-                >
-                  {formatAmountCompact(val, displayCurrency)}
-                </Link>
-              )}
-              {showVariation && (
-                <span className="text-muted-foreground block text-[11px] font-normal">
-                  {formatVar(varPct)}
-                </span>
-              )}
+              <DualCurrencyCell
+                arsCents={ars}
+                usdCents={usd}
+                arsVarPct={arsVar}
+                usdVarPct={usdVar}
+                showVariation={showVariation}
+                href={href}
+              />
             </TableCell>
           )
         })}
         <TableCell className="text-right tabular-nums">
-          {sectionTotalCents === 0 ? (
-            <span className="text-muted-foreground">—</span>
-          ) : (
-            <Link
-              href={buildPnlCellHref({
-                kind,
-                categoryIds: filters.categoryIds,
-                month: null,
-                effectiveFrom,
-                effectiveTo,
-                currencyMode,
-                filters,
-              })}
-              className="underline-offset-4 hover:text-paper hover:underline"
-            >
-              {formatAmountCompact(sectionTotalCents, displayCurrency)}
-            </Link>
-          )}
+          <DualCurrencyCell
+            arsCents={sectionTotalArs}
+            usdCents={sectionTotalUsd}
+            href={
+              sectionTotalArs !== 0 || sectionTotalUsd !== 0
+                ? buildPnlCellHref({
+                    kind,
+                    categoryIds: filters.categoryIds,
+                    month: null,
+                    effectiveFrom,
+                    effectiveTo,
+                    filters,
+                  })
+                : null
+            }
+          />
         </TableCell>
       </TableRow>
     </>
@@ -337,17 +386,18 @@ function CategorySectionRows({
 
 export function PnlReport({
   view,
-  currencyMode,
+  initialCurrency = "ARS",
   filters,
   hasActiveFilters,
 }: {
   view: PnlReportView
-  currencyMode: ReportCurrency
+  initialCurrency?: ReportCurrency
   filters: MovementQuery
   hasActiveFilters: boolean
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [showVariation, setShowVariation] = useState(false)
+  const [chartCurrency, setChartCurrency] = useState<Currency>(initialCurrency)
 
   function toggle(key: string) {
     setExpanded((prev) => {
@@ -358,9 +408,11 @@ export function PnlReport({
     })
   }
 
-  const { displayCurrency, summary, chart, incomeRows, expenseRows, months, totalsByMonth, grandTotal } =
-    view
+  const { summary, chart, incomeRows, expenseRows, months, totalsByMonth, grandTotal } = view
   const hasAnyData = incomeRows.length > 0 || expenseRows.length > 0
+  const hasUsd =
+    summary.usd.incomeCents !== 0 ||
+    summary.usd.expenseCents !== 0
 
   return (
     <div className="space-y-6">
@@ -368,31 +420,43 @@ export function PnlReport({
         <Card size="sm" className="gap-2 py-3">
           <BalanceHeader title="Total ingresos" />
           <CardContent>
-            <BalanceAmount>{formatMoney(summary.incomeCents, displayCurrency, 0)}</BalanceAmount>
+            <BalanceAmount>{formatMoney(summary.ars.incomeCents, "ARS", 0)}</BalanceAmount>
+            {summary.usd.incomeCents !== 0 && (
+              <BalanceNote>{formatMoney(summary.usd.incomeCents, "USD")}</BalanceNote>
+            )}
           </CardContent>
         </Card>
 
         <Card size="sm" className="gap-2 py-3">
           <BalanceHeader title="Total gastos" />
           <CardContent>
-            <BalanceAmount>{formatMoney(summary.expenseCents, displayCurrency, 0)}</BalanceAmount>
+            <BalanceAmount>{formatMoney(summary.ars.expenseCents, "ARS", 0)}</BalanceAmount>
+            {summary.usd.expenseCents !== 0 && (
+              <BalanceNote>{formatMoney(summary.usd.expenseCents, "USD")}</BalanceNote>
+            )}
           </CardContent>
         </Card>
 
         <Card size="sm" className="gap-2 py-3">
           <BalanceHeader title="Resultado" />
           <CardContent>
-            <BalanceAmount>{formatMoney(summary.netCents, displayCurrency, 0)}</BalanceAmount>
+            <BalanceAmount>{formatMoney(summary.ars.netCents, "ARS", 0)}</BalanceAmount>
+            {hasUsd && (
+              <BalanceNote>{formatMoney(summary.usd.netCents, "USD")}</BalanceNote>
+            )}
           </CardContent>
         </Card>
 
         <Card size="sm" className="gap-2 py-3">
           <BalanceHeader
             title="Tasa de ahorro"
-            hint="Resultado neto dividido entre el total de ingresos del período."
+            hint="Resultado neto dividido entre el total de ingresos del período, por moneda."
           />
           <CardContent>
-            <BalanceAmount>{formatSavingsRate(summary.savingsRatePct)}</BalanceAmount>
+            <BalanceAmount>{formatSavingsRate(summary.ars.savingsRatePct)}</BalanceAmount>
+            {summary.usd.savingsRatePct !== null && (
+              <BalanceNote>US$: {formatSavingsRate(summary.usd.savingsRatePct)}</BalanceNote>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -402,11 +466,25 @@ export function PnlReport({
           <CardTitle className="flex items-center gap-1.5 text-base">
             Ingresos y gastos por mes
             <InfoHint label="Cómo se calcula: Ingresos y gastos por mes">
-              Suma cuotas pagadas según su fecha de pago (criterio de lo percibido). Las compras
-              con tarjeta cuentan en el mes en que pagaste el resumen. Los cambios de dólares no son
-              ingreso ni gasto.
+              Suma cuotas pagadas según su fecha de pago (criterio de lo percibido), sin mezclar
+              monedas. Un resumen de tarjeta pagado con pesos cuenta en pesos; pagado con dólares,
+              en dólares. Los cambios de dólares no son ingreso ni gasto.
             </InfoHint>
           </CardTitle>
+          {hasAnyData && (
+            <CardAction>
+              <Segmented
+                label="Moneda del gráfico"
+                size="sm"
+                value={chartCurrency}
+                onChange={setChartCurrency}
+                options={[
+                  { value: "ARS", label: "$" },
+                  { value: "USD", label: "US$" },
+                ]}
+              />
+            </CardAction>
+          )}
         </CardHeader>
         <CardContent>
           {!hasAnyData ? (
@@ -414,7 +492,10 @@ export function PnlReport({
               No hay movimientos pagados en este período.
             </p>
           ) : (
-            <PnlChart data={chart} currency={displayCurrency} />
+            <PnlChart
+              data={chartCurrency === "USD" ? chart.usd : chart.ars}
+              currency={chartCurrency}
+            />
           )}
         </CardContent>
       </Card>
@@ -424,8 +505,8 @@ export function PnlReport({
           <CardTitle className="flex items-center gap-1.5 text-base">
             Estado por categoría
             <InfoHint label="Cómo leer esta tabla">
-              Cada fila agrupa por categoría padre; si tiene subcategorías, podés desplegarla. Tocá
-              cualquier importe para ver esos movimientos en el listado.
+              Cada celda muestra pesos y, debajo, dólares cuando los hay, sin convertir entre
+              monedas. Tocá cualquier importe para ver esos movimientos en el listado.
             </InfoHint>
           </CardTitle>
           {hasAnyData && (
@@ -436,9 +517,7 @@ export function PnlReport({
                 size="sm"
                 aria-pressed={showVariation}
                 onClick={() => setShowVariation((v) => !v)}
-                className={cn(
-                  showVariation && "border-mist/40 bg-accent text-paper",
-                )}
+                className={cn(showVariation && "border-mist/40 bg-accent text-paper")}
               >
                 Variación %
               </Button>
@@ -455,9 +534,7 @@ export function PnlReport({
               </p>
               {hasActiveFilters && (
                 <Button asChild variant="outline" size="sm">
-                  <Link href={currencyMode === "todo" ? "/informes" : `/informes?moneda=${currencyMode}`}>
-                    Limpiar filtros
-                  </Link>
+                  <Link href="/informes">Limpiar filtros</Link>
                 </Button>
               )}
             </div>
@@ -483,7 +560,6 @@ export function PnlReport({
                   totalLabel="Total ingresos"
                   rows={incomeRows}
                   view={view}
-                  currencyMode={currencyMode}
                   filters={filters}
                   expanded={expanded}
                   toggle={toggle}
@@ -495,7 +571,6 @@ export function PnlReport({
                   totalLabel="Total gastos"
                   rows={expenseRows}
                   view={view}
-                  currencyMode={currencyMode}
                   filters={filters}
                   expanded={expanded}
                   toggle={toggle}
@@ -512,16 +587,22 @@ export function PnlReport({
                       key={m.month}
                       className="text-right font-semibold text-paper tabular-nums"
                     >
-                      {formatAmountCompact(m.netCents, displayCurrency)}
-                      {showVariation && (
-                        <span className="text-muted-foreground block text-[11px] font-normal">
-                          {formatVar(m.netVarPct)}
-                        </span>
-                      )}
+                      <DualCurrencyCell
+                        arsCents={m.netArsCents}
+                        usdCents={m.netUsdCents}
+                        arsVarPct={m.netArsVarPct}
+                        usdVarPct={m.netUsdVarPct}
+                        showVariation={showVariation}
+                        href={null}
+                      />
                     </TableCell>
                   ))}
                   <TableCell className="text-right font-semibold text-paper tabular-nums">
-                    {formatAmountCompact(grandTotal.netCents, displayCurrency)}
+                    <DualCurrencyCell
+                      arsCents={grandTotal.ars.netCents}
+                      usdCents={grandTotal.usd.netCents}
+                      href={null}
+                    />
                   </TableCell>
                 </TableRow>
               </TableFooter>

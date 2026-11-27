@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { fetchSuggestedRate } from "@/lib/rate"
+import { fetchOfficialRate, fetchSuggestedRate, formatOfficialRateLabel } from "@/lib/rate"
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -175,5 +175,42 @@ describe("fetchSuggestedRate", () => {
     await fetchSuggestedRate("blue")
 
     expect(spy.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal)
+  })
+})
+
+describe("fetchOfficialRate", () => {
+  it("consulta siempre /dolares/oficial y devuelve compra, venta y fetchedAt", async () => {
+    const spy = stubFetch(() => ok({ compra: 1100, venta: 1150 }))
+
+    const result = await fetchOfficialRate()
+
+    expect(spy.mock.calls[0][0]).toContain("/dolares/oficial")
+    expect(result).not.toBeNull()
+    expect(result?.compra).toBe(1100)
+    expect(result?.venta).toBe(1150)
+    expect(result?.fetchedAt).toBeInstanceOf(Date)
+  })
+
+  it("devuelve null si la API falla o trae datos inválidos", async () => {
+    stubFetch(() => new Response("boom", { status: 503 }))
+    expect(await fetchOfficialRate()).toBeNull()
+
+    stubFetch(() => ok({ compra: 0, venta: 1150 }))
+    expect(await fetchOfficialRate()).toBeNull()
+  })
+})
+
+describe("formatOfficialRateLabel", () => {
+  it("distingue hoy, ayer y fechas anteriores en hora argentina", () => {
+    const now = new Date("2026-11-27T17:30:00Z") // 14:30 AR
+    expect(formatOfficialRateLabel(new Date("2026-11-27T15:05:00Z"), now)).toBe(
+      "oficial de hoy 12:05",
+    )
+    expect(formatOfficialRateLabel(new Date("2026-11-26T17:30:00Z"), now)).toBe(
+      "oficial de ayer 14:30",
+    )
+    expect(formatOfficialRateLabel(new Date("2026-11-24T17:30:00Z"), now)).toBe(
+      "oficial del 24/11 14:30",
+    )
   })
 })

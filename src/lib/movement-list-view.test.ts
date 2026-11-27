@@ -18,7 +18,6 @@ function mov(id: string, overrides: Partial<MovementForList> = {}): MovementForL
     date: "2026-11-01",
     amountCents: 100_00,
     currency: "ARS",
-    rate: "1",
     createdAt: new Date("2026-11-01T10:00:00Z"),
     installments: [{ amountCents: 100_00, dueDate: "2026-11-01", paid: false }],
     ...overrides,
@@ -54,7 +53,6 @@ describe("summarizeMovementTotals", () => {
     })
     const enUsd = mov("m2", {
       currency: "USD",
-      rate: "1200",
       installments: [{ amountCents: 50_00, dueDate: "2026-11-08", paid: false }],
     })
     expect(summarizeMovementTotals([mixto, enUsd], HOY)).toEqual({
@@ -75,7 +73,6 @@ describe("sortMovements", () => {
     date: "2026-11-15",
     amountCents: 100_00,
     currency: "USD",
-    rate: "1000",
     installments: [{ amountCents: 100_00, dueDate: "2026-11-20", paid: false }],
   })
   const c = mov("c", {
@@ -92,8 +89,8 @@ describe("sortMovements", () => {
     expect(sortMovements([a, b, c], "date").map((m) => m.id)).toEqual(["c", "b", "a"])
   })
 
-  it("por importe consolida a pesos para comparar ARS y USD juntos", () => {
-    expect(sortMovements([a, b, c], "amount").map((m) => m.id)).toEqual(["b", "a", "c"])
+  it("por importe ordena por centavos de mayor a menor sin convertir monedas", () => {
+    expect(sortMovements([a, b, c], "amount").map((m) => m.id)).toEqual(["a", "c", "b"])
   })
 })
 

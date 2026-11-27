@@ -1,5 +1,4 @@
 import { formatMonthLabel, isValidIsoDate, monthKey, addDaysIso, type IsoDate } from "@/lib/dates"
-import { convertToArs } from "@/lib/money"
 import { assertCurrency } from "@/lib/movement-asserts"
 import { summarizeMovementStatus, type MovementStatus } from "@/lib/movement-status"
 
@@ -14,7 +13,6 @@ export type MovementForList = {
   date: IsoDate
   amountCents: number
   currency: string
-  rate: string
   createdAt: Date | number | string
   installments: InstallmentLike[]
 }
@@ -116,11 +114,6 @@ function compareDateDesc(a: MovementForList, b: MovementForList): number {
   return a.id > b.id ? -1 : a.id < b.id ? 1 : 0
 }
 
-function amountInArs(m: MovementForList): number {
-  const currency = assertCurrency(m.currency)
-  return currency === "ARS" ? m.amountCents : convertToArs(m.amountCents, Number(m.rate))
-}
-
 export function sortMovements<T extends MovementForList & { description?: string }>(
   movements: readonly T[],
   sort: MovementSort,
@@ -137,7 +130,7 @@ export function sortMovements<T extends MovementForList & { description?: string
   }
   if (sort === "amount") {
     return copy.sort((a, b) => {
-      const diff = amountInArs(b) - amountInArs(a)
+      const diff = b.amountCents - a.amountCents
       return diff !== 0 ? diff : compareDateDesc(a, b)
     })
   }

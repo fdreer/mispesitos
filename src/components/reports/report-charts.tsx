@@ -61,7 +61,6 @@ const PNL_CONFIG = {
 
 const CASHFLOW_CONFIG = {
   neto: { label: "Neto", color: PULSE_GREEN },
-  saldoReal: { label: "Saldo real", color: SIGNAL_TEAL },
   saldoProyectado: { label: "Saldo proyectado", color: SIGNAL_TEAL },
 } satisfies ChartConfig
 
@@ -111,30 +110,16 @@ export function PnlChart({
 
 export function CashflowChart({
   rows,
-  currency,
 }: {
   rows: CashflowRow[]
-  currency: Currency
 }) {
-  const formatter = makeMoneyFormatter(currency)
-  const validRows = rows.filter((r) => !r.beforeInitialBalance)
-  let lastRealIdx = -1
-  for (let i = 0; i < validRows.length; i++) {
-    if (validRows[i].kind === "real") lastRealIdx = i
-  }
+  const formatter = makeMoneyFormatter("ARS")
 
-  const chartData = validRows.map((r, i) => {
-    const closing = toUnits(r.closingCents)
-    const isReal = r.kind === "real"
-    const isBridge = i === lastRealIdx && validRows.some((x) => x.kind !== "real")
-    return {
-      label: r.label,
-      kind: r.kind,
-      neto: toUnits(r.netCents),
-      saldoReal: isReal ? closing : null,
-      saldoProyectado: !isReal || isBridge ? closing : null,
-    }
-  })
+  const chartData = rows.map((r) => ({
+    label: r.label,
+    neto: toUnits(r.netCents),
+    saldoProyectado: toUnits(r.closingCents),
+  }))
 
   return (
     <ChartContainer config={CASHFLOW_CONFIG} className="aspect-auto h-[260px] w-full">
@@ -156,18 +141,10 @@ export function CashflowChart({
             <Cell
               key={entry.label}
               fill={entry.neto >= 0 ? PULSE_GREEN : CORAL_RED}
-              fillOpacity={entry.kind === "real" ? 0.9 : 0.45}
+              fillOpacity={0.65}
             />
           ))}
         </Bar>
-        <Line
-          type="monotone"
-          dataKey="saldoReal"
-          stroke="var(--color-saldoReal)"
-          strokeWidth={2}
-          dot={{ r: 3 }}
-          connectNulls={false}
-        />
         <Line
           type="monotone"
           dataKey="saldoProyectado"
@@ -175,7 +152,6 @@ export function CashflowChart({
           strokeWidth={2}
           strokeDasharray="5 5"
           dot={{ r: 3 }}
-          connectNulls={false}
         />
       </ComposedChart>
     </ChartContainer>

@@ -4,6 +4,7 @@ import { useState, type ComponentProps } from "react"
 import { ChevronRight } from "lucide-react"
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from "recharts"
 
+import { Segmented } from "@/components/segmented"
 import {
   ChartConfig,
   ChartContainer,
@@ -14,7 +15,8 @@ import {
 } from "@/components/ui/chart"
 import { categoryHue, hueColor } from "@/lib/category-color"
 import type { SpendGroup } from "@/lib/category-tree"
-import { formatAxisPesos, formatMoney } from "@/lib/money"
+import type { MonthlyBarPoint } from "@/lib/dashboard-view"
+import { formatAxisPesos, formatMoney, type Currency } from "@/lib/money"
 import { cn } from "@/lib/utils"
 
 const FOG = "#8a8f98"
@@ -22,26 +24,27 @@ const SIGNAL_TEAL = "#02b8cc"
 const PULSE_GREEN = "#27a644"
 const CORAL_RED = "#eb5757"
 
-const toPesos = (cents: number) => cents / 100
-const tip = (value: number) => formatMoney(Math.round(value * 100), "ARS")
+const toUnits = (cents: number) => cents / 100
 
 const AXIS_TICK = { fill: FOG, fontSize: 12 } as const
 
-const moneyTooltipFormatter: NonNullable<ComponentProps<typeof ChartTooltipContent>["formatter"]> = (
-  value,
-  name,
-  item,
-) => {
-  const color = (item.payload as { fill?: string } | undefined)?.fill ?? item.color
-  return (
-    <>
-      <div className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ backgroundColor: color }} />
-      <div className="flex flex-1 items-center justify-between leading-none">
-        <span className="text-muted-foreground">{name}</span>
-        <span className="font-mono font-medium text-foreground tabular-nums">{tip(Number(value))}</span>
-      </div>
-    </>
-  )
+type TooltipFormatter = NonNullable<ComponentProps<typeof ChartTooltipContent>["formatter"]>
+
+function makeMoneyTooltipFormatter(currency: Currency): TooltipFormatter {
+  return function MoneyTooltip(value, name, item) {
+    const color = (item.payload as { fill?: string } | undefined)?.fill ?? item.color
+    return (
+      <>
+        <div className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ backgroundColor: color }} />
+        <div className="flex flex-1 items-center justify-between leading-none">
+          <span className="text-muted-foreground">{name}</span>
+          <span className="font-mono font-medium text-foreground tabular-nums">
+            {formatMoney(Math.round(Number(value) * 100), currency)}
+          </span>
+        </div>
+      </>
+    )
+  }
 }
 
 const PROJECTION_CONFIG = {
@@ -60,9 +63,10 @@ export function ProjectionChart({
 }: {
   data: { month: string; arsCents: number }[]
 }) {
+  const formatter = makeMoneyTooltipFormatter("ARS")
   return (
     <ChartContainer config={PROJECTION_CONFIG} className="aspect-auto h-[220px] w-full">
-      <LineChart data={data.map((d) => ({ month: d.month, saldo: toPesos(d.arsCents) }))}>
+      <LineChart data={data.map((d) => ({ month: d.month, saldo: toUnits(d.arsCents) }))}>
         <CartesianGrid vertical={false} stroke="var(--border)" />
         <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} tick={AXIS_TICK} />
         <YAxis
@@ -72,7 +76,7 @@ export function ProjectionChart({
           tick={AXIS_TICK}
           tickFormatter={formatAxisPesos}
         />
-        <ChartTooltip content={<ChartTooltipContent formatter={moneyTooltipFormatter} />} />
+        <ChartTooltip content={<ChartTooltipContent formatter={formatter} />} />
         <Line
           type="monotone"
           dataKey="saldo"
@@ -88,8 +92,16 @@ export function ProjectionChart({
 const groupColor = (g: { name: string; hue: number | null }) =>
   hueColor(g.hue ?? categoryHue(g.name))
 
-export function CategoryPie({ data }: { data: SpendGroup[] }) {
-  if (data.length === 0) {
+export function CategoryPie({
+  data,
+}: {
+  data: { ars: SpendGroup[]; usd: SpendGroup[] }
+}) {
+  const [currency, setCurrency] = useState<Currency>("ARS")
+  const active = currency === "USD" ? data.usd : data.ars
+  const hasAny = data.ars.length > 0 || data.usd.length > 0
+
+  if (!hasAny) {
     return (
       <p className="text-muted-foreground py-8 text-center text-sm">
         Todavía no pagaste nada este mes.
@@ -97,31 +109,60 @@ export function CategoryPie({ data }: { data: SpendGroup[] }) {
     )
   }
 
-  const chartData = data.map((d) => ({
+  const formatter = makeMoneyTooltipFormatter(currency)
+  const chartData = active.map((d) => ({
     name: d.name,
-    value: toPesos(d.arsCents),
+    value: toUnits(d.arsCents),
     fill: groupColor(d),
   }))
-  const total = data.reduce((acc, d) => acc + d.arsCents, 0)
+  const total = active.reduce((acc, d) => acc + d.arsCents, 0)
 
   return (
     <div className="space-y-3">
-      <ChartContainer config={PIE_CONFIG} className="aspect-auto h-[200px] w-full">
-        <PieChart>
-          <Pie data={chartData} dataKey="value" nameKey="name" outerRadius={80} stroke="var(--card)">
-            {chartData.map((d) => (
-              <Cell key={d.name} fill={d.fill} />
-            ))}
-          </Pie>
-          <ChartTooltip content={<ChartTooltipContent formatter={moneyTooltipFormatter} />} />
-        </PieChart>
-      </ChartContainer>
-      <CategoryBreakdown data={data} total={total} />
+      <div className="flex justify-end">
+        <Segmented
+          label="Moneda de gastos por categoría"
+          size="sm"
+          value={currency}
+          onChange={setCurrency}
+          options={[
+            { value: "ARS", label: "$" },
+            { value: "USD", label: "US$" },
+          ]}
+        />
+      </div>
+      {active.length === 0 ? (
+        <p className="text-muted-foreground py-8 text-center text-sm">
+          Sin gastos pagados en {currency === "USD" ? "dólares" : "pesos"} este mes.
+        </p>
+      ) : (
+        <>
+          <ChartContainer config={PIE_CONFIG} className="aspect-auto h-[200px] w-full">
+            <PieChart>
+              <Pie data={chartData} dataKey="value" nameKey="name" outerRadius={80} stroke="var(--card)">
+                {chartData.map((d) => (
+                  <Cell key={d.name} fill={d.fill} />
+                ))}
+              </Pie>
+              <ChartTooltip content={<ChartTooltipContent formatter={formatter} />} />
+            </PieChart>
+          </ChartContainer>
+          <CategoryBreakdown data={active} total={total} currency={currency} />
+        </>
+      )}
     </div>
   )
 }
 
-function CategoryBreakdown({ data, total }: { data: SpendGroup[]; total: number }) {
+function CategoryBreakdown({
+  data,
+  total,
+  currency,
+}: {
+  data: SpendGroup[]
+  total: number
+  currency: Currency
+}) {
   const [open, setOpen] = useState<Set<string>>(new Set())
   const toggle = (name: string) =>
     setOpen((prev) => {
@@ -148,7 +189,7 @@ function CategoryBreakdown({ data, total }: { data: SpendGroup[]; total: number 
             <span className="min-w-0 flex-1 truncate text-left">{group.name}</span>
             <span className="text-muted-foreground tabular-nums">{percent(group.arsCents)}%</span>
             <span className="w-28 text-right font-mono tabular-nums">
-              {formatMoney(group.arsCents, "ARS")}
+              {formatMoney(group.arsCents, currency)}
             </span>
           </>
         )
@@ -181,7 +222,7 @@ function CategoryBreakdown({ data, total }: { data: SpendGroup[]; total: number 
                     <span className="min-w-0 flex-1 truncate">{child.name}</span>
                     <span className="tabular-nums">{percent(child.arsCents)}%</span>
                     <span className="w-28 text-right font-mono tabular-nums">
-                      {formatMoney(child.arsCents, "ARS")}
+                      {formatMoney(child.arsCents, currency)}
                     </span>
                   </li>
                 ))}
@@ -197,33 +238,49 @@ function CategoryBreakdown({ data, total }: { data: SpendGroup[]; total: number 
 export function MonthlyBars({
   data,
 }: {
-  data: { month: string; incomeArsCents: number; expenseArsCents: number }[]
+  data: { ars: MonthlyBarPoint[]; usd: MonthlyBarPoint[] }
 }) {
+  const [currency, setCurrency] = useState<Currency>("ARS")
+  const active = currency === "USD" ? data.usd : data.ars
+  const formatter = makeMoneyTooltipFormatter(currency)
+
   return (
-    <ChartContainer config={MONTHLY_CONFIG} className="aspect-auto h-[220px] w-full">
-      <BarChart
-        data={data.map((d) => ({
-          month: d.month,
-          Ingresos: toPesos(d.incomeArsCents),
-          Egresos: toPesos(d.expenseArsCents),
-        }))}
-      >
-        <CartesianGrid vertical={false} stroke="var(--border)" />
-        <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} tick={AXIS_TICK} />
-        <YAxis
-          width={80}
-          tickLine={false}
-          axisLine={false}
-          tick={AXIS_TICK}
-          tickFormatter={formatAxisPesos}
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <Segmented
+          label="Moneda de ingresos y gastos"
+          size="sm"
+          value={currency}
+          onChange={setCurrency}
+          options={[
+            { value: "ARS", label: "$" },
+            { value: "USD", label: "US$" },
+          ]}
         />
-        <ChartTooltip content={<ChartTooltipContent formatter={moneyTooltipFormatter} />} />
-        <ChartLegend content={<ChartLegendContent />} />
-        {/* Acá el verde y el rojo son datos, no cuerpo de texto: la regla de
-            "los importes van en gris" no aplica a una serie de un gráfico. */}
-        <Bar dataKey="Ingresos" fill="var(--color-Ingresos)" radius={4} />
-        <Bar dataKey="Egresos" fill="var(--color-Egresos)" radius={4} />
-      </BarChart>
-    </ChartContainer>
+      </div>
+      <ChartContainer config={MONTHLY_CONFIG} className="aspect-auto h-[220px] w-full">
+        <BarChart
+          data={active.map((d) => ({
+            month: d.month,
+            Ingresos: toUnits(d.incomeCents),
+            Egresos: toUnits(d.expenseCents),
+          }))}
+        >
+          <CartesianGrid vertical={false} stroke="var(--border)" />
+          <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} tick={AXIS_TICK} />
+          <YAxis
+            width={80}
+            tickLine={false}
+            axisLine={false}
+            tick={AXIS_TICK}
+            tickFormatter={formatAxisPesos}
+          />
+          <ChartTooltip content={<ChartTooltipContent formatter={formatter} />} />
+          <ChartLegend content={<ChartLegendContent />} />
+          <Bar dataKey="Ingresos" fill="var(--color-Ingresos)" radius={4} />
+          <Bar dataKey="Egresos" fill="var(--color-Egresos)" radius={4} />
+        </BarChart>
+      </ChartContainer>
+    </div>
   )
 }

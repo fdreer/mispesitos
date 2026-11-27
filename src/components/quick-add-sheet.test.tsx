@@ -65,7 +65,6 @@ describe("QuickAddSheet", () => {
         cards={[]}
         expenseSuggestions={[]}
         incomeSuggestions={[]}
-        suggestedRate={1200}
         today="2026-11-26"
       />,
     )
@@ -88,7 +87,6 @@ describe("QuickAddSheet", () => {
         cards={[]}
         expenseSuggestions={[]}
         incomeSuggestions={[]}
-        suggestedRate={1200}
         today="2026-11-26"
       />,
     )

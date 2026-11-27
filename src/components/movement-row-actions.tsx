@@ -65,14 +65,9 @@ export function MovementRowActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Sin cotización sugerida: editando manda el TC con el que se guardó el
-          movimiento, que es el del día en que ocurrió (ver `MovementForm`).
-          Pedirle una sugerencia a dolarapi por cada fila sería una llamada de
-          red para un dato que este formulario no va a usar. */}
       <MovementFormDialog
         kind={kind}
         categories={categories}
-        suggestedRate={null}
         today={today}
         movement={movement}
         cards={cards}

@@ -23,7 +23,6 @@ Element.prototype.scrollIntoView ??= () => {}
 const DEFAULTS = {
   initialBalanceArs: "1000",
   initialBalanceUsd: "0",
-  initialBalanceUsdRate: "0",
   initialBalanceDate: "2026-08-10",
   preferredRate: "blue",
 }

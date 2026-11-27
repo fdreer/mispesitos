@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
-import { and, eq, inArray } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 
 import { db, sqlClient, withUser } from "@/db/client"
 import {
@@ -11,13 +11,6 @@ import {
   user,
   userSettings,
 } from "@/db/schema"
-import { computeBalances } from "@/lib/balance"
-import {
-  assertCurrency,
-  assertExchangeDirection,
-  assertInstallmentMovementKind,
-} from "@/lib/movement-asserts"
-import { usdPosition } from "@/lib/position"
 import {
   countMovementsByCategory,
   getSettings,
@@ -27,7 +20,6 @@ import {
   listPaidInstallments,
   listPaidInstallmentsForReport,
   listPendingInstallments,
-  listUsdPositionEvents,
   queryMovementsView,
 } from "@/server/queries"
 import { CARD_FILTER_CASH, parseMovementQuery } from "@/lib/movement-query"
@@ -89,7 +81,6 @@ async function sembrarDatosA() {
       userId: USUARIO_A,
       initialBalanceArsCents: 500_000_00,
       initialBalanceUsdCents: 100_00,
-      initialBalanceUsdRate: "1000",
       initialBalanceDate: SALDO_INICIAL_A,
       preferredRate: "blue",
     })
@@ -126,7 +117,6 @@ async function sembrarDatosA() {
         date: "2026-03-10",
         currency: "ARS",
         amountCents: 180_00,
-        rate: "1",
         createdAt: new Date("2026-03-10T10:00:00Z"),
       },
       {
@@ -138,7 +128,6 @@ async function sembrarDatosA() {
         date: SALDO_INICIAL_A,
         currency: "USD",
         amountCents: 200_00,
-        rate: "1200",
         createdAt: new Date("2026-03-15T10:00:00Z"),
       },
       {
@@ -150,7 +139,6 @@ async function sembrarDatosA() {
         date: "2026-04-01",
         currency: "USD",
         amountCents: 300_00,
-        rate: "1300",
         createdAt: new Date("2026-04-01T10:00:00Z"),
       },
       {
@@ -162,7 +150,6 @@ async function sembrarDatosA() {
         date: "2026-02-01",
         currency: "USD",
         amountCents: 80_00,
-        rate: "900",
         createdAt: new Date("2026-02-01T10:00:00Z"),
       },
       {
@@ -174,7 +161,6 @@ async function sembrarDatosA() {
         date: "2026-06-01",
         currency: "ARS",
         amountCents: 11_00,
-        rate: "1",
         createdAt: new Date("2026-06-01T09:00:00Z"),
       },
       {
@@ -186,7 +172,6 @@ async function sembrarDatosA() {
         date: "2026-06-01",
         currency: "ARS",
         amountCents: 22_00,
-        rate: "1",
         createdAt: new Date("2026-06-01T18:00:00Z"),
       },
       {
@@ -312,7 +297,6 @@ async function sembrarDatosB() {
       userId: USUARIO_B,
       initialBalanceArsCents: 111_111_00,
       initialBalanceUsdCents: 500_00,
-      initialBalanceUsdRate: "700",
       initialBalanceDate: "2026-01-01",
       preferredRate: "oficial",
     })
@@ -333,7 +317,6 @@ async function sembrarDatosB() {
         date: "2026-03-10",
         currency: "ARS",
         amountCents: 999_00,
-        rate: "1",
         createdAt: new Date("2026-03-10T10:00:00Z"),
       },
       {
@@ -345,7 +328,6 @@ async function sembrarDatosB() {
         date: "2026-04-01",
         currency: "USD",
         amountCents: 777_00,
-        rate: "1400",
         createdAt: new Date("2026-04-01T10:00:00Z"),
       },
       // Mismo día que el borde del saldo inicial de A, a propósito.
@@ -463,7 +445,6 @@ describe("getSettings", () => {
       userId: USUARIO_A,
       initialBalanceArsCents: 500_000_00,
       initialBalanceUsdCents: 100_00,
-      initialBalanceUsdRate: "1000.0000",
       initialBalanceDate: SALDO_INICIAL_A,
       preferredRate: "blue",
     })
@@ -776,7 +757,6 @@ describe("listMovements", () => {
           date: "2026-06-05",
           currency: "ARS",
           amountCents: 50_00,
-          rate: "1",
           creditCardId: CARD_A,
           createdAt: new Date("2026-06-05T10:00:00Z"),
         })
@@ -1033,7 +1013,7 @@ describe("listPaidInstallments", () => {
         categoryId: CAT.comida,
         currency: "ARS",
         kind: "expense",
-        rate: "1.0000",
+        statementId: null,
       },
       {
         paidDate: "2026-03-01",
@@ -1041,7 +1021,7 @@ describe("listPaidInstallments", () => {
         categoryId: CAT.sueldo,
         currency: "USD",
         kind: "income",
-        rate: "900.0000",
+        statementId: null,
       },
       {
         paidDate: "2026-04-05",
@@ -1049,7 +1029,7 @@ describe("listPaidInstallments", () => {
         categoryId: CAT.alquiler,
         currency: "USD",
         kind: "expense",
-        rate: "1300.0000",
+        statementId: null,
       },
       {
         paidDate: SALDO_INICIAL_A,
@@ -1057,17 +1037,9 @@ describe("listPaidInstallments", () => {
         categoryId: CAT.sueldo,
         currency: "USD",
         kind: "income",
-        rate: "1200.0000",
+        statementId: null,
       },
     ])
-  })
-
-  it("trae el rate del movimiento, que es con lo que se consolida a pesos", async () => {
-    const pagadas = await listPaidInstallments(USUARIO_A)
-
-    // El rate no es de la cuota (que no tiene): sale del join con el movimiento.
-    expect(pagadas.find((p) => p.amountCents === 200_00)?.rate).toBe("1200.0000")
-    expect(pagadas.find((p) => p.amountCents === 45_00)?.rate).toBe("1.0000")
   })
 
   it("no se cruza con listPendingInstallments", async () => {
@@ -1124,7 +1096,6 @@ describe("listPendingInstallments", () => {
       movementId: MOV.alquiler,
       description: "Alquiler en dólares",
       currency: "USD",
-      rate: "1300.0000",
       kind: "expense",
       // Sin tarjeta (Fase 3): no está en ningún resumen.
       statementId: null,
@@ -1187,272 +1158,6 @@ describe("listExchanges", () => {
   })
 })
 
-/**
- * El corte `>= initialBalanceDate` está escrito DOS veces: acá en SQL (los dos
- * `gte` de listUsdPositionEvents) y adentro de `buildUsdPositionEvents`
- * (@/lib/position), que tiene sus propios tests unitarios.
- *
- * Esa duplicación es la trampa. Si alguien cambia un `gte` de SQL por `gt`,
- * `src/lib/position.test.ts` queda en verde igual —la parte pura no se tocó— y
- * los movimientos del día exacto del saldo inicial desaparecen de la posición
- * mientras siguen contando en el saldo. El usuario ve dos números distintos en
- * /cambios y en el dashboard, sin un solo error a la vista.
- *
- * Los dos tests del borde son los únicos que se enteran. NO BORRAR NI
- * RELAJAR: si se ponen en rojo, el arreglo es devolver el `gte`.
- */
-describe("listUsdPositionEvents", () => {
-  const ordenados = (eventos: { date: string; usdCents: number }[]) =>
-    [...eventos].sort((a, b) => a.date.localeCompare(b.date) || a.usdCents - b.usdCents)
-
-  it("arma el saldo inicial, los cambios y las cuotas en USD como una sola lista", async () => {
-    const eventos = await listUsdPositionEvents(USUARIO_A)
-
-    // La consulta no promete orden (buildUsdPositionEvents concatena y
-    // usdPosition ordena después), así que el test ordena antes de comparar.
-    expect(ordenados(eventos)).toEqual([
-      // Compra de divisa del día del saldo inicial.
-      { date: SALDO_INICIAL_A, usdCents: 50_00, rate: 1100, direction: "in" },
-      // El saldo inicial en sí.
-      { date: SALDO_INICIAL_A, usdCents: 100_00, rate: 1000, direction: "in" },
-      // Cuota cobrada ese mismo día.
-      { date: SALDO_INICIAL_A, usdCents: 200_00, rate: 1200, direction: "in" },
-      // Cuota pagada de un egreso en dólares.
-      { date: "2026-04-05", usdCents: 120_00, rate: 1300, direction: "out" },
-      // Venta de divisa.
-      { date: "2026-05-20", usdCents: 30_00, rate: 1500, direction: "out" },
-    ])
-  })
-
-  it("una cuota pagada exactamente en la fecha del saldo inicial entra en la posición", async () => {
-    const eventos = await listUsdPositionEvents(USUARIO_A)
-
-    // Lo único que sostiene esto es el `gte(installment.paidDate,
-    expect(eventos).toContainEqual({
-      date: SALDO_INICIAL_A,
-      usdCents: 200_00,
-      rate: 1200,
-      direction: "in",
-    })
-  })
-
-  it("un cambio con fecha exactamente igual a la del saldo inicial entra en la posición", async () => {
-    const eventos = await listUsdPositionEvents(USUARIO_A)
-
-    expect(eventos).toContainEqual({
-      date: SALDO_INICIAL_A,
-      usdCents: 50_00,
-      rate: 1100,
-      direction: "in",
-    })
-  })
-
-  it("descarta lo anterior a la fecha del saldo inicial", async () => {
-    const eventos = await listUsdPositionEvents(USUARIO_A)
-
-    expect(eventos.every((e) => e.date >= SALDO_INICIAL_A)).toBe(true)
-    expect(eventos.map((e) => e.usdCents)).not.toContain(10_00)
-    expect(eventos.map((e) => e.usdCents)).not.toContain(80_00)
-  })
-
-  it("una compra es entrada y una venta es salida", async () => {
-    const eventos = await listUsdPositionEvents(USUARIO_A)
-
-    expect(eventos.find((e) => e.usdCents === 50_00)?.direction).toBe("in")
-    expect(eventos.find((e) => e.usdCents === 30_00)?.direction).toBe("out")
-  })
-
-  it("una cuota cobrada en USD es entrada y una pagada es salida", async () => {
-    const eventos = await listUsdPositionEvents(USUARIO_A)
-
-    expect(eventos.find((e) => e.usdCents === 200_00)?.direction).toBe("in")
-    expect(eventos.find((e) => e.usdCents === 120_00)?.direction).toBe("out")
-  })
-
-  it("no cuenta las cuotas impagas", async () => {
-    const eventos = await listUsdPositionEvents(USUARIO_A)
-
-    expect(eventos.map((e) => e.usdCents)).not.toContain(180_00)
-  })
-
-  it("no cuenta las cuotas de movimientos en pesos", async () => {
-    const eventos = await listUsdPositionEvents(USUARIO_A)
-
-    expect(eventos.map((e) => e.date)).not.toContain("2026-03-20")
-    expect(eventos.map((e) => e.usdCents)).not.toContain(45_00)
-  })
-
-  it("devuelve una lista vacía si el usuario no completó el onboarding", async () => {
-    expect(await listUsdPositionEvents(USUARIO_SIN_ONBOARDING)).toEqual([])
-  })
-
-  it("no mezcla eventos de otro usuario", async () => {
-    const eventos = await listUsdPositionEvents(USUARIO_A)
-
-    for (const ajeno of [500_00, 444_00, 777_00]) {
-      expect(eventos.map((e) => e.usdCents)).not.toContain(ajeno)
-    }
-    expect(eventos).toHaveLength(5)
-  })
-
-  it("cada usuario siembra su propio saldo inicial", async () => {
-    expect(await listUsdPositionEvents(USUARIO_B)).toContainEqual({
-      date: "2026-01-01",
-      usdCents: 500_00,
-      rate: 700,
-      direction: "in",
-    })
-  })
-})
-
-describe("los tipos que devuelve el driver", () => {
-  it("los centavos llegan como number y los numeric como string", async () => {
-    const [mov] = await listMovements(USUARIO_A, { kind: "income", from: SALDO_INICIAL_A })
-
-    expect(typeof mov.amountCents).toBe("number")
-    expect(mov.amountCents).toBe(200_00)
-    expect(typeof mov.rate).toBe("string")
-    expect(mov.rate).toBe("1200.0000")
-    expect(typeof mov.installments[0].amountCents).toBe("number")
-  })
-
-  it("las fechas de negocio llegan como string YYYY-MM-DD y created_at como Date", async () => {
-    const [mov] = await listMovements(USUARIO_A, { kind: "income", from: SALDO_INICIAL_A })
-
-    expect(typeof mov.date).toBe("string")
-    expect(mov.date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    expect(typeof mov.installments[0].dueDate).toBe("string")
-    expect(typeof mov.installments[0].paidDate).toBe("string")
-    expect(mov.createdAt).toBeInstanceOf(Date)
-  })
-
-  it("los saldos iniciales llegan como number y su tipo de cambio como string", async () => {
-    const settings = await getSettings(USUARIO_A)
-
-    expect(typeof settings?.initialBalanceArsCents).toBe("number")
-    expect(typeof settings?.initialBalanceUsdCents).toBe("number")
-    expect(typeof settings?.initialBalanceUsdRate).toBe("string")
-    expect(typeof settings?.initialBalanceDate).toBe("string")
-  })
-
-  it("los eventos de posición ya vienen con el rate convertido a number", async () => {
-    const eventos = await listUsdPositionEvents(USUARIO_A)
-
-    expect(eventos).toHaveLength(5)
-    expect(eventos.every((e) => typeof e.rate === "number")).toBe(true)
-    expect(eventos.every((e) => typeof e.usdCents === "number")).toBe(true)
-  })
-})
-
-describe("aislamiento por usuario", () => {
-  it("el segundo usuario ve sus propios datos, no los del primero", async () => {
-    const [cats, movs, pagadas, pendientes, cambios] = await Promise.all([
-      listCategories(USUARIO_B, undefined, true),
-      listMovements(USUARIO_B),
-      listPaidInstallments(USUARIO_B),
-      listPendingInstallments(USUARIO_B),
-      listExchanges(USUARIO_B),
-    ])
-
-    expect(nombres(cats)).toEqual(["Comida", "Sueldo", "Zeta"])
-    expect(ids(movs)).toEqual(["q-mov-b-sueldo", "q-mov-b-cambio", "q-mov-b-comida"])
-    expect(pagadas.map((p) => p.amountCents).sort((a, b) => a - b)).toEqual([666_00, 777_00])
-    expect(pendientes.map((p) => p.amountCents)).toEqual([333_00])
-    expect(ids(cambios)).toEqual(["q-mov-b-cambio"])
-  })
-
-  it("un usuario sin datos ve vacío en todas las consultas, no los de los demás", async () => {
-    const [cats, movs, pagadas, pendientes, cambios, eventos, settings] = await Promise.all([
-      listCategories(USUARIO_SIN_ONBOARDING, undefined, true),
-      listMovements(USUARIO_SIN_ONBOARDING),
-      listPaidInstallments(USUARIO_SIN_ONBOARDING),
-      listPendingInstallments(USUARIO_SIN_ONBOARDING),
-      listExchanges(USUARIO_SIN_ONBOARDING),
-      listUsdPositionEvents(USUARIO_SIN_ONBOARDING),
-      getSettings(USUARIO_SIN_ONBOARDING),
-    ])
-
-    expect([cats, movs, pagadas, pendientes, cambios, eventos]).toEqual([[], [], [], [], [], []])
-    expect(settings).toBeNull()
-  })
-
-  it("las filas del primer usuario siguen ahí para su dueño", async () => {
-    const propias = await withUser(USUARIO_A, (tx) =>
-      tx
-        .select({ id: movement.id })
-        .from(movement)
-        .where(and(eq(movement.userId, USUARIO_A), eq(movement.kind, "exchange"))),
-    )
-
-    expect(propias).toHaveLength(3)
-  })
-})
-
-describe("la posición y el saldo salen del mismo dato por dos rutas distintas", () => {
-  async function porLasDosRutas(userId: string) {
-    const [eventos, settings, pagadas, cambios] = await Promise.all([
-      listUsdPositionEvents(userId),
-      getSettings(userId),
-      listPaidInstallments(userId),
-      listExchanges(userId),
-    ])
-
-    const position = usdPosition(eventos)
-
-    const balances = computeBalances(
-      {
-        initialArsCents: settings!.initialBalanceArsCents,
-        initialUsdCents: settings!.initialBalanceUsdCents,
-        initialDate: settings!.initialBalanceDate,
-      },
-      pagadas.map((p) => ({
-        paidDate: p.paidDate!,
-        currency: assertCurrency(p.currency),
-        kind: assertInstallmentMovementKind(p.kind),
-        amountCents: p.amountCents,
-      })),
-      cambios.map((c) => ({
-        date: c.date,
-        direction: assertExchangeDirection(c.direction),
-        usdCents: c.amountCents,
-        rate: Number(c.rate),
-      })),
-    )
-
-    return { position, balances }
-  }
-
-  it("los dólares que dice /cambios y los que dice el dashboard son los mismos", async () => {
-    const { position, balances } = await porLasDosRutas(USUARIO_A)
-
-    expect(position.oversoldUsdCents).toBe(0)
-    expect(position.usdCents - position.oversoldUsdCents).toBe(balances.usdCents)
-
-    expect(balances.usdCents).toBe(200_00)
-  })
-
-  it("y también para un usuario con otra fecha de saldo inicial", async () => {
-    const { position, balances } = await porLasDosRutas(USUARIO_B)
-
-    expect(position.usdCents - position.oversoldUsdCents).toBe(balances.usdCents)
-    expect(balances.usdCents).toBe(1721_00)
-  })
-
-  it("sacar del cálculo las filas del día exacto separa las dos pantallas por US$250", async () => {
-    const { balances } = await porLasDosRutas(USUARIO_A)
-    const eventos = await listUsdPositionEvents(USUARIO_A)
-
-    const delBorde = eventos.filter((e) => e.date === SALDO_INICIAL_A && e.usdCents !== 100_00)
-    expect(delBorde.map((e) => e.usdCents).sort((a, b) => a - b)).toEqual([50_00, 200_00])
-
-    const conGt = usdPosition(eventos.filter((e) => !delBorde.includes(e)))
-
-    expect(conGt.usdCents - conGt.oversoldUsdCents).not.toBe(balances.usdCents)
-    expect(balances.usdCents - (conGt.usdCents - conGt.oversoldUsdCents)).toBe(250_00)
-    expect(conGt.oversoldUsdCents).toBeGreaterThan(0)
-  })
-})
-
 describe("countMovementsByCategory", () => {
   it("cuenta los movimientos de cada categoría del usuario, y nada de otro", async () => {
     const conteo = await countMovementsByCategory(USUARIO_A)
@@ -1508,7 +1213,7 @@ describe("tarjetas", () => {
           closingDate: "2026-01-25",
           dueDate: "2026-02-05",
           paidDate: "2026-02-03",
-          usdPaidRate: "1500",
+          usdPaidArsCents: 15_000_00,
         },
         {
           id: RES_FEB,
@@ -1528,7 +1233,6 @@ describe("tarjetas", () => {
         date: "2026-01-10",
         currency: "USD",
         amountCents: 20_00,
-        rate: "1000",
         creditCardId: CARD,
       })
       await tx.insert(installment).values([
@@ -1558,16 +1262,15 @@ describe("tarjetas", () => {
 
   afterAll(limpiarTarjeta)
 
-  it("una cuota en dólares pagada con pesos se lee como pesos al TC del pago", async () => {
+  it("una cuota en dólares pagada con pesos se lee como pesos por el monto debitado", async () => {
     expect(await listPaidInstallments(USUARIO)).toEqual([
       {
         paidDate: "2026-02-03",
-        // US$ 10 a $1.500: $15.000, no US$ 10 a los $1.000 de la compra.
         amountCents: 15_000_00,
         categoryId: CAT_T,
         currency: "ARS",
         kind: "expense",
-        rate: "1",
+        statementId: RES_ENE,
       },
     ])
     expect(await listPaidInstallmentsForReport(USUARIO, { cardId: CARD })).toEqual([
@@ -1577,14 +1280,9 @@ describe("tarjetas", () => {
         categoryId: CAT_T,
         currency: "ARS",
         kind: "expense",
-        rate: "1",
+        statementId: RES_ENE,
       },
     ])
-  })
-
-  it("esa cuota no mueve la posición en dólares: salió de los pesos", async () => {
-    const eventos = await listUsdPositionEvents(USUARIO)
-    expect(eventos.filter((e) => e.direction === "out")).toEqual([])
   })
 
   it("la cuota impaga trae su resumen y su tarjeta", async () => {

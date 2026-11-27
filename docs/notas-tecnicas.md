@@ -92,5 +92,5 @@ El script se ejecuta en cada `docker compose up` (servicio `migrate`) y con `pnp
 - Se ignoran `coverage/` (generado por `pnpm test:coverage`) y worktrees locales de agentes para que el linter no analice archivos generados ni copias auxiliares.
 
 ### Vitest (`vitest.config.ts`, `vitest.db.config.ts`)
-- **Suite unitaria (`pnpm test`):** incluye `*.test.ts` y `*.test.tsx`, excluyendo `*.db.test.ts` por sufijo (no por directorio). Corre en `node` por defecto; los tests de componentes declaran `// @vitest-environment jsdom` en su primera línea. El timeout es de 20 s para dar margen a pruebas exhaustivas (`splitAmount`, `usdPosition`) en máquinas con carga.
+- **Suite unitaria (`pnpm test`):** incluye `*.test.ts` y `*.test.tsx`, excluyendo `*.db.test.ts` por sufijo (no por directorio). Corre en `node` por defecto; los tests de componentes declaran `// @vitest-environment jsdom` en su primera línea. El timeout es de 20 s para dar margen a pruebas exhaustivas (`splitAmount`) en máquinas con carga.
 - **Suite de base de datos (`pnpm test:db`):** corre los `*.db.test.ts` en serie contra Postgres real (comparten tablas) con timeout de 30 s. Mapea `"server-only"` a un módulo vacío (imitando la condición `react-server` de Next.js) para poder importar `src/db/client.ts` en Vitest.

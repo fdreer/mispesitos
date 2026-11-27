@@ -182,7 +182,6 @@ async function sembrarDatosDeB() {
       userId: USUARIO_B,
       initialBalanceArsCents: 777_777_00,
       initialBalanceUsdCents: 333_00,
-      initialBalanceUsdRate: "888.5",
       initialBalanceDate: "2026-02-02",
       preferredRate: "oficial",
     })
@@ -198,7 +197,6 @@ async function sembrarDatosDeB() {
       date: "2026-03-03",
       currency: "ARS",
       amountCents: 555_00,
-      rate: "1",
     })
     await tx.insert(installment).values({
       id: INS_B,
@@ -216,9 +214,11 @@ const AJUSTES_DE_B = {
   userId: USUARIO_B,
   initialBalanceArsCents: 777_777_00,
   initialBalanceUsdCents: 333_00,
-  initialBalanceUsdRate: "888.5000",
   initialBalanceDate: "2026-02-02",
   preferredRate: "oficial",
+  lastOfficialBuy: null,
+  lastOfficialSell: null,
+  lastOfficialAt: null,
 }
 
 /**
@@ -300,7 +300,6 @@ const ALTA_VALIDA: Record<string, CampoDeFormulario> = {
   date: "2026-04-15",
   currency: "USD",
   amountCents: "100",
-  rate: "1000",
   installmentAmount: ["10000"],
   installmentDueDate: ["2026-05-15"],
 }
@@ -314,13 +313,7 @@ describe("createMovement", () => {
       formulario({
         ...ALTA_VALIDA,
         description: "Notebook",
-        // "1.234,56" es el formato argentino: mil doscientos treinta y cuatro
-        // con cincuenta y seis, no uno con veintitrés.
         amountCents: "1.234,56",
-        rate: "1.450,7891",
-        // La cuota YA viaja en centavos (la arma buildInstallments del lado del
-        // cliente) y tiene que sumar el total: si no, el alta se rechaza. Es
-        // exactamente lo que pasó la primera vez que se escribió este test.
         installmentAmount: ["123456"],
       }),
     )
@@ -335,34 +328,12 @@ describe("createMovement", () => {
       categoryId: CAT_A_COMIDA,
       date: "2026-04-15",
       currency: "USD",
-      // Centavos enteros: 1.234,56 pesos son 123456 centavos, no 1234.56 ni 123.
       amountCents: 123456,
-      // El numeric viaja como string y con la escala de la columna (4 decimales).
-      rate: "1450.7891",
+      rate: null,
       direction: null,
     })
     expect(typeof fila.amountCents).toBe("number")
-    expect(typeof fila.rate).toBe("string")
     expect(fila.id).toMatch(UUID_V4)
-  })
-
-  it("un movimiento en pesos con un tipo de cambio distinto de 1 se rechaza en el campo del TC", async () => {
-    comoUsuario(USUARIO_A)
-
-    const resultado = await createMovement(
-      null,
-      formulario({
-        ...ALTA_VALIDA,
-        description: "Pesos con TC raro",
-        currency: "ARS",
-        rate: "1.450",
-      }),
-    )
-
-    expect(rechazo(resultado).fieldErrors?.rate).toEqual([
-      "Un movimiento en pesos siempre lleva tipo de cambio 1.",
-    ])
-    expect(await movimientosPorDescripcion(USUARIO_A, "Pesos con TC raro")).toEqual([])
   })
 
   it("las cuotas quedan numeradas en el orden en que se mandaron, con su importe y su vencimiento", async () => {
@@ -594,18 +565,6 @@ describe("createMovement", () => {
     { caso: "sin tipo de movimiento", campos: { kind: undefined }, campo: "kind" },
     { caso: "con una moneda que no existe", campos: { currency: "EUR" }, campo: "currency" },
     {
-      caso: "con un tipo de cambio que no es un número",
-      campos: { rate: "carísimo" },
-      campo: "rate",
-      mensaje: "Escribí un tipo de cambio válido.",
-    },
-    {
-      caso: "con un tipo de cambio de cero",
-      campos: { rate: "0" },
-      campo: "rate",
-      mensaje: "El tipo de cambio tiene que ser mayor a cero.",
-    },
-    {
       caso: "sin ninguna cuota",
       campos: { installmentAmount: [], installmentDueDate: [] },
       campo: "installments",
@@ -719,7 +678,7 @@ describe("createMovement", () => {
     comoUsuario(USUARIO_A)
 
     await createMovement(null, formulario({ ...ALTA_VALIDA, description: "Egreso a revalidar" }))
-    expect(rutasRevalidadas()).toEqual([["/dashboard"], ["/egresos"]])
+    expect(rutasRevalidadas()).toEqual([["/", "layout"]])
 
     vi.mocked(revalidatePath).mockClear()
 
@@ -734,7 +693,7 @@ describe("createMovement", () => {
     )
 
     expect(ingreso).toEqual({ ok: true })
-    expect(rutasRevalidadas()).toEqual([["/dashboard"], ["/ingresos"]])
+    expect(rutasRevalidadas()).toEqual([["/", "layout"]])
 
     const [fila] = await movimientosPorDescripcion(USUARIO_A, "Ingreso a revalidar")
     expect(fila.kind).toBe("income")
@@ -1178,12 +1137,14 @@ describe("updateMovement", () => {
         formulario({ direction: "buy", date: "2026-04-01", usdCents: "100", rate: "1000" }),
       ),
     ).toEqual({ ok: true })
-    const [cambio] = await cambiosDe(USUARIO_A)
+    const cambio = (await cambiosDe(USUARIO_A)).find(
+      (c) => c.date === "2026-04-01" && c.amountCents === 100_00,
+    )!
 
     const resultado = await updateMovement(null, edicion(cambio.id))
 
     expect(rechazo(resultado).message).toBe("Ese movimiento no existe.")
-    const [despues] = await cambiosDe(USUARIO_A)
+    const despues = (await cambiosDe(USUARIO_A)).find((c) => c.id === cambio.id)
     expect(despues).toMatchObject({ kind: "exchange", direction: "buy", amountCents: 100_00 })
   })
 
@@ -1757,7 +1718,6 @@ describe("unarchiveCategory", () => {
 const AJUSTES_VALIDOS: Record<string, CampoDeFormulario> = {
   initialBalanceArs: "1.500.000,50",
   initialBalanceUsd: "1.200",
-  initialBalanceUsdRate: "1.234,5678",
   initialBalanceDate: "2026-01-31",
   preferredRate: "mep",
 }
@@ -1778,10 +1738,11 @@ describe("saveSettings", () => {
       initialBalanceArsCents: 150_000_050,
       // "1.200" con tres dígitos después del punto es mil doscientos.
       initialBalanceUsdCents: 120_000,
-      // El TC del saldo inicial se guarda con la precisión de la columna.
-      initialBalanceUsdRate: "1234.5678",
       initialBalanceDate: "2026-01-31",
       preferredRate: "mep",
+      lastOfficialBuy: null,
+      lastOfficialSell: null,
+      lastOfficialAt: null,
     })
 
     const categorias = await categoriasDe(USUARIO_NUEVO)
@@ -1819,14 +1780,11 @@ describe("saveSettings", () => {
     expect(await saveSettings(null, formulario(AJUSTES_VALIDOS))).toEqual({ ok: true })
     expect(await categoriasDe(USUARIO_NUEVO)).toHaveLength(PRECARGA.length)
 
-    // Sin dólares en el saldo inicial, el TC puede ser cero: la validación
-    // cruzada sólo exige un TC mayor a cero cuando hay dólares.
     const resultado = await saveSettings(
       null,
       formulario({
         initialBalanceArs: "0",
         initialBalanceUsd: "0",
-        initialBalanceUsdRate: "0",
         initialBalanceDate: "2026-05-05",
         preferredRate: "oficial",
       }),
@@ -1839,9 +1797,11 @@ describe("saveSettings", () => {
       userId: USUARIO_NUEVO,
       initialBalanceArsCents: 0,
       initialBalanceUsdCents: 0,
-      initialBalanceUsdRate: "0.0000",
       initialBalanceDate: "2026-05-05",
       preferredRate: "oficial",
+      lastOfficialBuy: null,
+      lastOfficialSell: null,
+      lastOfficialAt: null,
     })
 
     // Una sola fila de ajustes y las mismas categorías: la segunda pasada va
@@ -1932,19 +1892,6 @@ describe("saveSettings", () => {
       campos: { initialBalanceArs: "-1" },
       campo: "initialBalanceArsCents",
       mensaje: "El importe no puede ser negativo.",
-    },
-    {
-      caso: "con un tipo de cambio que no es un número",
-      campos: { initialBalanceUsdRate: "el del blue" },
-      campo: "initialBalanceUsdRate",
-      mensaje: "Escribí un tipo de cambio válido.",
-    },
-    {
-      caso: "con dólares pero sin decir a qué tipo de cambio",
-      campos: { initialBalanceUsd: "500", initialBalanceUsdRate: "0" },
-      campo: "initialBalanceUsdRate",
-      mensaje:
-        "Si cargaste un saldo inicial en dólares, decinos a qué tipo de cambio los compraste.",
     },
     {
       caso: "con una preferencia de cotización que no existe",
@@ -2439,5 +2386,71 @@ describe("tarjetas", () => {
       formulario({ name: "Tarj repetida", closingDay: "20", dueDay: "1" }),
     )
     expect(resultado.ok).toBe(false)
+  })
+
+  it("pagar un resumen con USD en pesos guarda usdPaidArsCents; y con dólares + compra registra ambos en una transacción sin borrar la compra al desmarcar", async () => {
+    const card = await crearTarjeta("Tarj USD")
+    comoUsuario(USUARIO_A)
+    expect(
+      await createMovement(
+        null,
+        formulario({
+          ...ALTA_VALIDA,
+          description: "Tarj USD compra",
+          currency: "USD",
+          date: "2026-01-10",
+          amountCents: "100",
+          creditCardId: card.id,
+          installmentAmount: ["10000"],
+          installmentDueDate: ["2026-02-05"],
+        }),
+      ),
+    ).toEqual({ ok: true })
+    const [enero] = await resumenesDe(USUARIO_A, card.id)
+
+    expect(
+      await payStatement(
+        null,
+        formulario({
+          statementId: enero.id,
+          paidDate: "2026-02-03",
+          mode: "ars",
+          usdPaidArs: "155.000",
+        }),
+      ),
+    ).toEqual({ ok: true })
+    let [res] = await resumenesDe(USUARIO_A, card.id)
+    expect(res.usdPaidArsCents).toBe(155_000_00)
+
+    expect(await unpayStatement(enero.id)).toEqual({ ok: true })
+    ;[res] = await resumenesDe(USUARIO_A, card.id)
+    expect(res.usdPaidArsCents).toBeNull()
+
+    const cambiosAntes = (await cambiosDe(USUARIO_A)).length
+    expect(
+      await payStatement(
+        null,
+        formulario({
+          statementId: enero.id,
+          paidDate: "2026-02-04",
+          mode: "usd",
+          registerExchange: "true",
+          exchangeUsd: "60",
+          exchangeRate: "1450",
+        }),
+      ),
+    ).toEqual({ ok: true })
+
+    const cambiosDespues = await cambiosDe(USUARIO_A)
+    expect(cambiosDespues).toHaveLength(cambiosAntes + 1)
+    expect(
+      cambiosDespues.some(
+        (c) => c.date === "2026-02-04" && c.amountCents === 60_00 && c.rate === "1450.0000",
+      ),
+    ).toBe(true)
+
+    // Desmarcar el pago del resumen NO borra la compra de dólares.
+    expect(await unpayStatement(enero.id)).toEqual({ ok: true })
+    expect(await cambiosDe(USUARIO_A)).toHaveLength(cambiosAntes + 1)
   })
 })

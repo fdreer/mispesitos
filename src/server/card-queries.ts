@@ -40,7 +40,7 @@ export async function getCard(userId: string, cardId: string): Promise<CreditCar
 export type StatementRow = StatementSummary & {
   id: string
   cardId: string
-  usdPaidRate: string | null
+  usdPaidArsCents: number | null
 }
 
 export async function listStatementSummaries(
@@ -58,7 +58,7 @@ export async function listStatementSummaries(
         closingDate: cardStatement.closingDate,
         dueDate: cardStatement.dueDate,
         paidDate: cardStatement.paidDate,
-        usdPaidRate: cardStatement.usdPaidRate,
+        usdPaidArsCents: cardStatement.usdPaidArsCents,
         arsCents: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'ARS'), 0)`,
         usdCents: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'USD'), 0)`,
         count: count(installment.id),
@@ -89,7 +89,6 @@ export async function listUnpaidCardInstallments(userId: string) {
         cardId: movement.creditCardId,
         amountCents: installment.amountCents,
         currency: movement.currency,
-        rate: movement.rate,
       })
       .from(installment)
       .innerJoin(movement, eq(installment.movementId, movement.id))

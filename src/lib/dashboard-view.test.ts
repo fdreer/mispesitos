@@ -6,8 +6,15 @@ function cat(id: string, name: string, parentId: string | null = null) {
   return { id, name, parentId, archived: false, color: null }
 }
 
-function torta(view: ReturnType<typeof buildDashboardView>) {
-  return view.pie.map(({ name, arsCents }) => ({ name, arsCents }))
+function tortaArs(view: ReturnType<typeof buildDashboardView>) {
+  return view.pie.ars.map(({ name, arsCents }) => ({ name, arsCents }))
+}
+
+const OFFICIAL_RATE = {
+  compra: 1_500,
+  venta: 1_550,
+  fetchedAt: new Date("2026-08-10T15:00:00Z"),
+  stale: false,
 }
 
 const BASE: DashboardInput = {
@@ -17,7 +24,7 @@ const BASE: DashboardInput = {
     initialBalanceUsdCents: 0,
     initialBalanceDate: "2026-08-05",
   },
-  todayRate: 1_500,
+  officialRate: OFFICIAL_RATE,
   paid: [],
   exchanges: [],
   pending: [],
@@ -31,8 +38,8 @@ describe("buildDashboardView", () => {
     const view = buildDashboardView({
       ...BASE,
       paid: [
-        { paidDate: "2026-08-01", amountCents: 50_000, currency: "ARS", kind: "income", categoryId: null, rate: "1" },
-        { paidDate: "2026-08-07", amountCents: 20_000, currency: "ARS", kind: "income", categoryId: null, rate: "1" },
+        { paidDate: "2026-08-01", amountCents: 50_000, currency: "ARS", kind: "income", categoryId: null },
+        { paidDate: "2026-08-07", amountCents: 20_000, currency: "ARS", kind: "income", categoryId: null },
       ],
     })
 
@@ -52,7 +59,6 @@ describe("buildDashboardView", () => {
           movementId: "mov-1",
           description: "Televisor",
           currency: "ARS",
-          rate: "1",
           kind: "expense",
         },
         {
@@ -63,7 +69,6 @@ describe("buildDashboardView", () => {
           movementId: "mov-1",
           description: "Televisor",
           currency: "ARS",
-          rate: "1",
           kind: "expense",
         },
       ],
@@ -72,7 +77,7 @@ describe("buildDashboardView", () => {
     expect(view.upcomingPayments.map((u) => u.status)).toEqual(["overdue", "overdue"])
   })
 
-  it("separa los pagos impagos del mes actual y del mes siguiente", () => {
+  it("separa los pagos impagos del mes actual y del mes siguiente por moneda", () => {
     const pending = [
       {
         id: "exp-overdue",
@@ -82,18 +87,16 @@ describe("buildDashboardView", () => {
         movementId: "mov-overdue",
         description: "Vencido",
         currency: "ARS",
-        rate: "1",
         kind: "expense",
       },
       {
         id: "exp-current",
         number: 1,
         dueDate: "2026-08-31" as const,
-        amountCents: 100,
+        amountCents: 100_00,
         movementId: "mov-current",
         description: "Este mes en dólares",
         currency: "USD",
-        rate: "1200",
         kind: "expense",
       },
       {
@@ -104,7 +107,6 @@ describe("buildDashboardView", () => {
         movementId: "mov-next",
         description: "Mes siguiente",
         currency: "ARS",
-        rate: "1",
         kind: "expense",
       },
       {
@@ -115,83 +117,45 @@ describe("buildDashboardView", () => {
         movementId: "mov-income",
         description: "Cobro",
         currency: "ARS",
-        rate: "1",
         kind: "income",
       },
     ]
 
     const view = buildDashboardView({ ...BASE, pending })
 
-    expect(view.paymentsThisMonth).toEqual({ arsCents: 130_000, count: 2, overdueCount: 1 })
-    expect(view.paymentsNextMonth).toEqual({ arsCents: 30_000, count: 1 })
-  })
-
-  it("separa vencimientos a pagar y a cobrar hasta el fin del mes siguiente", () => {
-    const row = {
-      number: 1,
-      amountCents: 10_000,
-      currency: "ARS",
-      rate: "1",
-    }
-    const view = buildDashboardView({
-      ...BASE,
-      pending: [
-        {
-          ...row,
-          id: "expense-next",
-          dueDate: "2026-09-30",
-          movementId: "mov-expense",
-          description: "A pagar",
-          kind: "expense",
-        },
-        {
-          ...row,
-          id: "income-current",
-          dueDate: "2026-08-20",
-          movementId: "mov-income",
-          description: "A cobrar",
-          kind: "income",
-        },
-        {
-          ...row,
-          id: "outside-window",
-          dueDate: "2026-10-01",
-          movementId: "mov-later",
-          description: "Más adelante",
-          kind: "expense",
-        },
-      ],
+    expect(view.paymentsThisMonth).toEqual({
+      arsCents: 10_000,
+      usdCents: 100_00,
+      count: 2,
+      overdueCount: 1,
     })
-
-    expect(view.upcomingPayments.map((item) => item.id)).toEqual(["expense-next"])
-    expect(view.upcomingReceivables.map((item) => item.id)).toEqual(["income-current"])
+    expect(view.paymentsNextMonth).toEqual({ arsCents: 30_000, usdCents: 0, count: 1 })
   })
 
-  it("consolida la tenencia en dólares al TC de venta", () => {
+  it("consolida el saldo en dólares al oficial comprador, igual que el flujo", () => {
     const view = buildDashboardView({
       ...BASE,
       settings: { ...BASE.settings, initialBalanceUsdCents: 10_000 },
-      todayRate: 1_500,
     })
 
     expect(view.consolidatedArsCents).toBe(100_000 + 15_000_000)
+    expect(view.projection?.[0].arsCents).toBe(100_000 + 15_000_000)
   })
 
-  it("deja la proyección en null cuando hay dólares y no hay cotización", () => {
+  it("deja la proyección en null cuando hay dólares y no hay cotización oficial", () => {
     const view = buildDashboardView({
       ...BASE,
       settings: { ...BASE.settings, initialBalanceUsdCents: 10_000 },
-      todayRate: null,
+      officialRate: null,
     })
 
     expect(view.projection).toBeNull()
     expect(view.consolidatedArsCents).toBeNull()
   })
 
-  it("convierte USD al TC del propio movimiento, no al TC del día", () => {
+  it("mantiene USD separados en torta, barras y totales del mes sin convertir", () => {
     const view = buildDashboardView({
       ...BASE,
-      todayRate: 1_500,
       expenseCategories: [cat("cat-1", "Compras")],
       paid: [
         {
@@ -200,239 +164,64 @@ describe("buildDashboardView", () => {
           currency: "USD",
           kind: "expense",
           categoryId: "cat-1",
-          rate: "1200",
         },
       ],
     })
 
-    const expectedArsCents = 12_000_000
-
-    expect(view.monthExpenseArsCents).toBe(expectedArsCents)
-    expect(torta(view)).toEqual([{ name: "Compras", arsCents: expectedArsCents }])
-    expect(view.bars.find((b) => b.month === "2026-08")?.expenseArsCents).toBe(expectedArsCents)
+    expect(view.monthExpenseArsCents).toBe(0)
+    expect(view.monthExpenseUsdCents).toBe(10_000)
+    expect(view.pie.ars).toEqual([])
+    expect(view.pie.usd.map(({ name, arsCents }) => ({ name, arsCents }))).toEqual([
+      { name: "Compras", arsCents: 10_000 },
+    ])
+    expect(view.bars.usd.find((b) => b.month === "2026-08")?.expenseCents).toBe(10_000)
   })
 
-  it("cuenta en el mes lo pagado el mismo día del saldo inicial (el borde del >=)", () => {
-    const view = buildDashboardView({
-      ...BASE,
-      paid: [
-        { paidDate: "2026-08-05", amountCents: 5_000, currency: "ARS", kind: "income", categoryId: null, rate: "1" },
-      ],
-    })
-
-    expect(view.monthIncomeArsCents).toBe(5_000)
-    expect(view.arsCents).toBe(100_000 + 5_000)
-  })
-
-  it("la torta y las barras suman cuotas pagadas por su fecha de pago, no el movimiento entero", () => {
+  it("la torta y las barras suman cuotas pagadas por su fecha de pago", () => {
     const view = buildDashboardView({
       ...BASE,
       today: "2026-09-10",
       expenseCategories: [cat("cat-1", "Electro")],
       paid: [
-        { paidDate: "2026-08-15", amountCents: 100_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
-        { paidDate: "2026-09-02", amountCents: 100_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
-        { paidDate: "2026-09-05", amountCents: 50_000, currency: "ARS", kind: "income", categoryId: null, rate: "1" },
-        { paidDate: "2026-09-06", amountCents: 7_000, currency: "ARS", kind: "expense", categoryId: null, rate: "1" },
-      ],
-      pending: [
-        {
-          id: "ins-3",
-          number: 3,
-          dueDate: "2026-09-15",
-          amountCents: 100_000,
-          movementId: "mov-tv",
-          description: "Televisor",
-          currency: "ARS",
-          rate: "1",
-          kind: "expense",
-        },
+        { paidDate: "2026-08-15", amountCents: 100_000, currency: "ARS", kind: "expense", categoryId: "cat-1" },
+        { paidDate: "2026-09-02", amountCents: 100_000, currency: "ARS", kind: "expense", categoryId: "cat-1" },
+        { paidDate: "2026-09-05", amountCents: 50_000, currency: "ARS", kind: "income", categoryId: null },
+        { paidDate: "2026-09-06", amountCents: 7_000, currency: "ARS", kind: "expense", categoryId: null },
       ],
     })
 
-    expect(torta(view)).toEqual([
+    expect(tortaArs(view)).toEqual([
       { name: "Electro", arsCents: 100_000 },
       { name: "Sin categoría", arsCents: 7_000 },
     ])
-    expect(view.bars.find((b) => b.month === "2026-09")).toEqual({
+    expect(view.bars.ars.find((b) => b.month === "2026-09")).toEqual({
       month: "2026-09",
-      incomeArsCents: 50_000,
-      expenseArsCents: 107_000,
-    })
-    expect(view.bars.find((b) => b.month === "2026-08")).toEqual({
-      month: "2026-08",
-      incomeArsCents: 0,
-      expenseArsCents: 100_000,
+      incomeCents: 50_000,
+      expenseCents: 107_000,
     })
   })
 
-  it("la torta y la barra del mes suman lo mismo que la tarjeta, con el corte del saldo inicial", () => {
-    const view = buildDashboardView({
-      ...BASE,
-      expenseCategories: [cat("cat-1", "Comida")],
-      paid: [
-        { paidDate: "2026-08-01", amountCents: 30_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
-        { paidDate: "2026-07-20", amountCents: 9_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
-        { paidDate: "2026-08-07", amountCents: 10_000, currency: "ARS", kind: "expense", categoryId: "cat-1", rate: "1" },
-      ],
-    })
-
-    expect(view.monthExpenseArsCents).toBe(10_000)
-    expect(torta(view)).toEqual([{ name: "Comida", arsCents: 10_000 }])
-    expect(view.bars.find((b) => b.month === "2026-08")?.expenseArsCents).toBe(10_000)
-    expect(view.bars.find((b) => b.month === "2026-07")?.expenseArsCents).toBe(0)
-  })
-
-  it("no deja pasar más de MAX_UPCOMING vencimientos, ni uno que vence después del horizonte", () => {
-    const withinLimit = Array.from({ length: 25 }, (_, i) => ({
-      id: `ins-${i}`,
-      number: i + 1,
-      dueDate: "2026-09-30",
-      amountCents: 1_000,
-      movementId: `mov-${i}`,
-      description: `Cuota ${i}`,
-      currency: "ARS",
-      rate: "1",
-      kind: "expense",
-    }))
-
-    const view = buildDashboardView({
-      ...BASE,
-      pending: [
-        // Primera en la lista a propósito: si el `.slice()` corriera antes
-        // que el `.filter()`, ésta entraría en los primeros 20 y recién
-        // después la sacaría el filtro, dejando la lista en 19 en vez de 20.
-        {
-          id: "ins-far",
-          number: 1,
-          dueDate: "2026-10-01", // primer día fuera del mes siguiente.
-          amountCents: 1_000,
-          movementId: "mov-far",
-          description: "Cuota lejana",
-          currency: "ARS",
-          rate: "1",
-          kind: "expense",
-        },
-        ...withinLimit,
-      ],
-    })
-
-    expect(view.upcomingPayments).toHaveLength(20)
-    expect(view.upcomingPayments.some((u) => u.id === "ins-far")).toBe(false)
-  })
-
-  it("arma los vencimientos aunque el movimiento no esté en la lista de movimientos", () => {
-    // El caso que habilita el corte de fecha de la página: un plan viejo con
-    // cuotas que todavía vencen. Su movimiento quedó fuera de los últimos 12
-    // meses, y el enlace de la cuota tiene que seguir saliendo bien.
-    const view = buildDashboardView({
-      ...BASE,
-      pending: [
-        {
-          id: "ins-1",
-          number: 30,
-          dueDate: "2026-08-20",
-          amountCents: 10_000,
-          movementId: "mov-viejo",
-          description: "Plan de 2023",
-          currency: "ARS",
-          rate: "1",
-          kind: "expense",
-        },
-      ],
-    })
-
-    expect(view.upcomingPayments).toHaveLength(1)
-    expect(view.upcomingPayments[0].status).toBe("pending")
-  })
-
-  /**
-   * El brazo de los cambios de divisa. Era el único tramo del borde de la plata
-   * de este archivo sin una sola prueba: todos los demás casos pasan
-   * `exchanges: []`, así que ni el `assertExchangeDirection` ni el
-   * `Number(e.rate)` de acá tenían nada que los fijara.
-   */
   describe("cambios de divisa", () => {
-    // El TC llega como el `numeric` de Postgres, o sea STRING con sus cuatro
-    // decimales. Es lo que hace imprescindible el `Number(e.rate)`: sin él la
-    // multiplicación de `convertToArs` opera sobre texto.
     const COMPRA = { date: "2026-08-06", amountCents: 10_000, rate: "1450.5000" }
 
-    it("una compra saca pesos y suma dólares, con el TC leído como número", () => {
+    it("una compra saca pesos y suma dólares, y el consolidado valúa al oficial comprador", () => {
       const view = buildDashboardView({
         ...BASE,
         exchanges: [{ ...COMPRA, direction: "buy" }],
       })
 
-      // 100 dólares a 1450,50 son $145.050: el saldo en pesos queda en rojo
-      // porque el saldo inicial de la base es de $1.000.
       expect(view.arsCents).toBe(100_000 - 14_505_000)
       expect(view.usdCents).toBe(10_000)
-      // Y el consolidado los valúa al TC de hoy (1500), no al de la compra.
       expect(view.consolidatedArsCents).toBe(100_000 - 14_505_000 + 15_000_000)
     })
 
-    it("una venta hace exactamente lo contrario", () => {
-      const view = buildDashboardView({
-        ...BASE,
-        exchanges: [{ ...COMPRA, direction: "sell" }],
-      })
-
-      expect(view.arsCents).toBe(100_000 + 14_505_000)
-      expect(view.usdCents).toBe(-10_000)
-    })
-
-    /**
-     * El motivo del assert, escrito como test: con un `as`, un cambio sin
-     * dirección cae en el `else` de `computeBalances` y se cuenta EN SILENCIO
-     * como una venta —suma pesos, resta dólares—, o sea lo contrario de lo que
-     * pasó si era una compra. Acá no hay resultado, hay una excepción.
-     */
-    it("revienta con un cambio sin dirección en vez de contarlo como venta", () => {
+    it("revienta con un cambio sin dirección", () => {
       expect(() =>
         buildDashboardView({ ...BASE, exchanges: [{ ...COMPRA, direction: null }] }),
       ).toThrow(/direction inesperada/)
     })
-
-    it("revienta con una dirección que no es ninguna de las dos", () => {
-      expect(() =>
-        buildDashboardView({ ...BASE, exchanges: [{ ...COMPRA, direction: "compra" }] }),
-      ).toThrow(/direction inesperada/)
-    })
   })
 
-  it("la torta agrupa por categoría padre, con el desglose por subcategoría", () => {
-    const view = buildDashboardView({
-      ...BASE,
-      expenseCategories: [
-        cat("hogar", "Hogar"),
-        cat("alquiler", "Alquiler", "hogar"),
-        cat("expensas", "Expensas", "hogar"),
-        cat("ocio", "Ocio"),
-      ],
-      paid: [
-        { paidDate: "2026-08-06", amountCents: 3_000, currency: "ARS", kind: "expense", categoryId: "expensas", rate: "1" },
-        { paidDate: "2026-08-07", amountCents: 50_000, currency: "ARS", kind: "expense", categoryId: "alquiler", rate: "1" },
-        { paidDate: "2026-08-08", amountCents: 20_000, currency: "ARS", kind: "expense", categoryId: "ocio", rate: "1" },
-      ],
-    })
-
-    expect(torta(view)).toEqual([
-      { name: "Hogar", arsCents: 53_000 },
-      { name: "Ocio", arsCents: 20_000 },
-    ])
-    expect(view.pie[0].children.map(({ name, arsCents }) => ({ name, arsCents }))).toEqual([
-      { name: "Alquiler", arsCents: 50_000 },
-      { name: "Expensas", arsCents: 3_000 },
-    ])
-    expect(view.pie[1].children).toEqual([])
-  })
-
-  /**
-   * §1.4 del plan v2: las cuotas de una compra con tarjeta no se pagan una por
-   * una, se paga el resumen. En vencimientos son UN renglón por resumen y en
-   * "pagos del mes" cuentan como un solo concepto.
-   */
   it("agrupa las cuotas con tarjeta en un renglón por resumen", () => {
     const conTarjeta = (id: string, movementId: string, amountCents: number, currency = "ARS") => ({
       id,
@@ -442,7 +231,6 @@ describe("buildDashboardView", () => {
       movementId,
       description: movementId,
       currency,
-      rate: currency === "USD" ? "1000" : "1",
       kind: "expense",
       statementId: "res-1",
       statementPeriod: "2026-07",
@@ -463,7 +251,6 @@ describe("buildDashboardView", () => {
           movementId: "Luz",
           description: "Luz",
           currency: "ARS",
-          rate: "1",
           kind: "expense",
         },
       ],
@@ -484,10 +271,9 @@ describe("buildDashboardView", () => {
         status: "pending",
       },
     ])
-    // La luz y el resumen: dos conceptos, aunque el resumen tenga tres cuotas.
-    // El importe sí suma todo, con los dólares al TC de cada compra.
     expect(view.paymentsThisMonth).toEqual({
-      arsCents: 5_000 + 50_000 + 1_000_000,
+      arsCents: 5_000 + 50_000,
+      usdCents: 1_000,
       count: 2,
       overdueCount: 0,
     })

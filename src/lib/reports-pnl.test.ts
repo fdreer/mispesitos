@@ -62,87 +62,58 @@ describe("computeVariationPct", () => {
 })
 
 describe("buildPnlReport", () => {
-  it("agrupa por categoría padre e hijas en ingresos y gastos por paidDate, y calcula tarjetas y neto", () => {
+  it("agrupa por categoría padre e hijas en pesos y dólares lado a lado sin convertir", () => {
     const view = buildPnlReport({
       from: "2026-10-01",
       to: "2026-11-30",
-      currencyMode: "todo",
       categories: CATS,
       paidInstallments: [
-        { paidDate: "2026-09-10", amountCents: 100_000_00, currency: "ARS", kind: "income", categoryId: "sueldo", rate: "1" },
-        { paidDate: "2026-09-15", amountCents: 40_000_00, currency: "ARS", kind: "expense", categoryId: "alquiler", rate: "1" },
-        { paidDate: "2026-10-05", amountCents: 150_000_00, currency: "ARS", kind: "income", categoryId: "sueldo", rate: "1" },
-        { paidDate: "2026-10-10", amountCents: 50_000_00, currency: "ARS", kind: "expense", categoryId: "alquiler", rate: "1" },
-        { paidDate: "2026-10-12", amountCents: 10_000_00, currency: "ARS", kind: "expense", categoryId: "expensas", rate: "1" },
-        { paidDate: "2026-11-05", amountCents: 150_000_00, currency: "ARS", kind: "income", categoryId: "sueldo", rate: "1" },
-        { paidDate: "2026-11-10", amountCents: 100_00, currency: "USD", kind: "expense", categoryId: "comida", rate: "1200" },
+        { paidDate: "2026-09-10", amountCents: 100_000_00, currency: "ARS", kind: "income", categoryId: "sueldo" },
+        { paidDate: "2026-09-15", amountCents: 40_000_00, currency: "ARS", kind: "expense", categoryId: "alquiler" },
+        { paidDate: "2026-10-05", amountCents: 150_000_00, currency: "ARS", kind: "income", categoryId: "sueldo" },
+        { paidDate: "2026-10-10", amountCents: 50_000_00, currency: "ARS", kind: "expense", categoryId: "alquiler" },
+        { paidDate: "2026-10-12", amountCents: 10_000_00, currency: "ARS", kind: "expense", categoryId: "expensas" },
+        { paidDate: "2026-11-05", amountCents: 150_000_00, currency: "ARS", kind: "income", categoryId: "sueldo" },
+        { paidDate: "2026-11-10", amountCents: 100_00, currency: "USD", kind: "expense", categoryId: "comida" },
       ],
     })
 
-    expect(view.displayCurrency).toBe("ARS")
     expect(view.months).toEqual(["2026-10", "2026-11"])
-    expect(view.summary).toEqual({
+    expect(view.summary.ars).toEqual({
       incomeCents: 300_000_00,
-      expenseCents: 180_000_00,
-      netCents: 120_000_00,
-      savingsRatePct: 40,
+      expenseCents: 60_000_00,
+      netCents: 240_000_00,
+      savingsRatePct: 80,
+    })
+    expect(view.summary.usd).toEqual({
+      incomeCents: 0,
+      expenseCents: 100_00,
+      netCents: -100_00,
+      savingsRatePct: null,
     })
 
     expect(view.incomeRows).toHaveLength(1)
     expect(view.incomeRows[0].name).toBe("Sueldo")
-    expect(view.incomeRows[0].cells[0]).toMatchObject({ month: "2026-10", amountCents: 150_000_00 })
-    expect(view.incomeRows[0].cells[0].variationPct).toBeCloseTo(50)
-    expect(view.incomeRows[0].cells[1].variationPct).toBeCloseTo(0)
+    expect(view.incomeRows[0].cells[0]).toMatchObject({ month: "2026-10", arsCents: 150_000_00, usdCents: 0 })
+    expect(view.incomeRows[0].cells[0].arsVariationPct).toBeCloseTo(50)
+    expect(view.incomeRows[0].cells[1].arsVariationPct).toBeCloseTo(0)
 
-    expect(view.expenseRows.map((r) => [r.name, r.totalCents])).toEqual([
-      ["Comida", 120_000_00],
-      ["Hogar", 60_000_00],
+    expect(view.expenseRows.map((r) => [r.name, r.totalArsCents, r.totalUsdCents])).toEqual([
+      ["Hogar", 60_000_00, 0],
+      ["Comida", 0, 100_00],
     ])
-    expect(view.expenseRows[1].children.map((c) => [c.name, c.totalCents])).toEqual([
+    expect(view.expenseRows[0].children.map((c) => [c.name, c.totalArsCents])).toEqual([
       ["Alquiler", 50_000_00],
       ["Expensas", 10_000_00],
     ])
-    expect(view.chart).toEqual([
+    expect(view.chart.ars).toEqual([
       { month: "2026-10", label: "oct 26", incomeCents: 150_000_00, expenseCents: 60_000_00, netCents: 90_000_00 },
-      { month: "2026-11", label: "nov 26", incomeCents: 150_000_00, expenseCents: 120_000_00, netCents: 30_000_00 },
+      { month: "2026-11", label: "nov 26", incomeCents: 150_000_00, expenseCents: 0, netCents: 150_000_00 },
     ])
-  })
-
-  it("filtra por ARS o USD sin mezclar monedas y deja tasa de ahorro en null si no hay ingresos", () => {
-    const rows = [
-      { paidDate: "2026-10-05", amountCents: 100_000_00, currency: "ARS", kind: "income", categoryId: "sueldo", rate: "1" },
-      { paidDate: "2026-10-06", amountCents: 50_00, currency: "USD", kind: "expense", categoryId: "comida", rate: "1200" },
-    ]
-
-    const ars = buildPnlReport({
-      from: "2026-10-01",
-      to: "2026-10-31",
-      currencyMode: "ARS",
-      categories: CATS,
-      paidInstallments: rows,
-    })
-    expect(ars.displayCurrency).toBe("ARS")
-    expect(ars.summary).toEqual({
-      incomeCents: 100_000_00,
-      expenseCents: 0,
-      netCents: 100_000_00,
-      savingsRatePct: 100,
-    })
-
-    const usd = buildPnlReport({
-      from: "2026-10-01",
-      to: "2026-10-31",
-      currencyMode: "USD",
-      categories: CATS,
-      paidInstallments: rows,
-    })
-    expect(usd.displayCurrency).toBe("USD")
-    expect(usd.summary).toEqual({
-      incomeCents: 0,
-      expenseCents: 50_00,
-      netCents: -50_00,
-      savingsRatePct: null,
-    })
+    expect(view.chart.usd).toEqual([
+      { month: "2026-10", label: "oct 26", incomeCents: 0, expenseCents: 0, netCents: 0 },
+      { month: "2026-11", label: "nov 26", incomeCents: 0, expenseCents: 100_00, netCents: -100_00 },
+    ])
   })
 })
 
@@ -155,7 +126,6 @@ describe("buildPnlCellHref", () => {
         month: "2026-10",
         effectiveFrom: "2026-10-10",
         effectiveTo: "2026-11-30",
-        currencyMode: "todo",
         filters: FILTER_DEFAULTS,
       }),
     ).toBe("/egresos?categoryId=hogar&from=2026-10-10&to=2026-10-31&por=pago")
@@ -167,7 +137,7 @@ describe("buildPnlCellHref", () => {
         month: null,
         effectiveFrom: "2026-10-01",
         effectiveTo: "2026-11-30",
-        currencyMode: "USD",
+        currency: "USD",
         filters: { ...FILTER_DEFAULTS, cardId: "visa", search: "bono" },
       }),
     ).toBe("/ingresos?search=bono&categoryId=sueldo&currency=USD&from=2026-10-01&to=2026-11-30&por=pago")

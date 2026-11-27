@@ -35,7 +35,6 @@ async function AjustesBody() {
       defaults={{
         initialBalanceArs: String(settings.initialBalanceArsCents / 100),
         initialBalanceUsd: String(settings.initialBalanceUsdCents / 100),
-        initialBalanceUsdRate: settings.initialBalanceUsdRate,
         initialBalanceDate: settings.initialBalanceDate,
         preferredRate: settings.preferredRate,
       }}

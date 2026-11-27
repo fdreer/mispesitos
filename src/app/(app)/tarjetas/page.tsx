@@ -10,20 +10,32 @@ import {
   availableCredit,
   cardColor,
   cardOverview,
+  effectiveStatementRate,
   formatPeriod,
+  type AvailableCredit,
   type StatementSummary,
 } from "@/lib/cards"
 import { formatIsoForDisplay, todayInAr, type IsoDate } from "@/lib/dates"
-import { formatMoney } from "@/lib/money"
+import { convertToArs, formatMoney } from "@/lib/money"
 import {
   listCards,
   listStatementSummaries,
   listUnpaidCardInstallments,
   type CreditCard,
+  type StatementRow,
 } from "@/server/card-queries"
+import { resolveOfficialRate } from "@/server/rate"
 import { requireSettings } from "@/server/session"
 
-function Totals({ summary }: { summary: StatementSummary }) {
+type CardStatementSummary = StatementSummary & { usdPaidArsCents?: number | null }
+
+function Totals({
+  summary,
+  officialSellRate,
+}: {
+  summary: CardStatementSummary
+  officialSellRate: number | null
+}) {
   const { arsCents, usdCents, count } = summary.totals
   if (count === 0) return <span className="text-muted-foreground">Sin compras</span>
   return (
@@ -34,6 +46,19 @@ function Totals({ summary }: { summary: StatementSummary }) {
       ]
         .filter(Boolean)
         .join(" · ")}
+      {usdCents > 0 && summary.paidDate === null && officialSellRate !== null && (
+        <span className="block text-xs font-normal text-muted-foreground">
+          {formatMoney(usdCents, "USD")} ≈ {formatMoney(convertToArs(usdCents, officialSellRate), "ARS")}{" "}
+          si lo pagás en pesos (oficial vendedor de hoy)
+        </span>
+      )}
+      {usdCents > 0 && summary.paidDate !== null && summary.usdPaidArsCents != null && (
+        <span className="block text-xs font-normal text-muted-foreground">
+          Pagado en pesos: {formatMoney(summary.usdPaidArsCents, "ARS")}
+          {effectiveStatementRate(summary.usdPaidArsCents, usdCents) !== null &&
+            ` (TC ${formatMoney(Math.round(effectiveStatementRate(summary.usdPaidArsCents, usdCents)! * 100), "ARS")})`}
+        </span>
+      )}
     </span>
   )
 }
@@ -42,14 +67,22 @@ function CardTile({
   card,
   statements,
   available,
+  officialSellRate,
   today,
 }: {
   card: CreditCard
-  statements: StatementSummary[]
-  available: number | null
+  statements: StatementRow[]
+  available: AvailableCredit | null
+  officialSellRate: number | null
   today: IsoDate
 }) {
   const { open, current } = cardOverview(card, statements, today)
+  const openFull: CardStatementSummary =
+    statements.find((s) => s.period === open.period) ?? open
+  const currentFull: CardStatementSummary | null = current
+    ? (statements.find((s) => s.period === current.period) ?? current)
+    : null
+
   return (
     <Card size="sm" className="relative overflow-hidden">
       <span
@@ -66,16 +99,16 @@ function CardTile({
           <ChevronRight className="text-muted-foreground size-4" aria-hidden />
         </Link>
 
-        {current ? (
+        {currentFull ? (
           <div className="space-y-1">
             <p className="text-muted-foreground text-xs">
-              Resumen actual · {formatPeriod(current.period)}
+              Resumen actual · {formatPeriod(currentFull.period)}
             </p>
             <p className="text-lg font-semibold">
-              <Totals summary={current} />
+              <Totals summary={currentFull} officialSellRate={officialSellRate} />
             </p>
             <p className="text-sm">
-              <StatementStatus statement={current} today={today} />
+              <StatementStatus statement={currentFull} today={today} />
             </p>
           </div>
         ) : (
@@ -84,20 +117,28 @@ function CardTile({
 
         <div className="space-y-1 border-t pt-3">
           <p className="text-muted-foreground text-xs">
-            Próximo · {formatPeriod(open.period)} · cierra el {formatIsoForDisplay(open.closingDate)}
+            Próximo · {formatPeriod(openFull.period)} · cierra el{" "}
+            {formatIsoForDisplay(openFull.closingDate)}
           </p>
           <p className="text-sm">
-            <Totals summary={open} />
+            <Totals summary={openFull} officialSellRate={officialSellRate} />
           </p>
         </div>
 
         {available !== null && (
           <p className="text-muted-foreground border-t pt-3 text-xs">
             Disponible:{" "}
-            <span className={available < 0 ? "text-destructive font-medium" : "text-foreground font-medium"}>
-              {formatMoney(available, "ARS", 0)}
+            <span
+              className={
+                available.arsCents < 0 ? "text-destructive font-medium" : "text-foreground font-medium"
+              }
+            >
+              {formatMoney(available.arsCents, "ARS", 0)}
             </span>{" "}
             de {formatMoney(card.creditLimitCents ?? 0, "ARS", 0)}
+            {available.unconvertedUsdCents > 0 && (
+              <> · + {formatMoney(available.unconvertedUsdCents, "USD")} impagos</>
+            )}
           </p>
         )}
       </CardContent>
@@ -106,16 +147,18 @@ function CardTile({
 }
 
 async function TarjetasBody() {
-  const { user } = await requireSettings()
+  const { user, settings } = await requireSettings()
   const today = todayInAr()
-  const [cards, statements, unpaid] = await Promise.all([
+  const [cards, statements, unpaid, officialRate] = await Promise.all([
     listCards(user.id, true),
     listStatementSummaries(user.id),
     listUnpaidCardInstallments(user.id),
+    resolveOfficialRate(user.id, settings),
   ])
 
   const active = cards.filter((c) => !c.archived)
   const archived = cards.filter((c) => c.archived)
+  const officialSellRate = officialRate?.venta ?? null
 
   if (cards.length === 0) {
     return (
@@ -140,7 +183,9 @@ async function TarjetasBody() {
               available={availableCredit(
                 card.creditLimitCents,
                 unpaid.filter((i) => i.cardId === card.id),
+                officialSellRate,
               )}
+              officialSellRate={officialSellRate}
               today={today}
             />
           ))}

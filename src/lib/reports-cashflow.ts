@@ -1,3 +1,4 @@
+import type { Balances } from "@/lib/balance"
 import {
   addDaysIso,
   addMonthsClamped,
@@ -6,37 +7,22 @@ import {
   monthRange,
   type IsoDate,
 } from "@/lib/dates"
-import { convertToArs, type Currency } from "@/lib/money"
-import {
-  assertCurrency,
-  assertExchangeDirection,
-  assertInstallmentMovementKind,
-} from "@/lib/movement-asserts"
-import type { CashflowGranularity, ReportCurrency } from "@/lib/report-query"
+import { convertToArs } from "@/lib/money"
+import { assertCurrency, assertInstallmentMovementKind } from "@/lib/movement-asserts"
+import type { OfficialRateSnapshot } from "@/lib/rate"
+import type { CashflowGranularity } from "@/lib/report-query"
 import { formatShortMonth, monthsInRange } from "@/lib/reports-pnl"
-
-export type CashflowPaidRow = {
-  paidDate: IsoDate
-  amountCents: number
-  currency: string
-  kind: string
-  rate: string
-}
-
-export type CashflowExchangeRow = {
-  date: IsoDate
-  amountCents: number
-  rate: string
-  direction: string | null
-}
 
 export type CashflowPendingRow = {
   id: string
   dueDate: IsoDate
   amountCents: number
   currency: string
-  rate: string
   kind: string
+  statementId?: string | null
+  statementPeriod?: string | null
+  cardId?: string | null
+  cardName?: string | null
 }
 
 export type CashflowInput = {
@@ -44,27 +30,16 @@ export type CashflowInput = {
   from: IsoDate
   to: IsoDate
   granularity: CashflowGranularity
-  currencyMode: ReportCurrency
-  settings: {
-    initialBalanceArsCents: number
-    initialBalanceUsdCents: number
-    initialBalanceUsdRate: string
-    initialBalanceDate: IsoDate
-  }
-  paid: CashflowPaidRow[]
-  exchanges: CashflowExchangeRow[]
+  balances: Balances
   pending: CashflowPendingRow[]
+  officialRate: OfficialRateSnapshot | null
 }
-
-export type CashflowRowKind = "real" | "mixed" | "projected"
 
 export type CashflowRow = {
   key: string
   label: string
   from: IsoDate
   to: IsoDate
-  kind: CashflowRowKind
-  beforeInitialBalance: boolean
   initialCents: number
   inflowsCents: number
   outflowsCents: number
@@ -78,6 +53,8 @@ export type CashflowOverdue = {
   netCents: number
   expenseCount: number
   incomeCount: number
+  unconvertedUsdExpenseCents: number
+  unconvertedUsdIncomeCents: number
 }
 
 export type CashflowNegativeAlert = {
@@ -87,12 +64,27 @@ export type CashflowNegativeAlert = {
   includesOverdue: boolean
 }
 
+export type CashflowCardDue = {
+  id: string
+  cardId: string
+  cardName: string
+  period: string
+  dueDate: IsoDate
+  arsCents: number
+  usdCents: number
+  usdInArsCents: number | null
+}
+
 export type CashflowReportView = {
-  displayCurrency: Currency
   granularity: CashflowGranularity
+  balances: Balances
+  usdBalanceInArsCents: number | null
+  officialRate: OfficialRateSnapshot | null
+  missingRateForUsd: boolean
   rows: CashflowRow[]
   overdue: CashflowOverdue
   negativeAlert: CashflowNegativeAlert | null
+  upcomingCards: CashflowCardDue[]
   currentBalanceCents: number
   projectedEndBalanceCents: number
 }
@@ -112,64 +104,23 @@ const MONTH_NAMES_LOWER_ES = [
   "diciembre",
 ] as const
 
-function flowAmountCents(
-  row: { amountCents: number; currency: string; rate: string },
-  currencyMode: ReportCurrency,
+/**
+ * Convierte un pendiente a pesos según las reglas del flujo:
+ * - ARS: por su valor
+ * - Ingreso USD: × oficial comprador (`compra`)
+ * - Egreso USD (incluida la parte en USD de tarjetas): × oficial vendedor (`venta`)
+ * Sin cotización oficial, los USD devuelven `null` y no se suman.
+ */
+function pendingToArsCents(
+  row: { amountCents: number; currency: string; kind: string },
+  officialRate: OfficialRateSnapshot | null,
 ): number | null {
   const currency = assertCurrency(row.currency)
-  if (currencyMode === "ARS") return currency === "ARS" ? row.amountCents : null
-  if (currencyMode === "USD") return currency === "USD" ? row.amountCents : null
-  return currency === "ARS" ? row.amountCents : convertToArs(row.amountCents, Number(row.rate))
-}
-
-function exchangeParts(
-  row: CashflowExchangeRow,
-  currencyMode: ReportCurrency,
-): { inflowCents: number; outflowCents: number } {
-  const direction = assertExchangeDirection(row.direction)
-  if (currencyMode === "todo") return { inflowCents: 0, outflowCents: 0 }
-  if (currencyMode === "USD") {
-    return direction === "buy"
-      ? { inflowCents: row.amountCents, outflowCents: 0 }
-      : { inflowCents: 0, outflowCents: row.amountCents }
-  }
-  const arsCents = convertToArs(row.amountCents, Number(row.rate))
-  return direction === "sell"
-    ? { inflowCents: arsCents, outflowCents: 0 }
-    : { inflowCents: 0, outflowCents: arsCents }
-}
-
-function initialBalanceCents(
-  settings: CashflowInput["settings"],
-  currencyMode: ReportCurrency,
-): number {
-  if (currencyMode === "ARS") return settings.initialBalanceArsCents
-  if (currencyMode === "USD") return settings.initialBalanceUsdCents
-  return (
-    settings.initialBalanceArsCents +
-    convertToArs(settings.initialBalanceUsdCents, Number(settings.initialBalanceUsdRate))
-  )
-}
-
-function realBalanceAtToday(input: CashflowInput): number {
-  if (input.today < input.settings.initialBalanceDate) return 0
-  let balance = initialBalanceCents(input.settings, input.currencyMode)
-
-  for (const p of input.paid) {
-    if (p.paidDate < input.settings.initialBalanceDate || p.paidDate > input.today) continue
-    const val = flowAmountCents(p, input.currencyMode)
-    if (val === null) continue
-    const kind = assertInstallmentMovementKind(p.kind)
-    balance += kind === "income" ? val : -val
-  }
-
-  for (const e of input.exchanges) {
-    if (e.date < input.settings.initialBalanceDate || e.date > input.today) continue
-    const { inflowCents, outflowCents } = exchangeParts(e, input.currencyMode)
-    balance += inflowCents - outflowCents
-  }
-
-  return balance
+  if (currency === "ARS") return row.amountCents
+  if (officialRate === null) return null
+  const kind = assertInstallmentMovementKind(row.kind)
+  const rate = kind === "income" ? officialRate.compra : officialRate.venta
+  return convertToArs(row.amountCents, rate)
 }
 
 function formatAlertPeriodLabel(
@@ -186,20 +137,31 @@ function formatAlertPeriodLabel(
 }
 
 function computeOverdue(
-  pending: CashflowPendingRow[],
+  pending: readonly CashflowPendingRow[],
   today: IsoDate,
-  currencyMode: ReportCurrency,
+  officialRate: OfficialRateSnapshot | null,
 ): CashflowOverdue {
   let expenseCents = 0
   let incomeCents = 0
   let expenseCount = 0
   let incomeCount = 0
+  let unconvertedUsdExpenseCents = 0
+  let unconvertedUsdIncomeCents = 0
 
   for (const p of pending) {
     if (p.dueDate >= today) continue
-    const val = flowAmountCents(p, currencyMode)
-    if (val === null) continue
     const kind = assertInstallmentMovementKind(p.kind)
+    const val = pendingToArsCents(p, officialRate)
+    if (val === null) {
+      if (kind === "expense") {
+        unconvertedUsdExpenseCents += p.amountCents
+        expenseCount++
+      } else {
+        unconvertedUsdIncomeCents += p.amountCents
+        incomeCount++
+      }
+      continue
+    }
     if (kind === "expense") {
       expenseCents += val
       expenseCount++
@@ -215,17 +177,55 @@ function computeOverdue(
     netCents: incomeCents - expenseCents,
     expenseCount,
     incomeCount,
+    unconvertedUsdExpenseCents,
+    unconvertedUsdIncomeCents,
   }
 }
 
+function computeUpcomingCards(
+  pending: readonly CashflowPendingRow[],
+  today: IsoDate,
+  officialRate: OfficialRateSnapshot | null,
+): CashflowCardDue[] {
+  const byStatement = new Map<string, CashflowCardDue>()
+  for (const p of pending) {
+    if (p.dueDate < today || !p.statementId || !p.cardId) continue
+    let entry = byStatement.get(p.statementId)
+    if (!entry) {
+      entry = {
+        id: p.statementId,
+        cardId: p.cardId,
+        cardName: p.cardName ?? "Tarjeta",
+        period: p.statementPeriod ?? monthKey(p.dueDate),
+        dueDate: p.dueDate,
+        arsCents: 0,
+        usdCents: 0,
+        usdInArsCents: null,
+      }
+      byStatement.set(p.statementId, entry)
+    }
+    if (assertCurrency(p.currency) === "USD") entry.usdCents += p.amountCents
+    else entry.arsCents += p.amountCents
+  }
+
+  return [...byStatement.values()]
+    .map((c) => ({
+      ...c,
+      usdInArsCents:
+        c.usdCents > 0 && officialRate !== null
+          ? convertToArs(c.usdCents, officialRate.venta)
+          : null,
+    }))
+    .sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0))
+}
+
 function findNegativeAlert(
-  rows: CashflowRow[],
+  rows: readonly CashflowRow[],
   overdue: CashflowOverdue,
   granularity: CashflowGranularity,
   today: IsoDate,
 ): CashflowNegativeAlert | null {
   for (const row of rows) {
-    if (row.beforeInitialBalance || row.kind === "real") continue
     const withOverdue = row.closingCents + overdue.netCents
     if (withOverdue < 0) {
       return {
@@ -239,43 +239,22 @@ function findNegativeAlert(
   return null
 }
 
-function buildMonthlyRows(input: CashflowInput): CashflowRow[] {
-  const displayedMonths = monthsInRange(input.from, input.to)
+function buildMonthlyRows(input: CashflowInput, currentBalanceCents: number): CashflowRow[] {
+  const currentMonth = monthKey(input.today)
+  const effectiveFrom = input.from < input.today ? input.today : input.from
+  const effectiveTo = input.to < effectiveFrom ? effectiveFrom : input.to
+  const displayedMonths = monthsInRange(effectiveFrom, effectiveTo)
   if (displayedMonths.length === 0) return []
 
-  const initMonth = monthKey(input.settings.initialBalanceDate)
-  const currentMonth = monthKey(input.today)
-  const firstMonth = displayedMonths[0]
   const lastMonth = displayedMonths[displayedMonths.length - 1]
-
-  const realByMonth = new Map<string, { inflows: number; outflows: number }>()
-  const addReal = (ym: string, inflow: number, outflow: number) => {
-    const b = realByMonth.get(ym) ?? { inflows: 0, outflows: 0 }
-    b.inflows += inflow
-    b.outflows += outflow
-    realByMonth.set(ym, b)
-  }
-
-  for (const p of input.paid) {
-    if (p.paidDate < input.settings.initialBalanceDate) continue
-    const val = flowAmountCents(p, input.currencyMode)
-    if (val === null) continue
-    const kind = assertInstallmentMovementKind(p.kind)
-    addReal(monthKey(p.paidDate), kind === "income" ? val : 0, kind === "expense" ? val : 0)
-  }
-
-  for (const e of input.exchanges) {
-    if (e.date < input.settings.initialBalanceDate || e.date > input.today) continue
-    const { inflowCents, outflowCents } = exchangeParts(e, input.currencyMode)
-    if (inflowCents === 0 && outflowCents === 0) continue
-    addReal(monthKey(e.date), inflowCents, outflowCents)
-  }
+  const allMonths = monthsInRange(`${currentMonth}-01`, monthRange(lastMonth).to, 240)
+  const displayedSet = new Set(displayedMonths)
 
   const pendingByMonth = new Map<string, { inflows: number; outflows: number }>()
   for (const p of input.pending) {
-    // Las vencidas se muestran aparte ("Atrasado"), nunca dentro del mes actual.
+    // Sólo desde hoy hacia adelante; lo vencido va aparte en "Atrasado".
     if (p.dueDate < input.today) continue
-    const val = flowAmountCents(p, input.currencyMode)
+    const val = pendingToArsCents(p, input.officialRate)
     if (val === null) continue
     const kind = assertInstallmentMovementKind(p.kind)
     const ym = monthKey(p.dueDate)
@@ -285,73 +264,14 @@ function buildMonthlyRows(input: CashflowInput): CashflowRow[] {
     pendingByMonth.set(ym, b)
   }
 
-  // Arrancamos la simulación desde el menor entre el saldo inicial y el rango
-  // visible para que `saldo inicial` del primer mes visible herede el saldo real
-  // (y/o proyectado intermedio) acumulado hasta ese día.
-  const simStart = firstMonth < initMonth ? firstMonth : initMonth
-  const allMonths = monthsInRange(`${simStart}-01`, monthRange(lastMonth).to, 240)
-  const displayedSet = new Set(displayedMonths)
-  const initialSeed = initialBalanceCents(input.settings, input.currencyMode)
-
   const rows: CashflowRow[] = []
-  let running = 0
-
-  // Si la ventana de simulación (topada a 240 meses) arrancó después de
-  // `initMonth`, acumulamos el saldo inicial + lo real ocurrido entre
-  // `initMonth` y el primer mes simulado para no perder `initialSeed`.
-  const firstSimMonth = allMonths[0]
-  if (firstSimMonth && initMonth < firstSimMonth) {
-    running = initialSeed
-    for (const [ym, b] of realByMonth) {
-      if (ym >= initMonth && ym < firstSimMonth && ym <= currentMonth) {
-        running += b.inflows - b.outflows
-      }
-    }
-  }
+  let running = currentBalanceCents
 
   for (const m of allMonths) {
     const range = monthRange(m)
-    const kind: CashflowRowKind =
-      m < currentMonth ? "real" : m === currentMonth ? "mixed" : "projected"
-
-    if (m < initMonth) {
-      if (displayedSet.has(m)) {
-        rows.push({
-          key: m,
-          label: formatShortMonth(m),
-          from: range.from,
-          to: range.to,
-          kind,
-          beforeInitialBalance: true,
-          initialCents: 0,
-          inflowsCents: 0,
-          outflowsCents: 0,
-          netCents: 0,
-          closingCents: 0,
-        })
-      }
-      continue
-    }
-
-    if (m === initMonth) running = initialSeed
-    const rowInitial = running
-    const real = realByMonth.get(m) ?? { inflows: 0, outflows: 0 }
     const pend = pendingByMonth.get(m) ?? { inflows: 0, outflows: 0 }
-
-    let inflowsCents = 0
-    let outflowsCents = 0
-    if (kind === "real") {
-      inflowsCents = real.inflows
-      outflowsCents = real.outflows
-    } else if (kind === "mixed") {
-      inflowsCents = real.inflows + pend.inflows
-      outflowsCents = real.outflows + pend.outflows
-    } else {
-      inflowsCents = pend.inflows
-      outflowsCents = pend.outflows
-    }
-
-    const netCents = inflowsCents - outflowsCents
+    const rowInitial = running
+    const netCents = pend.inflows - pend.outflows
     const closingCents = rowInitial + netCents
     running = closingCents
 
@@ -359,13 +279,11 @@ function buildMonthlyRows(input: CashflowInput): CashflowRow[] {
       rows.push({
         key: m,
         label: formatShortMonth(m),
-        from: range.from,
+        from: m === currentMonth ? input.today : range.from,
         to: range.to,
-        kind,
-        beforeInitialBalance: false,
         initialCents: rowInitial,
-        inflowsCents,
-        outflowsCents,
+        inflowsCents: pend.inflows,
+        outflowsCents: pend.outflows,
         netCents,
         closingCents,
       })
@@ -391,7 +309,7 @@ function buildWeeklyRows(input: CashflowInput, currentBalanceCents: number): Cas
     let outflowsCents = 0
     for (const p of futurePending) {
       if (p.dueDate < cursor || p.dueDate > weekEnd) continue
-      const val = flowAmountCents(p, input.currencyMode)
+      const val = pendingToArsCents(p, input.officialRate)
       if (val === null) continue
       const kind = assertInstallmentMovementKind(p.kind)
       if (kind === "income") inflowsCents += val
@@ -405,8 +323,6 @@ function buildWeeklyRows(input: CashflowInput, currentBalanceCents: number): Cas
       label: `${formatIsoForDisplay(cursor).slice(0, 5)} – ${formatIsoForDisplay(weekEnd).slice(0, 5)}`,
       from: cursor,
       to: weekEnd,
-      kind: "projected",
-      beforeInitialBalance: false,
       initialCents: running,
       inflowsCents,
       outflowsCents,
@@ -422,23 +338,35 @@ function buildWeeklyRows(input: CashflowInput, currentBalanceCents: number): Cas
 }
 
 export function buildCashflowReport(input: CashflowInput): CashflowReportView {
-  const displayCurrency: Currency = input.currencyMode === "USD" ? "USD" : "ARS"
-  const currentBalanceCents = realBalanceAtToday(input)
-  const overdue = computeOverdue(input.pending, input.today, input.currencyMode)
+  const usdBalanceInArsCents =
+    input.officialRate !== null
+      ? convertToArs(input.balances.usdCents, input.officialRate.compra)
+      : null
+  const currentBalanceCents = input.balances.arsCents + (usdBalanceInArsCents ?? 0)
+  const hasAnyUsd =
+    input.balances.usdCents !== 0 || input.pending.some((p) => assertCurrency(p.currency) === "USD")
+  const missingRateForUsd = input.officialRate === null && hasAnyUsd
+
+  const overdue = computeOverdue(input.pending, input.today, input.officialRate)
+  const upcomingCards = computeUpcomingCards(input.pending, input.today, input.officialRate)
   const rows =
     input.granularity === "semanal"
       ? buildWeeklyRows(input, currentBalanceCents)
-      : buildMonthlyRows(input)
+      : buildMonthlyRows(input, currentBalanceCents)
 
   const negativeAlert = findNegativeAlert(rows, overdue, input.granularity, input.today)
   const projectedEndBalanceCents = rows.at(-1)?.closingCents ?? currentBalanceCents
 
   return {
-    displayCurrency,
     granularity: input.granularity,
+    balances: input.balances,
+    usdBalanceInArsCents,
+    officialRate: input.officialRate,
+    missingRateForUsd,
     rows,
     overdue,
     negativeAlert,
+    upcomingCards,
     currentBalanceCents,
     projectedEndBalanceCents,
   }

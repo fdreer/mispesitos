@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { CalendarCog, Check } from "lucide-react"
+import { AlertTriangle, CalendarCog, Check } from "lucide-react"
 
 import { DateField } from "@/components/date-field"
 import { Segmented } from "@/components/segmented"
@@ -19,6 +19,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -29,9 +30,15 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { formatPeriod, type StatementPaymentMode } from "@/lib/cards"
+import { effectiveStatementRate, formatPeriod, type StatementPaymentMode } from "@/lib/cards"
 import { formatIsoForDisplay, type IsoDate } from "@/lib/dates"
-import { convertToArs, formatMoney, parseDecimalInput } from "@/lib/money"
+import {
+  convertToArs,
+  formatAmountInput,
+  formatMoney,
+  parseAmountToCents,
+  parseDecimalInput,
+} from "@/lib/money"
 import { payStatement, unpayStatement, updateStatementDates } from "@/server/actions/cards"
 import type { ActionResult } from "@/server/actions/result"
 
@@ -46,6 +53,10 @@ export type StatementForActions = {
   arsCents: number
   usdCents: number
   count: number
+}
+
+function centsToInput(cents: number): string {
+  return formatAmountInput((cents / 100).toFixed(2).replace(".", ","))
 }
 
 function useOnSuccess(state: ActionResult | null, message: string, then: () => void) {
@@ -64,11 +75,15 @@ function useOnSuccess(state: ActionResult | null, message: string, then: () => v
 export function PayStatementButton({
   statement,
   today,
-  suggestedRate,
+  officialSellRate,
+  suggestedBuyRate,
+  usdBalanceCents,
 }: {
   statement: StatementForActions
   today: IsoDate
-  suggestedRate: number | null
+  officialSellRate: number | null
+  suggestedBuyRate: number | null
+  usdBalanceCents: number
 }) {
   const [open, setOpen] = useState(false)
   const notClosedYet = statement.closingDate > today
@@ -92,7 +107,9 @@ export function PayStatementButton({
             <PayStatementForm
               statement={statement}
               today={today}
-              suggestedRate={suggestedRate}
+              officialSellRate={officialSellRate}
+              suggestedBuyRate={suggestedBuyRate}
+              usdBalanceCents={usdBalanceCents}
               onClose={() => setOpen(false)}
             />
           )}
@@ -105,31 +122,67 @@ export function PayStatementButton({
 function PayStatementForm({
   statement,
   today,
-  suggestedRate,
+  officialSellRate,
+  suggestedBuyRate,
+  usdBalanceCents,
   onClose,
 }: {
   statement: StatementForActions
   today: IsoDate
-  suggestedRate: number | null
+  officialSellRate: number | null
+  suggestedBuyRate: number | null
+  usdBalanceCents: number
   onClose: () => void
 }) {
   const [state, action, pending] = useActionState<ActionResult | null, FormData>(
     payStatement,
     null,
   )
-  // Hoy, salvo que el resumen todavía no haya cerrado: ahí no se puede pagar
-  // (ver `resolveStatementPayment`) y el calendario arranca en el cierre.
-  const [paidDate, setPaidDate] = useState(today < statement.closingDate ? statement.closingDate : today)
+  const [paidDate, setPaidDate] = useState(
+    today < statement.closingDate ? statement.closingDate : today,
+  )
   const [mode, setMode] = useState<StatementPaymentMode>("usd")
-  const [rate, setRate] = useState(suggestedRate === null ? "" : String(suggestedRate).replace(".", ","))
+
+  const hasUsd = statement.usdCents > 0
+  const estimatedArsCents =
+    hasUsd && officialSellRate !== null && officialSellRate > 0
+      ? convertToArs(statement.usdCents, officialSellRate)
+      : null
+  const [usdPaidArs, setUsdPaidArs] = useState(
+    estimatedArsCents !== null ? centsToInput(estimatedArsCents) : "",
+  )
+
+  const shortfallCents = Math.max(0, statement.usdCents - Math.max(0, usdBalanceCents))
+  const [registerExchange, setRegisterExchange] = useState(shortfallCents > 0)
+  const [exchangeUsd, setExchangeUsd] = useState(
+    shortfallCents > 0
+      ? centsToInput(shortfallCents)
+      : hasUsd
+        ? centsToInput(statement.usdCents)
+        : "",
+  )
+  const [exchangeRate, setExchangeRate] = useState(
+    suggestedBuyRate === null ? "" : String(suggestedBuyRate).replace(".", ","),
+  )
+
   useOnSuccess(state, `Resumen de ${formatPeriod(statement.period)} pagado`, onClose)
 
   const errors = state && !state.ok ? (state.fieldErrors ?? {}) : {}
-  const hasUsd = statement.usdCents > 0
-  const parsedRate = parseDecimalInput(rate)
-  const usdInPesos =
-    hasUsd && mode === "ars" && parsedRate !== null && parsedRate > 0
-      ? convertToArs(statement.usdCents, parsedRate)
+
+  const parsedUsdPaidArs = parseAmountToCents(usdPaidArs)
+  const effRate =
+    hasUsd && mode === "ars" && parsedUsdPaidArs !== null && parsedUsdPaidArs > 0
+      ? effectiveStatementRate(parsedUsdPaidArs, statement.usdCents)
+      : null
+
+  const parsedExchangeUsd = parseAmountToCents(exchangeUsd)
+  const parsedExchangeRate = parseDecimalInput(exchangeRate)
+  const exchangeArsCents =
+    parsedExchangeUsd !== null &&
+    parsedExchangeUsd > 0 &&
+    parsedExchangeRate !== null &&
+    parsedExchangeRate > 0
+      ? convertToArs(parsedExchangeUsd, parsedExchangeRate)
       : null
 
   return (
@@ -181,7 +234,9 @@ function PayStatementForm({
 
       {hasUsd && (
         <fieldset className="space-y-3">
-          <legend className="mb-2 text-xs text-muted-foreground">La parte en dólares la pagaste…</legend>
+          <legend className="mb-2 text-xs text-muted-foreground">
+            La parte en dólares la pagaste…
+          </legend>
           <Segmented
             label="Cómo pagaste la parte en dólares"
             value={mode}
@@ -191,32 +246,118 @@ function PayStatementForm({
               { value: "ars", label: "Con pesos" },
             ]}
           />
+
           {mode === "ars" && (
             <div className="space-y-2">
-              <Label htmlFor="statement-usd-rate">Tipo de cambio</Label>
+              <Label htmlFor="statement-usd-paid-ars">
+                Total en pesos debitado por los {formatMoney(statement.usdCents, "USD")}
+              </Label>
               <Input
-                id="statement-usd-rate"
-                name="usdPaidRate"
+                id="statement-usd-paid-ars"
+                name="usdPaidArs"
                 inputMode="decimal"
                 required
-                value={rate}
-                onChange={(e) => setRate(e.target.value)}
-                aria-invalid={errors.usdPaidRate !== undefined}
-                className="h-10"
+                value={usdPaidArs}
+                onChange={(e) => setUsdPaidArs(formatAmountInput(e.target.value, usdPaidArs))}
+                aria-invalid={errors.usdPaidArs !== undefined}
+                className="h-10 tabular-nums"
               />
-              {errors.usdPaidRate ? (
-                <p className="text-destructive text-xs">{errors.usdPaidRate[0]}</p>
+              {errors.usdPaidArs ? (
+                <p className="text-destructive text-xs">{errors.usdPaidArs[0]}</p>
               ) : (
                 <p className="text-muted-foreground text-xs" aria-live="polite">
-                  {usdInPesos === null
-                    ? "El que figura en el resumen."
-                    : `${formatMoney(statement.usdCents, "USD")} son ${formatMoney(usdInPesos, "ARS")}: salen de tu saldo en pesos.`}
+                  {effRate !== null
+                    ? `TC efectivo: ${formatMoney(Math.round(effRate * 100), "ARS")} por dólar (impuestos y cargos incluidos).`
+                    : "Incluí impuestos y cargos que te debitó el banco."}
                 </p>
               )}
             </div>
           )}
+
           {mode === "usd" && (
-            <p className="text-muted-foreground text-xs">Salen de tu saldo en dólares.</p>
+            <div className="space-y-3">
+              <p className="text-muted-foreground text-xs">
+                Saldo en dólares disponible:{" "}
+                <span className="font-medium text-foreground tabular-nums">
+                  {formatMoney(usdBalanceCents, "USD")}
+                </span>
+                . Salen de tu saldo en dólares.
+              </p>
+
+              {shortfallCents > 0 && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+                >
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  <span>
+                    No te alcanza el saldo en dólares: faltan{" "}
+                    <strong className="tabular-nums">{formatMoney(shortfallCents, "USD")}</strong>.
+                    Podés registrar la compra acá mismo.
+                  </span>
+                </div>
+              )}
+
+              <input
+                type="hidden"
+                name="registerExchange"
+                value={registerExchange ? "true" : "false"}
+              />
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <Checkbox
+                  checked={registerExchange}
+                  onCheckedChange={(checked) => setRegisterExchange(checked === true)}
+                />
+                <span>Registrar compra de dólares</span>
+              </label>
+
+              {registerExchange && (
+                <div className="space-y-3 rounded-lg border border-white/[0.08] bg-white/[0.02] p-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="statement-exchange-usd">Dólares a comprar</Label>
+                      <Input
+                        id="statement-exchange-usd"
+                        name="exchangeUsd"
+                        inputMode="decimal"
+                        required
+                        value={exchangeUsd}
+                        onChange={(e) =>
+                          setExchangeUsd(formatAmountInput(e.target.value, exchangeUsd))
+                        }
+                        aria-invalid={errors.exchangeUsd !== undefined}
+                        className="h-9 tabular-nums"
+                      />
+                      {errors.exchangeUsd && (
+                        <p className="text-destructive text-xs">{errors.exchangeUsd[0]}</p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="statement-exchange-rate">Tipo de cambio</Label>
+                      <Input
+                        id="statement-exchange-rate"
+                        name="exchangeRate"
+                        inputMode="decimal"
+                        required
+                        value={exchangeRate}
+                        onChange={(e) => setExchangeRate(e.target.value)}
+                        aria-invalid={errors.exchangeRate !== undefined}
+                        className="h-9 tabular-nums"
+                      />
+                      {errors.exchangeRate && (
+                        <p className="text-destructive text-xs">{errors.exchangeRate[0]}</p>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-muted-foreground text-xs" aria-live="polite">
+                    Se registra con fecha {formatIsoForDisplay(paidDate)}
+                    {exchangeArsCents !== null
+                      ? ` · salen ${formatMoney(exchangeArsCents, "ARS")} de tu saldo en pesos.`
+                      : "."}
+                  </p>
+                </div>
+              )}
+            </div>
           )}
         </fieldset>
       )}

@@ -8,7 +8,6 @@ import { Segmented } from "@/components/segmented"
 import {
   buildReportHref,
   type CashflowGranularity,
-  type ReportCurrency,
   type ReportQuery,
 } from "@/lib/report-query"
 import { cn } from "@/lib/utils"
@@ -16,12 +15,6 @@ import { cn } from "@/lib/utils"
 const TABS = [
   { id: "ingresos-gastos" as const, label: "Ingresos vs Gastos" },
   { id: "flujo" as const, label: "Flujo de caja" },
-]
-
-const CURRENCY_OPTIONS: { value: ReportCurrency; label: string }[] = [
-  { value: "ARS", label: "ARS" },
-  { value: "USD", label: "USD" },
-  { value: "todo", label: "Todo en pesos" },
 ]
 
 const GRANULARITY_OPTIONS: { value: CashflowGranularity; label: string }[] = [
@@ -68,29 +61,17 @@ export function ReportControls({ query }: { query: ReportQuery }) {
         })}
       </nav>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="w-full sm:w-72">
+      {query.tab === "flujo" && (
+        <div className="w-full sm:w-64">
           <Segmented
-            label="Moneda del informe"
+            label="Granularidad"
             size="sm"
-            value={query.currency}
-            onChange={(currency) => navigate(buildReportHref(query, { currency }))}
-            options={CURRENCY_OPTIONS}
+            value={query.granularity}
+            onChange={(granularity) => navigate(buildReportHref(query, { granularity }))}
+            options={GRANULARITY_OPTIONS}
           />
         </div>
-
-        {query.tab === "flujo" && (
-          <div className="w-full sm:w-64">
-            <Segmented
-              label="Granularidad"
-              size="sm"
-              value={query.granularity}
-              onChange={(granularity) => navigate(buildReportHref(query, { granularity }))}
-              options={GRANULARITY_OPTIONS}
-            />
-          </div>
-        )}
-      </div>
+      )}
     </div>
   )
 }

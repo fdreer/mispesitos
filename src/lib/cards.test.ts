@@ -2,15 +2,17 @@ import { describe, expect, it } from "vitest"
 
 import {
   addPeriods,
+  allocateProportional,
   assignStatements,
   availableCredit,
   cardOverview,
   dayInPeriod,
+  effectiveStatementRate,
   firstStatementPeriod,
   formatPeriod,
   isValidPeriod,
   paidStatementConflict,
-  perceivedPayment,
+  perceivedPayments,
   proposeStatementDates,
   resolveStatementPayment,
   statementTotals,
@@ -189,14 +191,14 @@ describe("resolveStatementPayment", () => {
     requestedDate: undefined,
     today: "2026-12-01",
     mode: "usd" as const,
-    usdRate: null,
+    usdPaidArsCents: null,
   }
 
   it("sin fecha paga hoy", () => {
     expect(resolveStatementPayment(base)).toEqual({
       ok: true,
       paidDate: "2026-12-01",
-      usdPaidRate: null,
+      usdPaidArsCents: null,
     })
   })
 
@@ -227,67 +229,126 @@ describe("resolveStatementPayment", () => {
     ).toMatchObject({ ok: false })
   })
 
-  it("los dólares pagados con dólares no guardan TC", () => {
+  it("los dólares pagados con dólares no guardan monto en pesos", () => {
     const totals = { arsCents: 0, usdCents: 50_00, count: 1 }
-    expect(resolveStatementPayment({ ...base, totals, usdRate: 1200 })).toMatchObject({
+    expect(
+      resolveStatementPayment({ ...base, totals, usdPaidArsCents: 60_000_00 }),
+    ).toMatchObject({
       ok: true,
-      usdPaidRate: null,
+      usdPaidArsCents: null,
     })
   })
 
-  it("los dólares pagados con pesos exigen el TC", () => {
+  it("los dólares pagados con pesos exigen el total en pesos positivo", () => {
     const totals = { arsCents: 0, usdCents: 50_00, count: 1 }
     expect(resolveStatementPayment({ ...base, totals, mode: "ars" })).toMatchObject({
       ok: false,
-      field: "usdPaidRate",
+      field: "usdPaidArs",
     })
-    expect(resolveStatementPayment({ ...base, totals, mode: "ars", usdRate: 1200 })).toMatchObject(
-      { ok: true, usdPaidRate: 1200 },
-    )
+    expect(
+      resolveStatementPayment({ ...base, totals, mode: "ars", usdPaidArsCents: 60_000_00 }),
+    ).toMatchObject({ ok: true, usdPaidArsCents: 60_000_00 })
   })
 
-  it("sin dólares en el resumen no guarda TC aunque llegue", () => {
-    expect(resolveStatementPayment({ ...base, mode: "ars", usdRate: 1200 })).toMatchObject({
+  it("sin dólares en el resumen no guarda monto en pesos aunque llegue", () => {
+    expect(
+      resolveStatementPayment({ ...base, mode: "ars", usdPaidArsCents: 60_000_00 }),
+    ).toMatchObject({
       ok: true,
-      usdPaidRate: null,
+      usdPaidArsCents: null,
     })
   })
 })
 
-describe("perceivedPayment", () => {
-  const cuota = { paidDate: "2026-12-01", currency: "USD", amountCents: 10_00, rate: "1000" }
+describe("allocateProportional", () => {
+  it("reparte con resto mayor para que la suma cierre al centavo", () => {
+    expect(allocateProportional(100, [1, 1, 1])).toEqual([34, 33, 33])
+    expect(allocateProportional(101, [1, 1, 1])).toEqual([34, 34, 33])
+    expect(allocateProportional(100_00, [30_00, 70_00])).toEqual([30_00, 70_00])
+  })
+})
 
-  it("una cuota en dólares pagada con pesos cuenta como pesos al TC del pago", () => {
-    expect(perceivedPayment({ ...cuota, usdPaidRate: "1250.5000" })).toEqual({
-      paidDate: "2026-12-01",
-      currency: "ARS",
-      amountCents: 12_505_00,
-      rate: "1",
-    })
+describe("effectiveStatementRate", () => {
+  it("calcula el TC efectivo a partir de los centavos", () => {
+    expect(effectiveStatementRate(150_000_00, 100_00)).toBe(1500)
+    expect(effectiveStatementRate(0, 100_00)).toBeNull()
+    expect(effectiveStatementRate(150_000_00, 0)).toBeNull()
+  })
+})
+
+describe("perceivedPayments", () => {
+  it("reparte usdPaidArsCents entre las cuotas USD del resumen con resto mayor", () => {
+    const rows = [
+      { id: "a", statementId: "st1", currency: "USD", amountCents: 10_00, usdPaidArsCents: 100 },
+      { id: "b", statementId: "st1", currency: "USD", amountCents: 10_00, usdPaidArsCents: 100 },
+      { id: "c", statementId: "st1", currency: "USD", amountCents: 10_00, usdPaidArsCents: 100 },
+    ]
+    const result = perceivedPayments(rows)
+    expect(result.map((r) => ({ id: r.id, currency: r.currency, amountCents: r.amountCents }))).toEqual([
+      { id: "a", currency: "ARS", amountCents: 34 },
+      { id: "b", currency: "ARS", amountCents: 33 },
+      { id: "c", currency: "ARS", amountCents: 33 },
+    ])
+    expect(result.reduce((s, r) => s + r.amountCents, 0)).toBe(100)
   })
 
-  it("pagada con dólares sigue siendo en dólares", () => {
-    expect(perceivedPayment({ ...cuota, usdPaidRate: null })).toEqual(cuota)
+  it("en un subconjunto filtrado respeta el total USD del resumen", () => {
+    const rows = [
+      {
+        id: "a",
+        statementId: "st1",
+        currency: "USD",
+        amountCents: 25_00,
+        usdPaidArsCents: 100_000_00,
+        statementUsdCents: 100_00,
+      },
+    ]
+    const [r] = perceivedPayments(rows)
+    expect(r.currency).toBe("ARS")
+    expect(r.amountCents).toBe(25_000_00)
   })
 
-  it("una cuota en pesos no cambia", () => {
-    const pesos = { ...cuota, currency: "ARS", rate: "1" }
-    expect(perceivedPayment({ ...pesos, usdPaidRate: "1250" })).toEqual(pesos)
+  it("pagada con dólares o en pesos no cambia", () => {
+    const rows = [
+      { id: "u", statementId: "st1", currency: "USD", amountCents: 10_00, usdPaidArsCents: null },
+      { id: "p", statementId: "st1", currency: "ARS", amountCents: 50_00, usdPaidArsCents: 100_00 },
+    ]
+    expect(perceivedPayments(rows)).toEqual([
+      { id: "u", statementId: "st1", currency: "USD", amountCents: 10_00 },
+      { id: "p", statementId: "st1", currency: "ARS", amountCents: 50_00 },
+    ])
   })
 })
 
 describe("availableCredit", () => {
   it("sin límite no hay disponible", () => {
-    expect(availableCredit(null, [])).toBeNull()
+    expect(availableCredit(null, [], 1200)).toBeNull()
   })
 
-  it("descuenta lo impago, con los dólares al TC de la compra", () => {
+  it("descuenta lo impago convirtiendo USD al oficial vendedor", () => {
     expect(
-      availableCredit(1_000_000_00, [
-        { amountCents: 100_000_00, currency: "ARS", rate: "1" },
-        { amountCents: 100_00, currency: "USD", rate: "1000" },
-      ]),
-    ).toBe(800_000_00)
+      availableCredit(
+        1_000_000_00,
+        [
+          { amountCents: 100_000_00, currency: "ARS" },
+          { amountCents: 100_00, currency: "USD" },
+        ],
+        1200,
+      ),
+    ).toEqual({ arsCents: 780_000_00, unconvertedUsdCents: 0 })
+  })
+
+  it("sin cotización oficial informa los USD aparte", () => {
+    expect(
+      availableCredit(
+        1_000_000_00,
+        [
+          { amountCents: 100_000_00, currency: "ARS" },
+          { amountCents: 100_00, currency: "USD" },
+        ],
+        null,
+      ),
+    ).toEqual({ arsCents: 900_000_00, unconvertedUsdCents: 100_00 })
   })
 })
 

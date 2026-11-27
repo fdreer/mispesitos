@@ -92,7 +92,6 @@ export async function createMovement(
     date: formData.get("date"),
     currency: formData.get("currency"),
     amountCents: formData.get("amountCents") ?? "",
-    rate: formData.get("rate") ?? "1",
     installments,
   })
 
@@ -139,7 +138,7 @@ export async function createMovement(
         date: input.date,
         currency: input.currency,
         amountCents: input.amountCents,
-        rate: String(input.rate),
+        rate: null,
         direction: null,
         creditCardId: cardId,
       })
@@ -269,7 +268,6 @@ async function applyMovementUpdate(
       date: input.date,
       currency: input.currency,
       amountCents: input.amountCents,
-      rate: String(input.rate),
       creditCardId: cardId,
       updatedAt: new Date(),
     })
@@ -356,7 +354,6 @@ export async function updateMovement(
     date: formData.get("date"),
     currency: formData.get("currency"),
     amountCents: formData.get("amountCents") ?? "",
-    rate: formData.get("rate") ?? "1",
     installments,
   })
 
@@ -483,7 +480,6 @@ export async function patchMovement(id: string, patch: MovementPatch): Promise<A
         date,
         currency: assertCurrency(actual.currency),
         amountCents,
-        rate: Number(actual.rate),
         installments: [{ amountCents, dueDate }],
       }
       return applyMovementUpdate(tx, user.id, movementId, input, actual.creditCardId)

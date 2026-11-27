@@ -26,7 +26,6 @@ type Props = {
   defaults: {
     initialBalanceArs: string
     initialBalanceUsd: string
-    initialBalanceUsdRate: string
     initialBalanceDate: string
     preferredRate: string
   }
@@ -82,22 +81,6 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
           defaultValue={defaults.initialBalanceUsd}
           required
         />
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="initialBalanceUsdRate">
-          ¿A qué tipo de cambio promedio los compraste?
-        </Label>
-        <Input
-          id="initialBalanceUsdRate"
-          name="initialBalanceUsdRate"
-          inputMode="decimal"
-          defaultValue={defaults.initialBalanceUsdRate}
-          required
-        />
-        <p className="text-muted-foreground text-xs">
-          Pesos por dólar. Si no cargaste dólares, dejalo en 0.
-        </p>
       </div>
 
       <div className="space-y-1.5">
@@ -158,6 +141,9 @@ export function SettingsForm({ defaults, redirectTo, submitLabel }: Props) {
             </SelectContent>
           </Select>
         </div>
+        <p className="text-muted-foreground text-xs">
+          Sólo se usa para precargar el tipo de cambio cuando registrás una compra o venta de dólares.
+        </p>
       </div>
 
       {state && !state.ok && <p className="text-destructive text-sm">{state.message}</p>}

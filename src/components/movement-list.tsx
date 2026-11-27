@@ -267,7 +267,6 @@ export function MovementList({
               kind={kind}
               categories={categories}
               cards={cards}
-              suggestedRate={null}
               today={today}
               triggerLabel={kind === "income" ? "Cargar primer ingreso" : "Cargar primer egreso"}
             />

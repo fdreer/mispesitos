@@ -26,25 +26,20 @@ afterEach(() => {
 })
 
 describe("ReportControls", () => {
-  it("cambia de pestaña y moneda preservando filtros compartidos", () => {
+  it("cambia de pestaña preservando el período y sin selector de moneda", () => {
     const query = parseReportQuery({
-      moneda: "ARS",
       categoryId: "hogar",
-      from: "2026-01-01",
-      to: "2026-12-31",
+      from: "2026-11-26",
+      to: "2027-03-31",
     })
 
     render(<ReportControls query={query} />)
 
     const flujoLink = screen.getByRole("link", { name: "Flujo de caja" })
     expect(flujoLink.getAttribute("href")).toBe(
-      "/informes?tab=flujo&moneda=ARS&from=2026-01-01&to=2026-12-31",
+      "/informes?tab=flujo&from=2026-11-26&to=2027-03-31",
     )
-
-    fireEvent.click(screen.getByRole("radio", { name: "USD" }))
-    expect(push).toHaveBeenCalledWith(
-      "/informes?moneda=USD&categoryId=hogar&from=2026-01-01&to=2026-12-31",
-    )
+    expect(screen.queryByRole("radiogroup", { name: "Moneda del informe" })).toBeNull()
   })
 
   it("muestra selector de granularidad sólo en Flujo de caja", () => {

@@ -29,11 +29,11 @@ export const userSettings = pgTable("user_settings", {
   initialBalanceUsdCents: bigint("initial_balance_usd_cents", { mode: "number" })
     .notNull()
     .default(0),
-  initialBalanceUsdRate: numeric("initial_balance_usd_rate", { precision: 12, scale: 4 })
-    .notNull()
-    .default("0"),
   initialBalanceDate: date("initial_balance_date").notNull(),
   preferredRate: text("preferred_rate").notNull().default("blue"),
+  lastOfficialBuy: numeric("last_official_buy", { precision: 12, scale: 4 }),
+  lastOfficialSell: numeric("last_official_sell", { precision: 12, scale: 4 }),
+  lastOfficialAt: timestamp("last_official_at", { withTimezone: true }),
 })
 
 export const category = pgTable(
@@ -166,12 +166,12 @@ export const cardStatement = pgTable(
     dueDate: date("due_date").notNull(),
     paidDate: date("paid_date"),
     /**
-     * Si la parte en dólares se pagó con pesos, el TC al que se pagó (decisión
-     * 7.1). Null si se pagó con dólares, o si no está pagado. Con TC, el saldo
-     * y los informes cuentan esas cuotas como pesos y la posición en dólares
-     * no las ve.
+     * Si la parte en dólares se pagó con pesos, el total en pesos debitado por
+     * esa parte (impuestos y cargos incluidos). Null si se pagó con dólares o
+     * si no está pagado. Con este monto, el saldo y los informes cuentan esas
+     * cuotas como pesos repartidos proporcionalmente.
      */
-    usdPaidRate: numeric("usd_paid_rate", { precision: 12, scale: 4 }),
+    usdPaidArsCents: bigint("usd_paid_ars_cents", { mode: "number" }),
   },
   (t) => [
     unique("card_statement_card_id_period_unique").on(t.cardId, t.period),
@@ -193,8 +193,8 @@ export const cardStatement = pgTable(
     check("card_statement_period_format", sql`"period" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
     check("card_statement_due_after_closing", sql`"due_date" >= "closing_date"`),
     check(
-      "card_statement_usd_rate_only_when_paid",
-      sql`"usd_paid_rate" IS NULL OR ("paid_date" IS NOT NULL AND "usd_paid_rate" > 0)`,
+      "card_statement_usd_paid_ars_only_when_paid",
+      sql`"usd_paid_ars_cents" IS NULL OR ("paid_date" IS NOT NULL AND "usd_paid_ars_cents" > 0)`,
     ),
   ],
 )
@@ -224,8 +224,8 @@ export const movement = pgTable(
     /** "ARS" | "USD". En exchange siempre "USD". */
     currency: text("currency").notNull(),
     amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
-    /** Pesos por dólar. Siempre 1 cuando currency es ARS. */
-    rate: numeric("rate", { precision: 12, scale: 4 }).notNull(),
+    /** Pesos por dólar. Obligatorio sólo en exchange, null en ingresos y egresos. */
+    rate: numeric("rate", { precision: 12, scale: 4 }),
     /** "buy" | "sell". Sólo en exchange, null en el resto. */
     direction: text("direction"),
     /**
@@ -289,7 +289,10 @@ export const movement = pgTable(
     check("movement_kind_valid", sql`"kind" IN ('income', 'expense', 'exchange')`),
     check("movement_currency_valid", sql`"currency" IN ('ARS', 'USD')`),
     check("movement_amount_positive", sql`"amount_cents" > 0`),
-    check("movement_rate_positive", sql`"rate" > 0`),
+    check(
+      "movement_rate_only_exchange",
+      sql`("kind" = 'exchange' AND "rate" IS NOT NULL AND "rate" > 0) OR ("kind" <> 'exchange' AND "rate" IS NULL)`,
+    ),
     check(
       "movement_direction_valid",
       sql`("kind" = 'exchange' AND "direction" IN ('buy', 'sell')) OR ("kind" <> 'exchange' AND "direction" IS NULL)`,

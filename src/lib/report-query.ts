@@ -10,7 +10,7 @@ import {
 export const REPORT_TABS = ["ingresos-gastos", "flujo"] as const
 export type ReportTab = (typeof REPORT_TABS)[number]
 
-export const REPORT_CURRENCIES = ["todo", "ARS", "USD"] as const
+export const REPORT_CURRENCIES = ["ARS", "USD"] as const
 export type ReportCurrency = (typeof REPORT_CURRENCIES)[number]
 
 export const CASHFLOW_GRANULARITIES = ["mensual", "semanal"] as const
@@ -37,9 +37,10 @@ export function parseReportQuery(raw: RawParams): ReportQuery {
   const tab: ReportTab = (REPORT_TABS as readonly string[]).includes(tabRaw)
     ? (tabRaw as ReportTab)
     : "ingresos-gastos"
+  // Enlaces viejos con `?moneda=todo` caen en el default ("ARS").
   const currency: ReportCurrency = (REPORT_CURRENCIES as readonly string[]).includes(monedaRaw)
     ? (monedaRaw as ReportCurrency)
-    : "todo"
+    : "ARS"
   const granularity: CashflowGranularity =
     tab === "flujo" &&
     (CASHFLOW_GRANULARITIES as readonly string[]).includes(granularidadRaw)
@@ -73,7 +74,7 @@ export function parseReportQuery(raw: RawParams): ReportQuery {
 export function reportExtraParams(query: ReportQuery): Record<string, string | undefined> {
   return {
     tab: query.tab === "flujo" ? "flujo" : undefined,
-    moneda: query.currency !== "todo" ? query.currency : undefined,
+    moneda: query.tab === "ingresos-gastos" && query.currency !== "ARS" ? query.currency : undefined,
     granularidad:
       query.tab === "flujo" && query.granularity === "semanal" ? "semanal" : undefined,
   }
@@ -142,6 +143,10 @@ export function effectivePnlRange(
   return { ...presetRange("last_12_months", today), isDefault: true }
 }
 
+/**
+ * El flujo de caja sólo mira desde hoy hacia adelante: cualquier fecha
+ * anterior a hoy se acota a `today`.
+ */
 export function effectiveCashflowRange(
   from: string,
   to: string,
@@ -151,19 +156,25 @@ export function effectiveCashflowRange(
   if (granularity === "semanal") {
     return { from: today, to: addMonthsClamped(today, 3), isDefault: true }
   }
-  if (from && to) return { ...normalizePair(from, to), isDefault: false }
   const ym = monthKey(today)
+  const defaultEnd = monthRange(monthKey(addMonthsClamped(`${ym}-01`, 6))).to
+  if (from && to) {
+    const pair = normalizePair(from, to)
+    const clampedFrom = pair.from < today ? today : pair.from
+    const clampedTo = pair.to < clampedFrom ? clampedFrom : pair.to
+    return { from: clampedFrom, to: clampedTo, isDefault: false }
+  }
   if (from) {
-    const end = monthRange(monthKey(addMonthsClamped(`${ym}-01`, 6))).to
-    return { from, to: from > end ? from : end, isDefault: false }
+    const clampedFrom = from < today ? today : from
+    return { from: clampedFrom, to: clampedFrom > defaultEnd ? clampedFrom : defaultEnd, isDefault: false }
   }
   if (to) {
-    const start = `${monthKey(addMonthsClamped(`${monthKey(to)}-01`, -8))}-01`
-    return { from: start, to, isDefault: false }
+    const clampedTo = to < today ? today : to
+    return { from: today, to: clampedTo, isDefault: false }
   }
   return {
-    from: `${monthKey(addMonthsClamped(`${ym}-01`, -3))}-01`,
-    to: monthRange(monthKey(addMonthsClamped(`${ym}-01`, 6))).to,
+    from: today,
+    to: defaultEnd,
     isDefault: true,
   }
 }

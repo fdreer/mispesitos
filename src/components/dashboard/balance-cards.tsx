@@ -1,14 +1,15 @@
 import { InfoHint } from "@/components/info-hint"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatMoney } from "@/lib/money"
+import { formatOfficialRateLabel, type OfficialRateSnapshot } from "@/lib/rate"
 
 type Props = {
   arsCents: number
   usdCents: number
   consolidatedArsCents: number | null
-  rate: number | null
-  paymentsThisMonth: { arsCents: number; count: number; overdueCount: number }
-  paymentsNextMonth: { arsCents: number; count: number }
+  officialRate: OfficialRateSnapshot | null
+  paymentsThisMonth: { arsCents: number; usdCents: number; count: number; overdueCount: number }
+  paymentsNextMonth: { arsCents: number; usdCents: number; count: number }
 }
 
 export function BalanceHeader({ title, hint }: { title: string; hint?: React.ReactNode }) {
@@ -39,7 +40,7 @@ export function BalanceCards({
   arsCents,
   usdCents,
   consolidatedArsCents,
-  rate,
+  officialRate,
   paymentsThisMonth,
   paymentsNextMonth,
 }: Props) {
@@ -53,17 +54,9 @@ export function BalanceCards({
       </Card>
 
       <Card size="sm" className="gap-2 py-3">
-        {/*
-         * A propósito distinto de la "Tenencia" de /cambios (usdPosition):
-         * este saldo sale de computeBalances y puede quedar negativo si se
-         * gastó de más, mientras que la tenencia se clampea en cero y
-         * acumula la diferencia como sobreventa. /cambios ya explica la
-         * relación entre los dos números; esta aclaración sólo evita que
-         * verlos distintos parezca un error de la app.
-         */}
         <BalanceHeader
           title="Saldo en dólares"
-          hint="Puede quedar negativo si gastaste más dólares de los que tenías cargados. No es lo mismo que la tenencia de Cambios, que nunca baja de cero."
+          hint="Saldo real en dólares (efectivo + bancos). Puede quedar negativo si gastaste más dólares de los que tenías cargados."
         />
         <CardContent>
           <BalanceAmount>{formatMoney(usdCents, "USD", 0)}</BalanceAmount>
@@ -71,22 +64,32 @@ export function BalanceCards({
       </Card>
 
       <Card size="sm" className="gap-2 py-3">
-        <BalanceHeader title="Total consolidado" />
+        <BalanceHeader
+          title="Total consolidado"
+          hint="Saldo en pesos más saldo en dólares valuado al oficial comprador, igual que el punto de partida del flujo de caja."
+        />
         <CardContent>
           <BalanceAmount>
             {consolidatedArsCents === null ? "—" : formatMoney(consolidatedArsCents, "ARS", 0)}
           </BalanceAmount>
-          <BalanceNote>{rate ? `dólar a ${Math.round(rate).toLocaleString("es-AR")}` : "sin cotización de hoy"}</BalanceNote>
+          <BalanceNote>
+            {officialRate
+              ? `${formatOfficialRateLabel(officialRate.fetchedAt)} · ${Math.round(officialRate.compra).toLocaleString("es-AR")}`
+              : "sin cotización oficial"}
+          </BalanceNote>
         </CardContent>
       </Card>
 
       <Card size="sm" className="gap-2 py-3">
         <BalanceHeader
           title="Impagos este mes"
-          hint="Incluye egresos vencidos de meses anteriores y los que vencen durante este mes. Los importes en dólares usan el tipo de cambio guardado en cada movimiento."
+          hint="Incluye egresos vencidos de meses anteriores y los que vencen durante este mes, separados por moneda."
         />
         <CardContent>
           <BalanceAmount>{formatMoney(paymentsThisMonth.arsCents, "ARS", 0)}</BalanceAmount>
+          {paymentsThisMonth.usdCents > 0 && (
+            <BalanceNote>+ {formatMoney(paymentsThisMonth.usdCents, "USD", 0)}</BalanceNote>
+          )}
           <BalanceNote>
             {paymentsThisMonth.count} {paymentsThisMonth.count === 1 ? "concepto" : "conceptos"}
             {paymentsThisMonth.overdueCount > 0 &&
@@ -98,10 +101,13 @@ export function BalanceCards({
       <Card size="sm" className="gap-2 py-3">
         <BalanceHeader
           title="A pagar el mes próximo"
-          hint="Incluye sólo egresos pendientes cuyo vencimiento cae en el próximo mes calendario. Los importes en dólares usan el tipo de cambio guardado en cada movimiento."
+          hint="Incluye sólo egresos pendientes cuyo vencimiento cae en el próximo mes calendario, separados por moneda."
         />
         <CardContent>
           <BalanceAmount>{formatMoney(paymentsNextMonth.arsCents, "ARS", 0)}</BalanceAmount>
+          {paymentsNextMonth.usdCents > 0 && (
+            <BalanceNote>+ {formatMoney(paymentsNextMonth.usdCents, "USD", 0)}</BalanceNote>
+          )}
           <BalanceNote>
             {paymentsNextMonth.count} {paymentsNextMonth.count === 1 ? "concepto" : "conceptos"}
           </BalanceNote>

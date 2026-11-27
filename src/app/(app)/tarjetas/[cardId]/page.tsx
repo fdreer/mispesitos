@@ -16,10 +16,12 @@ import { CategoryBadge } from "@/components/category-badge"
 import { Badge } from "@/components/ui/badge"
 import { buttonVariants } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { computeBalances } from "@/lib/balance"
 import {
   addPeriods,
   cardColor,
   cardOverview,
+  effectiveStatementRate,
   formatPeriod,
   isValidPeriod,
   proposeStatementDates,
@@ -28,11 +30,20 @@ import {
 import { categoryLabels } from "@/lib/category-tree"
 import { formatIsoForDisplay, todayInAr } from "@/lib/dates"
 import { convertToArs, formatMoney } from "@/lib/money"
-import { assertCurrency } from "@/lib/movement-asserts"
+import {
+  assertCurrency,
+  assertExchangeDirection,
+  assertInstallmentMovementKind,
+} from "@/lib/movement-asserts"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import { cn } from "@/lib/utils"
 import { getCard, listStatementInstallments, listStatementSummaries } from "@/server/card-queries"
-import { listCategories } from "@/server/queries"
+import {
+  listCategories,
+  listExchanges,
+  listPaidInstallments,
+} from "@/server/queries"
+import { resolveOfficialRate } from "@/server/rate"
 import { requireSettings } from "@/server/session"
 
 type Props = {
@@ -49,9 +60,10 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
   const card = await getCard(user.id, cardId)
   if (!card) notFound()
 
-  const [statements, categories] = await Promise.all([
+  const [statements, categories, officialRate] = await Promise.all([
     listStatementSummaries(user.id, card.id),
     listCategories(user.id, "expense", true),
+    resolveOfficialRate(user.id, settings),
   ])
   const { open, current } = cardOverview(card, statements, today)
 
@@ -60,7 +72,7 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
   const period =
     requested ?? (current && current.paidDate === null && current.totals.count > 0 ? current.period : open.period)
 
-  const statement: StatementSummary & { usdPaidRate?: string | null } =
+  const statement: StatementSummary & { usdPaidArsCents?: number | null } =
     statements.find((s) => s.period === period) ?? {
       ...proposeStatementDates(card, period),
       id: null,
@@ -68,12 +80,38 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
       totals: { arsCents: 0, usdCents: 0, count: 0 },
     }
 
-  const [installments, rate] = await Promise.all([
+  const needsUsdPaymentInfo = statement.totals.usdCents > 0 && statement.paidDate === null
+  const [installments, suggestedRate, paidInstallments, exchanges] = await Promise.all([
     statement.id ? listStatementInstallments(user.id, statement.id) : Promise.resolve([]),
-    statement.totals.usdCents > 0 && statement.paidDate === null
+    needsUsdPaymentInfo
       ? fetchSuggestedRate(settings.preferredRate as RatePreference)
       : Promise.resolve(null),
+    needsUsdPaymentInfo ? listPaidInstallments(user.id) : Promise.resolve([]),
+    needsUsdPaymentInfo ? listExchanges(user.id) : Promise.resolve([]),
   ])
+
+  const usdBalanceCents = needsUsdPaymentInfo
+    ? computeBalances(
+        {
+          initialArsCents: settings.initialBalanceArsCents,
+          initialUsdCents: settings.initialBalanceUsdCents,
+          initialDate: settings.initialBalanceDate,
+        },
+        paidInstallments.map((p) => ({
+          paidDate: p.paidDate,
+          currency: assertCurrency(p.currency),
+          kind: assertInstallmentMovementKind(p.kind),
+          amountCents: p.amountCents,
+        })),
+        exchanges.map((e) => ({
+          date: e.date,
+          direction: assertExchangeDirection(e.direction),
+          usdCents: e.amountCents,
+          rate: Number(e.rate),
+        })),
+      ).usdCents
+    : 0
+
   const labels = categoryLabels(categories)
 
   const forActions: StatementForActions = {
@@ -90,7 +128,12 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
   }
 
   const periods = [...new Set([...statements.map((s) => s.period), open.period, period])].sort()
-  const usdPaidRate = statement.usdPaidRate ? Number(statement.usdPaidRate) : null
+  const usdPaidArsCents = statement.usdPaidArsCents ?? null
+  const effRate =
+    usdPaidArsCents !== null
+      ? effectiveStatementRate(usdPaidArsCents, statement.totals.usdCents)
+      : null
+  const officialSellRate = officialRate?.venta ?? null
 
   return (
     <div className="space-y-6">
@@ -190,10 +233,22 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
             </div>
           </dl>
 
-          {usdPaidRate !== null && (
-            <p className="text-muted-foreground text-xs">
-              Los dólares se pagaron con pesos a {formatMoney(Math.round(usdPaidRate * 100), "ARS")}:{" "}
-              {formatMoney(convertToArs(statement.totals.usdCents, usdPaidRate), "ARS")}.
+          {statement.paidDate === null &&
+            statement.totals.usdCents > 0 &&
+            officialSellRate !== null && (
+              <p className="text-muted-foreground text-xs tabular-nums">
+                {formatMoney(statement.totals.usdCents, "USD")} ≈{" "}
+                {formatMoney(convertToArs(statement.totals.usdCents, officialSellRate), "ARS")} si
+                lo pagás en pesos (oficial vendedor de hoy).
+              </p>
+            )}
+
+          {usdPaidArsCents !== null && (
+            <p className="text-muted-foreground text-xs tabular-nums">
+              Los dólares se pagaron con pesos: {formatMoney(usdPaidArsCents, "ARS")}
+              {effRate !== null &&
+                ` (TC efectivo ${formatMoney(Math.round(effRate * 100), "ARS")})`}
+              .
             </p>
           )}
 
@@ -204,7 +259,9 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
               <PayStatementButton
                 statement={forActions}
                 today={today}
-                suggestedRate={rate?.referenceRate ?? null}
+                officialSellRate={officialSellRate}
+                suggestedBuyRate={suggestedRate?.buyRate ?? null}
+                usdBalanceCents={usdBalanceCents}
               />
             )}
             <StatementDatesButton statement={forActions} />

@@ -22,7 +22,6 @@ export async function saveSettings(
   const parsed = settingsSchema.safeParse({
     initialBalanceArsCents: formData.get("initialBalanceArs") ?? "",
     initialBalanceUsdCents: formData.get("initialBalanceUsd") ?? "",
-    initialBalanceUsdRate: formData.get("initialBalanceUsdRate") ?? "",
     initialBalanceDate: formData.get("initialBalanceDate") ?? "",
     preferredRate: formData.get("preferredRate") ?? "",
   })
@@ -31,10 +30,7 @@ export async function saveSettings(
     return failure("Revisá los datos.", z.flattenError(parsed.error).fieldErrors)
   }
 
-  const values = {
-    ...parsed.data,
-    initialBalanceUsdRate: String(parsed.data.initialBalanceUsdRate),
-  }
+  const values = parsed.data
 
   try {
     await withUser(user.id, async (tx) => {

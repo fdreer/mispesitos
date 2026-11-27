@@ -107,7 +107,6 @@ const tablas: CasoTabla[] = [
           date: "2026-01-05",
           currency: "ARS",
           amountCents: 123_45,
-          rate: "1",
         })
         .onConflictDoNothing(),
     leer: (tx) => tx.select({ userId: movement.userId }).from(movement),
@@ -121,7 +120,6 @@ const tablas: CasoTabla[] = [
         date: "2026-01-05",
         currency: "ARS",
         amountCents: 100_00,
-        rate: "1",
       }),
     borrar: (tx) => tx.delete(movement),
   },
@@ -336,7 +334,6 @@ describe("RLS", () => {
           date: "2026-01-05",
           currency: "ARS",
           amountCents: 100_00,
-          rate: "1",
         }),
       ),
     )
@@ -353,7 +350,7 @@ describe("RLS", () => {
           id: "ins-cruzada",
           userId: USER_A,
           movementId: `mov-${USER_B}`,
-          number: 1,
+          number: 2,
           amountCents: 100_00,
           dueDate: "2026-02-05",
         }),
@@ -394,7 +391,6 @@ describe("RLS", () => {
           date: "2026-01-07",
           currency: "ARS",
           amountCents: 100_00,
-          rate: "1",
         }),
       ),
     )
@@ -435,7 +431,6 @@ describe("RLS", () => {
             date: "2026-01-08",
             currency: "ARS",
             amountCents: 100_00,
-            rate: "1",
           })
           .returning(),
       )
@@ -455,7 +450,6 @@ describe("RLS", () => {
             date: "2026-01-08",
             currency: "ARS",
             amountCents: 100_00,
-            rate: "1",
           }),
         ),
       )
@@ -718,7 +712,6 @@ describe("categorías en árbol", () => {
     date: "2026-01-09",
     currency: "ARS",
     amountCents: 100_00,
-    rate: "1",
   })
 
   /** Una sola sentencia para las categorías: la FK al padre es NO ACTION. */
@@ -884,7 +877,6 @@ describe("tarjetas", () => {
     date: "2026-03-10",
     currency: "ARS",
     amountCents: 100_00,
-    rate: "1",
     creditCardId,
   })
   const cuota = (statementId: string | null, dueDate = "2026-04-05") => ({
@@ -1090,5 +1082,118 @@ describe("tarjetas", () => {
     } finally {
       await limpiarTarjetas()
     }
+  })
+
+  it("usd_paid_ars_cents sólo entra cuando el resumen está pagado y es positivo", async () => {
+    try {
+      await sembrar(async (tx) => {
+        await tx.insert(movement).values(compra(CARD))
+        await tx.insert(installment).values(cuota(RES))
+      })
+
+      const sinFecha = await motivoDelRechazo(
+        withUser(USER_A, (tx) =>
+          tx
+            .update(cardStatement)
+            .set({ usdPaidArsCents: 150_000_00 })
+            .where(eq(cardStatement.id, RES)),
+        ),
+      )
+      expect(sinFecha).toMatch(/card_statement_usd_paid_ars_only_when_paid/)
+
+      const cero = await motivoDelRechazo(
+        withUser(USER_A, async (tx) => {
+          await tx
+            .update(cardStatement)
+            .set({ paidDate: "2026-04-01", usdPaidArsCents: 0 })
+            .where(eq(cardStatement.id, RES))
+          await tx
+            .update(installment)
+            .set({ paid: true, paidDate: "2026-04-01" })
+            .where(eq(installment.id, INS))
+        }),
+      )
+      expect(cero).toMatch(/card_statement_usd_paid_ars_only_when_paid/)
+
+      await withUser(USER_A, async (tx) => {
+        await tx
+          .update(cardStatement)
+          .set({ paidDate: "2026-04-01", usdPaidArsCents: 150_000_00 })
+          .where(eq(cardStatement.id, RES))
+        await tx
+          .update(installment)
+          .set({ paid: true, paidDate: "2026-04-01" })
+          .where(eq(installment.id, INS))
+      })
+    } finally {
+      await withUser(USER_A, async (tx) => {
+        await tx
+          .update(installment)
+          .set({ paid: false, paidDate: null })
+          .where(eq(installment.id, INS))
+        await tx
+          .update(cardStatement)
+          .set({ paidDate: null, usdPaidArsCents: null })
+          .where(eq(cardStatement.id, RES))
+      }).catch(() => {})
+      await limpiarTarjetas()
+    }
+  })
+})
+
+describe("tipo de cambio sólo en cambios de divisa", () => {
+  it("rechaza rate en ingresos/egresos y lo exige positivo en exchange", async () => {
+    const egresoConRate = await motivoDelRechazo(
+      withUser(USER_A, (tx) =>
+        tx.insert(movement).values({
+          id: "mov-rate-egreso",
+          userId: USER_A,
+          kind: "expense",
+          description: "Con TC",
+          categoryId: `cat-${USER_A}`,
+          date: "2026-01-10",
+          currency: "USD",
+          amountCents: 100_00,
+          rate: "1200",
+        }),
+      ),
+    )
+    expect(egresoConRate).toMatch(/movement_rate_only_exchange/)
+
+    const exchangeSinRate = await motivoDelRechazo(
+      withUser(USER_A, (tx) =>
+        tx.insert(movement).values({
+          id: "mov-rate-exchange-null",
+          userId: USER_A,
+          kind: "exchange",
+          description: "Sin TC",
+          categoryId: null,
+          date: "2026-01-10",
+          currency: "USD",
+          amountCents: 100_00,
+          rate: null,
+          direction: "buy",
+        }),
+      ),
+    )
+    expect(exchangeSinRate).toMatch(/movement_rate_only_exchange/)
+
+    const exchangeCero = await motivoDelRechazo(
+      withUser(USER_A, (tx) =>
+        tx.insert(movement).values({
+          id: "mov-rate-exchange-cero",
+          userId: USER_A,
+          kind: "exchange",
+          description: "TC cero",
+          categoryId: null,
+          date: "2026-01-10",
+          currency: "USD",
+          amountCents: 100_00,
+          rate: "0",
+          direction: "buy",
+        }),
+      ),
+    )
+    expect(exchangeCero).toMatch(/movement_rate_only_exchange/)
   })
 })

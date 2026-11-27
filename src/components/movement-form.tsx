@@ -34,7 +34,6 @@ import type { Category, MovementWithInstallments } from "@/server/queries"
 type Props = {
   kind: "income" | "expense"
   categories: Category[]
-  suggestedRate: number | null
   today: IsoDate
   movement?: MovementWithInstallments
   cards?: CardOption[]
@@ -46,10 +45,6 @@ type Row = { amount: string; dueDate: string }
 
 function centsToInput(cents: number): string {
   return formatAmountInput((cents / 100).toFixed(2).replace(".", ","))
-}
-
-function rateToInput(rate: string): string {
-  return String(Number(rate)).replace(".", ",")
 }
 
 function planKeyOf(totalCents: number, count: number, date: IsoDate, cardId: string): string {
@@ -85,7 +80,6 @@ function planSummary(
 export function MovementForm({
   kind,
   categories,
-  suggestedRate,
   today,
   movement,
   cards = [],
@@ -331,14 +325,6 @@ export function MovementForm({
       <input type="hidden" name="amountCents" value={amount} />
       <input type="hidden" name="creditCardId" value={isCard ? cardId : ""} />
       {!movement && <input type="hidden" name="settled" value={isSettled ? "true" : "false"} />}
-      {/*
-       * Un solo campo `rate` a la vez: en ARS va oculto en "1", en USD es el
-       * visible más abajo. Dos campos con el mismo `name` haría que
-       * formData.get("rate") devuelva siempre el primero del DOM y descarte
-       * en silencio lo que el usuario tipeó (o un campo vacío si dolarapi no
-       * respondió).
-       */}
-      {currency === "ARS" && <input type="hidden" name="rate" value="1" />}
 
       {/* El error general arriba (§5.2). Si la acción marcó campos, cada uno
           lleva el suyo al lado y acá sólo se avisa que hay que mirarlos. */}
@@ -467,40 +453,6 @@ export function MovementForm({
           />
           {errors.date && <p className="text-destructive text-xs">{errors.date[0]}</p>}
         </div>
-
-        {currency === "USD" && (
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor="rateVisible">Tipo de cambio</Label>
-            {/* Editando gana el TC con el que se guardó: es el del día de la
-                operación, y el sugerido de hoy no tiene nada que ver con ella.
-                Sólo si el movimiento estaba en pesos y se lo pasa a dólares acá
-                mismo no hay TC anterior, y ahí sí vale el sugerido. */}
-            <Input
-              id="rateVisible"
-              name="rate"
-              inputMode="decimal"
-              defaultValue={
-                movement && movement.currency === "USD"
-                  ? rateToInput(movement.rate)
-                  : (suggestedRate ?? "")
-              }
-              required
-              aria-invalid={errors.rate !== undefined}
-              className={cn(FIELD, "tabular-nums")}
-            />
-            {errors.rate ? (
-              <p className="text-destructive text-xs">{errors.rate[0]}</p>
-            ) : (
-              !movement && (
-                <p className="text-muted-foreground text-xs">
-                  {suggestedRate
-                    ? "Sugerido de hoy. Cambialo si operaste a otro valor."
-                    : "No pudimos traer la cotización. Escribila a mano."}
-                </p>
-              )
-            )}
-          </div>
-        )}
       </div>
 
       {/* Medio de pago (§1.4 del plan v2). Sin tarjetas cargadas no aparece:

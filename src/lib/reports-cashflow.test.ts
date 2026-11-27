@@ -1,99 +1,97 @@
 import { describe, expect, it } from "vitest"
 
-import { computeBalances } from "@/lib/balance"
 import { buildCashflowReport, type CashflowInput } from "@/lib/reports-cashflow"
+
+const OFFICIAL_RATE = {
+  compra: 1100,
+  venta: 1150,
+  fetchedAt: new Date("2026-11-15T17:30:00Z"),
+  stale: false,
+}
 
 const BASE: CashflowInput = {
   today: "2026-11-15",
-  from: "2026-10-01",
+  from: "2026-11-15",
   to: "2027-01-31",
   granularity: "mensual",
-  currencyMode: "ARS",
-  settings: {
-    initialBalanceArsCents: 100_000,
-    initialBalanceUsdCents: 10_000,
-    initialBalanceUsdRate: "1000",
-    initialBalanceDate: "2026-09-01",
-  },
-  paid: [],
-  exchanges: [],
+  balances: { arsCents: 100_000, usdCents: 10_00 },
   pending: [],
+  officialRate: OFFICIAL_RATE,
 }
 
 describe("buildCashflowReport", () => {
-  it("arranca cada mes con el saldo real acumulado previo e incluye compra/venta en cada moneda", () => {
-    const paid = [
-      { paidDate: "2026-09-10" as const, amountCents: 50_000, currency: "ARS", kind: "income", rate: "1" },
-      { paidDate: "2026-10-05" as const, amountCents: 20_000, currency: "ARS", kind: "expense", rate: "1" },
-      { paidDate: "2026-08-20" as const, amountCents: 999_999, currency: "ARS", kind: "income", rate: "1" },
-    ]
-    const exchanges = [
-      { date: "2026-10-20" as const, amountCents: 1_000, rate: "1200", direction: "buy" },
-    ]
-
-    const ars = buildCashflowReport({ ...BASE, paid, exchanges, currencyMode: "ARS" })
-    const octArs = ars.rows.find((r) => r.key === "2026-10")!
-    expect(octArs).toMatchObject({
-      kind: "real",
-      initialCents: 150_000,
-      inflowsCents: 0,
-      outflowsCents: 20_000 + 1_200_000,
-      closingCents: 150_000 - 20_000 - 1_200_000,
-    })
-
-    const balances = computeBalances(
-      {
-        initialArsCents: BASE.settings.initialBalanceArsCents,
-        initialUsdCents: BASE.settings.initialBalanceUsdCents,
-        initialDate: BASE.settings.initialBalanceDate,
-      },
-      paid.map((p) => ({
-        paidDate: p.paidDate,
-        currency: p.currency as "ARS" | "USD",
-        kind: p.kind as "income" | "expense",
-        amountCents: p.amountCents,
-      })),
-      exchanges.map((e) => ({
-        date: e.date,
-        direction: e.direction as "buy" | "sell",
-        usdCents: e.amountCents,
-        rate: Number(e.rate),
-      })),
-    )
-    expect(ars.currentBalanceCents).toBe(balances.arsCents)
-    expect(ars.rows.find((r) => r.key === "2026-11")?.closingCents).toBe(balances.arsCents)
-
-    const usd = buildCashflowReport({ ...BASE, paid, exchanges, currencyMode: "USD" })
-    expect(usd.currentBalanceCents).toBe(balances.usdCents)
-    expect(usd.rows.find((r) => r.key === "2026-10")).toMatchObject({
-      initialCents: 10_000,
-      inflowsCents: 1_000,
-      outflowsCents: 0,
-      closingCents: 11_000,
-    })
-
-    const todo = buildCashflowReport({ ...BASE, paid, exchanges, currencyMode: "todo" })
-    expect(todo.rows.find((r) => r.key === "2026-10")).toMatchObject({
-      initialCents: 10_150_000,
-      inflowsCents: 0,
-      outflowsCents: 20_000,
-    })
-  })
-
-  it("separa Atrasado del mes actual, combina real + pendiente del resto del mes y avisa si queda negativo", () => {
+  it("arranca desde hoy con saldo $ + saldo US$ × compra, e ingresos USD × compra / egresos USD × venta", () => {
     const view = buildCashflowReport({
       ...BASE,
-      paid: [
-        { paidDate: "2026-11-05", amountCents: 20_000, currency: "ARS", kind: "income", rate: "1" },
-      ],
       pending: [
-        { id: "p1", dueDate: "2026-11-01", amountCents: 70_000, currency: "ARS", rate: "1", kind: "expense" },
-        { id: "p2", dueDate: "2026-11-25", amountCents: 40_000, currency: "ARS", rate: "1", kind: "expense" },
-        { id: "p3", dueDate: "2026-12-10", amountCents: 30_000, currency: "ARS", rate: "1", kind: "expense" },
+        // Ingreso USD en noviembre (después de hoy): 20 × 1100 = 22.000
+        { id: "i1", dueDate: "2026-11-20", amountCents: 20_00, currency: "USD", kind: "income" },
+        // Egreso USD en noviembre (tarjeta): 10 × 1150 = 11.500
+        {
+          id: "e1",
+          dueDate: "2026-11-25",
+          amountCents: 10_00,
+          currency: "USD",
+          kind: "expense",
+          statementId: "st1",
+          statementPeriod: "2026-11",
+          cardId: "c1",
+          cardName: "Visa",
+        },
+        // Egreso ARS en diciembre
+        { id: "e2", dueDate: "2026-12-10", amountCents: 50_000, currency: "ARS", kind: "expense" },
       ],
     })
 
-    expect(view.overdue).toEqual({
+    // Punto de partida: 100.000 + 10_00 * 1100 = 1.200.000
+    expect(view.usdBalanceInArsCents).toBe(1_100_000)
+    expect(view.currentBalanceCents).toBe(1_200_000)
+    expect(view.missingRateForUsd).toBe(false)
+
+    const nov = view.rows.find((r) => r.key === "2026-11")!
+    expect(nov).toMatchObject({
+      from: "2026-11-15",
+      to: "2026-11-30",
+      initialCents: 1_200_000,
+      inflowsCents: 2_200_000,
+      outflowsCents: 1_150_000,
+      netCents: 1_050_000,
+      closingCents: 2_250_000,
+    })
+
+    const dec = view.rows.find((r) => r.key === "2026-12")!
+    expect(dec).toMatchObject({
+      initialCents: 2_250_000,
+      outflowsCents: 50_000,
+      closingCents: 2_200_000,
+    })
+
+    expect(view.upcomingCards).toEqual([
+      {
+        id: "st1",
+        cardId: "c1",
+        cardName: "Visa",
+        period: "2026-11",
+        dueDate: "2026-11-25",
+        arsCents: 0,
+        usdCents: 10_00,
+        usdInArsCents: 1_150_000,
+      },
+    ])
+  })
+
+  it("separa Atrasado del mes actual y avisa si queda negativo contando lo atrasado", () => {
+    const view = buildCashflowReport({
+      ...BASE,
+      balances: { arsCents: 100_000, usdCents: 0 },
+      pending: [
+        { id: "p1", dueDate: "2026-11-01", amountCents: 70_000, currency: "ARS", kind: "expense" },
+        { id: "p2", dueDate: "2026-11-25", amountCents: 40_000, currency: "ARS", kind: "expense" },
+        { id: "p3", dueDate: "2026-12-10", amountCents: 30_000, currency: "ARS", kind: "expense" },
+      ],
+    })
+
+    expect(view.overdue).toMatchObject({
       expenseCents: 70_000,
       incomeCents: 0,
       netCents: -70_000,
@@ -101,28 +99,16 @@ describe("buildCashflowReport", () => {
       incomeCount: 0,
     })
 
-    const nov = view.rows.find((r) => r.key === "2026-11")!
-    expect(nov).toMatchObject({
-      kind: "mixed",
+    expect(view.rows.find((r) => r.key === "2026-11")).toMatchObject({
       initialCents: 100_000,
-      inflowsCents: 20_000,
       outflowsCents: 40_000,
-      netCents: -20_000,
-      closingCents: 80_000,
-    })
-
-    const dec = view.rows.find((r) => r.key === "2026-12")!
-    expect(dec).toMatchObject({
-      kind: "projected",
-      initialCents: 80_000,
-      outflowsCents: 30_000,
-      closingCents: 50_000,
+      closingCents: 60_000,
     })
 
     expect(view.negativeAlert).toEqual({
-      periodKey: "2026-12",
-      periodLabel: "diciembre",
-      shortageCents: 20_000,
+      periodKey: "2026-11",
+      periodLabel: "noviembre",
+      shortageCents: 10_000,
       includesOverdue: true,
     })
   })
@@ -130,19 +116,18 @@ describe("buildCashflowReport", () => {
   it("arma ventanas semanales móviles de 7 días para los próximos 3 meses", () => {
     const view = buildCashflowReport({
       ...BASE,
-      today: "2026-11-15",
+      balances: { arsCents: 100_000, usdCents: 0 },
       granularity: "semanal",
       pending: [
-        { id: "p1", dueDate: "2026-11-15", amountCents: 30_000, currency: "ARS", rate: "1", kind: "expense" },
-        { id: "p2", dueDate: "2026-11-23", amountCents: 150_000, currency: "ARS", rate: "1", kind: "expense" },
-        { id: "p3", dueDate: "2027-02-20", amountCents: 999_000, currency: "ARS", rate: "1", kind: "expense" },
+        { id: "p1", dueDate: "2026-11-15", amountCents: 30_000, currency: "ARS", kind: "expense" },
+        { id: "p2", dueDate: "2026-11-23", amountCents: 150_000, currency: "ARS", kind: "expense" },
+        { id: "p3", dueDate: "2027-02-20", amountCents: 999_000, currency: "ARS", kind: "expense" },
       ],
     })
 
     expect(view.rows[0]).toMatchObject({
       from: "2026-11-15",
       to: "2026-11-21",
-      kind: "projected",
       initialCents: 100_000,
       outflowsCents: 30_000,
       closingCents: 70_000,
@@ -163,40 +148,19 @@ describe("buildCashflowReport", () => {
     })
   })
 
-  it("deja en cero y marcados como previos los meses anteriores al saldo inicial", () => {
+  it("sin cotización oficial no convierte los dólares y marca missingRateForUsd", () => {
     const view = buildCashflowReport({
       ...BASE,
-      from: "2026-08-01",
-      to: "2026-10-31",
-      paid: [
-        { paidDate: "2026-08-15", amountCents: 50_000, currency: "ARS", kind: "expense", rate: "1" },
+      officialRate: null,
+      pending: [
+        { id: "u1", dueDate: "2026-11-20", amountCents: 50_00, currency: "USD", kind: "expense" },
+        { id: "a1", dueDate: "2026-11-20", amountCents: 20_000, currency: "ARS", kind: "expense" },
       ],
     })
 
-    expect(view.rows[0]).toMatchObject({
-      key: "2026-08",
-      beforeInitialBalance: true,
-      initialCents: 0,
-      outflowsCents: 0,
-      closingCents: 0,
-    })
-    expect(view.rows[1]).toMatchObject({
-      key: "2026-09",
-      beforeInitialBalance: false,
-      initialCents: 100_000,
-    })
-  })
-
-  it("ignora cambios de divisa con fecha futura de forma consistente con el saldo real", () => {
-    const view = buildCashflowReport({
-      ...BASE,
-      exchanges: [
-        { date: "2026-11-25", amountCents: 1_000, rate: "1200", direction: "buy" },
-      ],
-    })
-    const nov = view.rows.find((r) => r.key === "2026-11")!
+    expect(view.missingRateForUsd).toBe(true)
+    expect(view.usdBalanceInArsCents).toBeNull()
     expect(view.currentBalanceCents).toBe(100_000)
-    expect(nov.outflowsCents).toBe(0)
-    expect(nov.closingCents).toBe(100_000)
+    expect(view.rows[0].outflowsCents).toBe(20_000)
   })
 })

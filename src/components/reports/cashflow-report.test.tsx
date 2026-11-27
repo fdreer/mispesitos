@@ -23,24 +23,22 @@ global.ResizeObserver ??= class {
 afterEach(cleanup)
 
 describe("CashflowReport", () => {
-  it("muestra aviso de saldo proyectado negativo, bloque de Atrasado aparte y estilos por tipo de período", () => {
+  it("muestra aviso de saldo proyectado negativo, panel lateral con saldos, cotización y atrasado", () => {
     const view = buildCashflowReport({
       today: "2026-11-15",
-      from: "2026-10-01",
+      from: "2026-11-15",
       to: "2026-12-31",
       granularity: "mensual",
-      currencyMode: "ARS",
-      settings: {
-        initialBalanceArsCents: 100_000_00,
-        initialBalanceUsdCents: 0,
-        initialBalanceUsdRate: "0",
-        initialBalanceDate: "2026-09-01",
+      balances: { arsCents: 100_000_00, usdCents: 50_00 },
+      officialRate: {
+        compra: 1000,
+        venta: 1100,
+        fetchedAt: new Date("2026-11-15T17:30:00Z"),
+        stale: false,
       },
-      paid: [],
-      exchanges: [],
       pending: [
-        { id: "p-atrasado", dueDate: "2026-11-01", amountCents: 40_000_00, currency: "ARS", rate: "1", kind: "expense" },
-        { id: "p-dic", dueDate: "2026-12-10", amountCents: 120_000_00, currency: "ARS", rate: "1", kind: "expense" },
+        { id: "p-atrasado", dueDate: "2026-11-01", amountCents: 40_000_00, currency: "ARS", kind: "expense" },
+        { id: "p-dic", dueDate: "2026-12-10", amountCents: 200_000_00, currency: "ARS", kind: "expense" },
       ],
     })
 
@@ -48,15 +46,13 @@ describe("CashflowReport", () => {
 
     const alerta = screen.getByRole("alert")
     expect(alerta.textContent).toContain("En diciembre te faltarían")
-    expect(alerta.textContent).toContain("60.000")
+    expect(alerta.textContent).toContain("90.000")
 
-    expect(screen.getByText(/Atrasado:/)).toBeTruthy()
+    expect(screen.getByText("Atrasado")).toBeTruthy()
     expect(screen.getByRole("link", { name: "Ver egresos vencidos" }).getAttribute("href")).toBe(
       "/egresos?status=overdue",
     )
-
-    expect(screen.getByText("Real")).toBeTruthy()
-    expect(screen.getByText("En curso")).toBeTruthy()
-    expect(screen.getByText("Proyectado")).toBeTruthy()
+    expect(screen.getByText("Saldos de hoy")).toBeTruthy()
+    expect(screen.getByText(/Compra/)).toBeTruthy()
   })
 })

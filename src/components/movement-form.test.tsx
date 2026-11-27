@@ -39,7 +39,7 @@ describe("MovementForm", () => {
 
   it("regenera el plan cuando la fecha cambia", () => {
     const { container } = render(
-      <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+      <MovementForm kind="expense" categories={CATEGORIAS} today="2026-08-10" />,
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
@@ -60,7 +60,7 @@ describe("MovementForm", () => {
     { kind: "expense" as const, label: /Pagado/ },
   ])("arranca marcado como $kind inmediato y oculta las cuotas hasta desactivarlo", ({ kind, label }) => {
     const { container } = render(
-      <MovementForm kind={kind} categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+      <MovementForm kind={kind} categories={CATEGORIAS} today="2026-08-10" />,
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
@@ -84,7 +84,7 @@ describe("MovementForm", () => {
 
   it("las cuotas se muestran en pesos y viajan en centavos", () => {
     const { container } = render(
-      <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+      <MovementForm kind="expense" categories={CATEGORIAS} today="2026-08-10" />,
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
@@ -104,7 +104,7 @@ describe("MovementForm", () => {
 
   it("una cuota editada a mano se reenvía en centavos", () => {
     const { container } = render(
-      <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+      <MovementForm kind="expense" categories={CATEGORIAS} today="2026-08-10" />,
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
@@ -121,7 +121,7 @@ describe("MovementForm", () => {
 
   it("no genera más de 120 filas de cuota aunque se tipee un número enorme", () => {
     render(
-      <MovementForm kind="expense" categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+      <MovementForm kind="expense" categories={CATEGORIAS} today="2026-08-10" />,
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
@@ -142,7 +142,7 @@ const MOVIMIENTO = {
   date: "2026-05-03",
   currency: "ARS",
   amountCents: 120_000,
-  rate: "1.0000",
+  rate: null,
   direction: null,
   creditCardId: null,
   createdAt: new Date("2026-05-03T12:00:00Z"),
@@ -192,7 +192,6 @@ function editar() {
     <MovementForm
       kind="expense"
       categories={CATEGORIAS}
-      suggestedRate={null}
       today="2026-08-10"
       movement={MOVIMIENTO}
     />,
@@ -266,7 +265,7 @@ describe("MovementForm editando", () => {
 
     it("al dar de alta, nunca arranca en un padre: arranca en su primera subcategoría", () => {
       const { container } = render(
-        <MovementForm kind="expense" categories={CON_SUBCATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+        <MovementForm kind="expense" categories={CON_SUBCATEGORIAS} today="2026-08-10" />,
       )
       const campo = container.querySelector<HTMLInputElement>('input[name="categoryId"]')
       expect(campo?.value).toBe("a")
@@ -280,7 +279,7 @@ describe("MovementForm editando", () => {
         fieldErrors: { categoryId: [mensaje] },
       })
       const { container } = render(
-        <MovementForm kind="expense" categories={CON_SUBCATEGORIAS} suggestedRate={null} today="2026-08-10" />,
+        <MovementForm kind="expense" categories={CON_SUBCATEGORIAS} today="2026-08-10" />,
       )
 
       await act(async () => {
@@ -310,7 +309,6 @@ function alta(props: Partial<React.ComponentProps<typeof MovementForm>> = {}) {
     <MovementForm
       kind="expense"
       categories={CATEGORIAS}
-      suggestedRate={null}
       today="2026-08-10"
       {...props}
     />,
@@ -330,12 +328,12 @@ describe("MovementForm, el formulario de carga", () => {
     expect(importe.value).toBe("1.500.000")
   })
 
-  it("la moneda es un segmentado y cambia el prefijo", () => {
+  it("la moneda es un segmentado y cambia el prefijo sin pedir tipo de cambio", () => {
     alta()
     expect(screen.getByRole("radiogroup", { name: "Moneda" })).toBeTruthy()
     fireEvent.click(screen.getByRole("radio", { name: "USD" }))
     expect(screen.getByText("US$")).toBeTruthy()
-    expect(screen.getByLabelText("Tipo de cambio")).toBeTruthy()
+    expect(screen.queryByLabelText("Tipo de cambio")).toBeNull()
   })
 
   it("los atajos y el stepper cambian la cantidad de cuotas", () => {
