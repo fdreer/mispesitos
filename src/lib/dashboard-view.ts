@@ -1,4 +1,4 @@
-import { computeBalances } from "@/lib/balance"
+import { computeBalances, type Balances } from "@/lib/balance"
 import { monthlyTotals } from "@/lib/dashboard"
 import { spendByParent, type SpendGroup, type TreeCategory } from "@/lib/category-tree"
 import { addMonthsClamped, isOverdue, monthKey, monthRange, type IsoDate } from "@/lib/dates"
@@ -50,8 +50,15 @@ export type DashboardInput = {
     initialBalanceDate: IsoDate
   }
   officialRate: OfficialRateSnapshot | null
+  /**
+   * El saldo de hoy ya calculado (`getBalances` lo suma en la base). Sin él se
+   * calcula con `paid` y `exchanges`, que entonces tienen que traer TODA la
+   * historia; con él, `paid` alcanza con la ventana de los gráficos.
+   */
+  balances?: Balances
   paid: PaidRow[]
-  exchanges: ExchangeRow[]
+  /** Sólo hacen falta sin `balances`. */
+  exchanges?: ExchangeRow[]
   pending: PendingRow[]
   /** Las fechas de cierre de los resúmenes, para saber si ya se pueden pagar. */
   statements?: readonly { id: string; closingDate: IsoDate }[]
@@ -147,26 +154,28 @@ const byDueDate = (a: { dueDate: IsoDate }, b: { dueDate: IsoDate }) =>
 export function buildDashboardView(input: DashboardInput): DashboardView {
   const { today, settings, officialRate } = input
 
-  const balances = computeBalances(
-    {
-      initialArsCents: settings.initialBalanceArsCents,
-      initialUsdCents: settings.initialBalanceUsdCents,
-      initialDate: settings.initialBalanceDate,
-    },
-    input.paid.map((p) => ({
-      paidDate: p.paidDate,
-      currency: assertCurrency(p.currency),
-      kind: assertInstallmentMovementKind(p.kind),
-      amountCents: p.amountCents,
-    })),
-    input.exchanges.map((e) => ({
-      date: e.date,
-      direction: assertExchangeDirection(e.direction),
-      usdCents: e.amountCents,
-      rate: Number(e.rate),
-    })),
-    today,
-  )
+  const balances =
+    input.balances ??
+    computeBalances(
+      {
+        initialArsCents: settings.initialBalanceArsCents,
+        initialUsdCents: settings.initialBalanceUsdCents,
+        initialDate: settings.initialBalanceDate,
+      },
+      input.paid.map((p) => ({
+        paidDate: p.paidDate,
+        currency: assertCurrency(p.currency),
+        kind: assertInstallmentMovementKind(p.kind),
+        amountCents: p.amountCents,
+      })),
+      (input.exchanges ?? []).map((e) => ({
+        date: e.date,
+        direction: assertExchangeDirection(e.direction),
+        usdCents: e.amountCents,
+        rate: Number(e.rate),
+      })),
+      today,
+    )
 
   const consolidatedArsCents =
     officialRate === null

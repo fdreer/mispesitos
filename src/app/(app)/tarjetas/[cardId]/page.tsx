@@ -23,7 +23,6 @@ import { CategoryBadge } from "@/components/category-badge"
 import { Badge } from "@/components/ui/badge"
 import { buttonVariants } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { computeBalances } from "@/lib/balance"
 import {
   addPeriods,
   availableCredit,
@@ -38,24 +37,10 @@ import {
 import { categoryLabels } from "@/lib/category-tree"
 import { formatIsoForDisplay, todayInAr } from "@/lib/dates"
 import { convertToArs, formatMoney } from "@/lib/money"
-import {
-  assertCurrency,
-  assertExchangeDirection,
-  assertInstallmentMovementKind,
-} from "@/lib/movement-asserts"
+import { assertCurrency } from "@/lib/movement-asserts"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
 import { cn } from "@/lib/utils"
-import {
-  getCard,
-  listStatementInstallments,
-  listStatementSummaries,
-  listUnpaidCardInstallments,
-} from "@/server/card-queries"
-import {
-  listCategories,
-  listExchanges,
-  listPaidInstallments,
-} from "@/server/queries"
+import { getCardDetailData, getStatementDetailData } from "@/server/page-data"
 import { resolveOfficialRate } from "@/server/rate"
 import { requireSettings } from "@/server/session"
 
@@ -70,15 +55,13 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
 
   const { user, settings } = await requireSettings()
   const today = todayInAr()
-  const card = await getCard(user.id, cardId)
-  if (!card) notFound()
-
-  const [statements, categories, officialRate, unpaid] = await Promise.all([
-    listStatementSummaries(user.id, card.id),
-    listCategories(user.id, "expense", true),
+  // La tarjeta sale junto con todo lo que no depende del resumen elegido:
+  // una sola transacción, y la cotización en paralelo.
+  const [{ card, statements, categories, unpaid }, officialRate] = await Promise.all([
+    getCardDetailData(user.id, cardId),
     resolveOfficialRate(user.id, settings),
-    card.creditLimitCents !== null ? listUnpaidCardInstallments(user.id) : Promise.resolve([]),
   ])
+  if (!card) notFound()
   const { open, current } = cardOverview(card, statements, today)
 
   const rawPeriod = (await searchParams).periodo
@@ -95,37 +78,14 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
     }
 
   const needsUsdPaymentInfo = statement.totals.usdCents > 0 && statement.paidDate === null
-  const [installments, suggestedRate, paidInstallments, exchanges] = await Promise.all([
-    statement.id ? listStatementInstallments(user.id, statement.id) : Promise.resolve([]),
+  const [{ installments, usdBalanceCents }, suggestedRate] = await Promise.all([
+    // El saldo en dólares se suma en la base (`getBalances`), sin traer el
+    // historial de cuotas pagadas y cambios.
+    getStatementDetailData(user.id, settings, today, statement.id, needsUsdPaymentInfo),
     needsUsdPaymentInfo
       ? fetchSuggestedRate(settings.preferredRate as RatePreference)
       : Promise.resolve(null),
-    needsUsdPaymentInfo ? listPaidInstallments(user.id) : Promise.resolve([]),
-    needsUsdPaymentInfo ? listExchanges(user.id) : Promise.resolve([]),
   ])
-
-  const usdBalanceCents = needsUsdPaymentInfo
-    ? computeBalances(
-        {
-          initialArsCents: settings.initialBalanceArsCents,
-          initialUsdCents: settings.initialBalanceUsdCents,
-          initialDate: settings.initialBalanceDate,
-        },
-        paidInstallments.map((p) => ({
-          paidDate: p.paidDate,
-          currency: assertCurrency(p.currency),
-          kind: assertInstallmentMovementKind(p.kind),
-          amountCents: p.amountCents,
-        })),
-        exchanges.map((e) => ({
-          date: e.date,
-          direction: assertExchangeDirection(e.direction),
-          usdCents: e.amountCents,
-          rate: Number(e.rate),
-        })),
-        today,
-      ).usdCents
-    : 0
 
   const labels = categoryLabels(categories)
 
@@ -151,11 +111,7 @@ export default async function TarjetaPage({ params, searchParams }: Props) {
   const officialSellRate = officialRate?.venta ?? null
 
   const color = cardColor(card)
-  const available = availableCredit(
-    card.creditLimitCents,
-    unpaid.filter((i) => i.cardId === card.id),
-    officialSellRate,
-  )
+  const available = availableCredit(card.creditLimitCents, unpaid, officialSellRate)
   const stateByPeriod = new Map<string, StatementState>(
     statements.map((s) => [s.period, statementState(s, today)]),
   )

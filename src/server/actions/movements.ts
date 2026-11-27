@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto"
 import { revalidatePath } from "next/cache"
-import { and, eq, inArray } from "drizzle-orm"
+import { and, eq, exists, inArray, isNotNull, not, sql } from "drizzle-orm"
 import { z } from "zod"
 
 import { withUser, type Tx } from "@/db/client"
@@ -29,22 +29,32 @@ import { requireUser } from "@/server/session"
 const CATEGORIA_NO_HOJA = "Esa categoría tiene subcategorías: elegí una de ellas."
 const CATEGORIA_ARCHIVADA = "Esa categoría está archivada."
 
-async function categoryHasChildren(tx: Tx, userId: string, categoryId: string): Promise<boolean> {
-  const [child] = await tx
-    .select({ id: category.id })
-    .from(category)
-    .where(and(eq(category.parentId, categoryId), eq(category.userId, userId)))
-    .limit(1)
-  return child !== undefined
+type CategoryState = {
+  /** Null si la categoría no existe (o es de otro usuario). */
+  kind: string | null
+  archived: boolean
+  hasChildren: boolean
 }
 
-async function isCategoryArchived(tx: Tx, userId: string, categoryId: string): Promise<boolean> {
+/**
+ * Lo que las acciones necesitan saber de una categoría antes de usarla, en
+ * una sola consulta: si está archivada, si tiene hijas (sólo se carga en
+ * hojas) y de qué tipo es.
+ */
+async function categoryState(tx: Tx, userId: string, categoryId: string): Promise<CategoryState> {
   const [row] = await tx
-    .select({ archived: category.archived })
+    .select({
+      kind: category.kind,
+      archived: category.archived,
+      hasChildren: sql<boolean>`exists (
+        select 1 from ${category} ch
+        where ch."parent_id" = ${category.id} and ch."user_id" = ${userId}
+      )`,
+    })
     .from(category)
     .where(and(eq(category.id, categoryId), eq(category.userId, userId)))
     .limit(1)
-  return Boolean(row?.archived)
+  return row ?? { kind: null, archived: false, hasChildren: false }
 }
 
 const categoryNotLeaf = () => failure(CATEGORIA_NO_HOJA, { categoryId: [CATEGORIA_NO_HOJA] })
@@ -121,8 +131,9 @@ export async function createMovement(
 
   try {
     const resultado = await withUser(user.id, async (tx) => {
-      if (await isCategoryArchived(tx, user.id, input.categoryId)) return categoryArchived()
-      if (await categoryHasChildren(tx, user.id, input.categoryId)) return categoryNotLeaf()
+      const cat = await categoryState(tx, user.id, input.categoryId)
+      if (cat.archived) return categoryArchived()
+      if (cat.hasChildren) return categoryNotLeaf()
 
       const cardPlan =
         cardId === null
@@ -189,19 +200,28 @@ const EDITABLE_KINDS = ["income", "expense"]
 
 type MovementInput = z.output<typeof movementSchema>
 
-/**
- * El corazón de `updateMovement`, adentro de una transacción ya abierta:
- * valida categoría, cuotas pagas y tarjeta, y reemplaza el movimiento y su
- * plan de cuotas. Lo reutiliza `patchMovement` para la edición inline de
- * fecha e importe, así las reglas viven en un solo lugar.
- */
-async function applyMovementUpdate(
+type CurrentMovement = {
+  kind: string
+  creditCardId: string | null
+  date: IsoDate
+  categoryId: string | null
+}
+
+type PreviousInstallment = {
+  id: string
+  number: number
+  amountCents: number
+  dueDate: IsoDate
+  paid: boolean
+  paidDate: IsoDate | null
+  statementId: string | null
+}
+
+async function loadCurrentMovement(
   tx: Tx,
   userId: string,
   id: string,
-  input: MovementInput,
-  cardId: string | null,
-): Promise<ActionResult> {
+): Promise<CurrentMovement | undefined> {
   const [actual] = await tx
     .select({
       kind: movement.kind,
@@ -217,27 +237,50 @@ async function applyMovementUpdate(
         inArray(movement.kind, EDITABLE_KINDS),
       ),
     )
-  if (!actual) return failure("Ese movimiento no existe.")
-  if (cardId !== null && actual.kind !== "expense") return failure(SOLO_EGRESOS)
+  return actual
+}
 
-  const previas = await tx
+function loadInstallments(tx: Tx, userId: string, id: string): Promise<PreviousInstallment[]> {
+  return tx
     .select({
+      id: installment.id,
       number: installment.number,
       amountCents: installment.amountCents,
+      dueDate: installment.dueDate,
       paid: installment.paid,
       paidDate: installment.paidDate,
       statementId: installment.statementId,
     })
     .from(installment)
     .where(and(eq(installment.movementId, id), eq(installment.userId, userId)))
+}
 
-  if (
-    input.categoryId !== actual.categoryId &&
-    (await isCategoryArchived(tx, userId, input.categoryId))
-  ) {
-    return categoryArchived()
-  }
-  if (await categoryHasChildren(tx, userId, input.categoryId)) return categoryNotLeaf()
+/**
+ * El corazón de `updateMovement`, adentro de una transacción ya abierta:
+ * valida categoría, cuotas pagas y tarjeta, y reemplaza el movimiento y su
+ * plan de cuotas. Lo reutiliza `patchMovement` para la edición inline de
+ * fecha e importe, así las reglas viven en un solo lugar; `patchMovement` ya
+ * leyó el movimiento y sus cuotas y los pasa en `loaded` para no releerlos.
+ */
+async function applyMovementUpdate(
+  tx: Tx,
+  userId: string,
+  id: string,
+  input: MovementInput,
+  cardId: string | null,
+  loaded?: { actual: CurrentMovement; previas: PreviousInstallment[] },
+): Promise<ActionResult> {
+  const actual = loaded?.actual ?? (await loadCurrentMovement(tx, userId, id))
+  if (!actual) return failure("Ese movimiento no existe.")
+  if (cardId !== null && actual.kind !== "expense") return failure(SOLO_EGRESOS)
+
+  const [previas, cat] = await Promise.all([
+    loaded?.previas ?? loadInstallments(tx, userId, id),
+    categoryState(tx, userId, input.categoryId),
+  ])
+
+  if (input.categoryId !== actual.categoryId && cat.archived) return categoryArchived()
+  if (cat.hasChildren) return categoryNotLeaf()
 
   const masAlta = highestPaidNumber(previas)
   if (masAlta > input.installments.length) {
@@ -289,6 +332,18 @@ async function applyMovementUpdate(
     .returning({ id: movement.id })
 
   if (actualizado.length === 0) return failure("Ese movimiento no existe.")
+
+  // Una cuota que sigue siendo una, sin tarjeta (lo más común: la edición
+  // inline de fecha o importe): se actualiza en el lugar, sin regenerar la
+  // fila. Pagada y fecha de pago no se tocan, igual que en el reemplazo.
+  if (!cardPlan && previas.length === 1 && input.installments.length === 1) {
+    const [cuota] = input.installments
+    await tx
+      .update(installment)
+      .set({ amountCents: cuota.amountCents, dueDate: cuota.dueDate, statementId: null })
+      .where(and(eq(installment.id, previas[0].id), eq(installment.userId, userId)))
+    return success()
+  }
 
   const pagoPorNumero = new Map(previas.map((p) => [p.number, p]))
 
@@ -449,13 +504,10 @@ export async function patchMovement(id: string, patch: MovementPatch): Promise<A
 
       if ("categoryId" in cambio) {
         if (cambio.categoryId === actual.categoryId) return success()
-        if (await isCategoryArchived(tx, user.id, cambio.categoryId)) return categoryArchived()
-        if (await categoryHasChildren(tx, user.id, cambio.categoryId)) return categoryNotLeaf()
-        const [cat] = await tx
-          .select({ kind: category.kind })
-          .from(category)
-          .where(and(eq(category.id, cambio.categoryId), eq(category.userId, user.id)))
-        if (!cat || cat.kind !== actual.kind) return failure("Esa categoría no existe.")
+        const cat = await categoryState(tx, user.id, cambio.categoryId)
+        if (cat.archived) return categoryArchived()
+        if (cat.hasChildren) return categoryNotLeaf()
+        if (cat.kind !== actual.kind) return failure("Esa categoría no existe.")
 
         await tx
           .update(movement)
@@ -464,10 +516,7 @@ export async function patchMovement(id: string, patch: MovementPatch): Promise<A
         return success()
       }
 
-      const cuotas = await tx
-        .select({ amountCents: installment.amountCents, dueDate: installment.dueDate })
-        .from(installment)
-        .where(and(eq(installment.movementId, movementId), eq(installment.userId, user.id)))
+      const cuotas = await loadInstallments(tx, user.id, movementId)
       if (cuotas.length !== 1) return failure(VARIAS_CUOTAS)
       if (!actual.categoryId) return failure("Elegí una categoría primero.")
 
@@ -490,7 +539,10 @@ export async function patchMovement(id: string, patch: MovementPatch): Promise<A
         amountCents,
         installments: [{ amountCents, dueDate }],
       }
-      return applyMovementUpdate(tx, user.id, movementId, input, actual.creditCardId)
+      return applyMovementUpdate(tx, user.id, movementId, input, actual.creditCardId, {
+        actual,
+        previas: cuotas,
+      })
     })
     if (!resultado.ok) return resultado
   } catch (error) {
@@ -571,43 +623,45 @@ export async function deleteMovement(id: string): Promise<ActionResult> {
 
   try {
     const result = await withUser(user.id, async (tx) => {
-      // Una cuota de tarjeta pagada implica un resumen pagado (trigger
-      // `installment_matches_statement`). Borrar la compra alteraría en silencio
-      // el total de un resumen cerrado y ya pagado.
-      const [paidStatementInstallment] = await tx
-        .select({ id: installment.id })
-        .from(installment)
-        .where(
-          and(
-            eq(installment.movementId, parsed.data),
-            eq(installment.userId, user.id),
-            eq(installment.paid, true),
-          ),
-        )
-        .limit(1)
-
-      // Solo bloqueamos cuando la cuota paga pertenece a un resumen de tarjeta:
-      // en efectivo/débito borrar un movimiento pagado sigue estando permitido.
-      if (paidStatementInstallment) {
-        const [onCard] = await tx
-          .select({ creditCardId: movement.creditCardId })
-          .from(movement)
-          .where(and(eq(movement.id, parsed.data), eq(movement.userId, user.id)))
-          .limit(1)
-        if (onCard?.creditCardId !== null && onCard?.creditCardId !== undefined) {
-          return failure(
-            "Tiene cuotas en un resumen de tarjeta ya pagado: desmarcalo antes de borrar la compra.",
-          )
-        }
-      }
-
-      // Las cuotas caen solas por el ON DELETE CASCADE.
+      const byId = and(eq(movement.id, parsed.data), eq(movement.userId, user.id))
+      /*
+       * Una cuota de tarjeta pagada implica un resumen pagado (trigger
+       * `installment_matches_statement`). Borrar la compra alteraría en
+       * silencio el total de un resumen cerrado y ya pagado. Sólo se bloquea
+       * eso: en efectivo/débito borrar un movimiento pagado está permitido.
+       *
+       * La regla va adentro del DELETE: en el caso común es una sola
+       * sentencia. Las cuotas caen solas por el ON DELETE CASCADE.
+       */
+      const paidOnCard = and(
+        isNotNull(movement.creditCardId),
+        exists(
+          tx
+            .select({ one: sql`1` })
+            .from(installment)
+            .where(
+              and(
+                eq(installment.movementId, movement.id),
+                eq(installment.userId, user.id),
+                eq(installment.paid, true),
+              ),
+            ),
+        ),
+      )!
       const deleted = await tx
         .delete(movement)
-        .where(and(eq(movement.id, parsed.data), eq(movement.userId, user.id)))
+        .where(and(byId, not(paidOnCard)))
         .returning({ id: movement.id })
-      if (deleted.length === 0) return failure("Ese movimiento no existe.")
-      return success()
+      if (deleted.length > 0) return success()
+
+      // No borró nada: o no existe, o lo frenó la regla de arriba.
+      const [blocked] = await tx.select({ id: movement.id }).from(movement).where(byId).limit(1)
+      if (blocked) {
+        return failure(
+          "Tiene cuotas en un resumen de tarjeta ya pagado: desmarcalo antes de borrar la compra.",
+        )
+      }
+      return failure("Ese movimiento no existe.")
     })
     if (!result.ok) return result
   } catch (error) {
@@ -722,11 +776,13 @@ export async function fetchMovementListPage(
   }
 
   const today = todayInAr()
+  // Sin totales: la lista móvil ya los tiene de la primera página.
   const view = await queryMovementsView(
     user.id,
     parsed.data.kind,
     { ...parsed.data.query, page: parsed.data.page },
     today,
+    { includeTotals: false },
   )
   return {
     items: view.items,

@@ -178,6 +178,9 @@ export const cardStatement = pgTable(
     // Destino de la FK compuesta de `installment`.
     unique("card_statement_user_id_id_unique").on(t.userId, t.id),
     index("card_statement_user_due_idx").on(t.userId, t.dueDate),
+    // `listCardOptions` y el catálogo del alta rápida filtran por
+    // `(user_id, period >= ...)`.
+    index("card_statement_user_period_idx").on(t.userId, t.period),
     /**
      * La tarjeta tiene que ser del mismo usuario: mismo agujero que cierran
      * las FK compuestas de la 0006 (las FK las evalúa el dueño de la tabla,
@@ -334,6 +337,18 @@ export const installment = pgTable(
   },
   (t) => [
     index("installment_user_due_idx").on(t.userId, t.dueDate),
+    /*
+     * Parciales: casi todas las consultas de cuotas miran sólo un lado. El
+     * saldo, los gráficos y los informes leen lo pagado por `paid_date`; las
+     * deudas, la proyección y el disponible de tarjeta, lo impago por
+     * vencimiento. Cada índice cubre una mitad de la tabla.
+     */
+    index("installment_user_paid_date_idx")
+      .on(t.userId, t.paidDate)
+      .where(sql`"paid" = true`),
+    index("installment_user_unpaid_due_idx")
+      .on(t.userId, t.dueDate)
+      .where(sql`"paid" = false`),
     index("installment_movement_idx").on(t.movementId),
     index("installment_statement_idx").on(t.statementId),
     foreignKey({

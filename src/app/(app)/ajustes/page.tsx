@@ -4,12 +4,14 @@ import { ChevronRight, Users } from "lucide-react"
 
 import { SettingsForm } from "@/components/settings-form"
 import { Card, CardContent } from "@/components/ui/card"
-import { getUserRole } from "@/server/access"
 import { requireSettings, requireUser } from "@/server/session"
 
 async function UsuariosLink() {
   const user = await requireUser()
-  if ((await getUserRole(user.id)) !== "admin") return null
+  // El rol de la sesión alcanza para mostrar el link (puede tener hasta un
+  // minuto de atraso por el cache de sesión). La pantalla de usuarios lo
+  // vuelve a validar contra la base con `requireAdmin`.
+  if (user.role !== "admin") return null
 
   return (
     <Link href="/ajustes/usuarios" className="block">

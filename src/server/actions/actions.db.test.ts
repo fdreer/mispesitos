@@ -1297,6 +1297,8 @@ describe("patchMovement", () => {
     expect(despues.amountCents).toBe(75_000)
     const [nueva] = await cuotasDe(USUARIO_A, fila.id)
     expect(nueva).toMatchObject({ amountCents: 75_000, paid: true, paidDate: "2026-05-20" })
+    // Se actualiza en el lugar: es la misma fila, no una regenerada.
+    expect(nueva.id).toBe(cuota.id)
   })
 
   it("con varias cuotas rechaza fecha e importe sin tocar nada", async () => {
@@ -2499,5 +2501,27 @@ describe("tarjetas", () => {
     // Desmarcar el pago del resumen NO borra la compra de dólares.
     expect(await unpayStatement(enero.id)).toEqual({ ok: true })
     expect(await cambiosDe(USUARIO_A)).toHaveLength(cambiosAntes + 1)
+  })
+
+  it("no se borra una compra con cuotas en un resumen pagado; desmarcado el resumen, sí", async () => {
+    const card = await crearTarjeta("Tarj borrar")
+    const mov = await comprarCon(card.id, "Tarj borrar pagada")
+    const [enero] = await resumenesDe(USUARIO_A, card.id)
+    expect(
+      await payStatement(
+        null,
+        formulario({ statementId: enero.id, paidDate: "2026-02-03", mode: "usd" }),
+      ),
+    ).toEqual({ ok: true })
+
+    expect(rechazo(await deleteMovement(mov.id)).message).toBe(
+      "Tiene cuotas en un resumen de tarjeta ya pagado: desmarcalo antes de borrar la compra.",
+    )
+    expect(await movimientosPorDescripcion(USUARIO_A, "Tarj borrar pagada")).toHaveLength(1)
+    expect(await cuotasDe(USUARIO_A, mov.id)).toHaveLength(2)
+
+    expect(await unpayStatement(enero.id)).toEqual({ ok: true })
+    expect(await deleteMovement(mov.id)).toEqual({ ok: true })
+    expect(await movimientosPorDescripcion(USUARIO_A, "Tarj borrar pagada")).toEqual([])
   })
 })

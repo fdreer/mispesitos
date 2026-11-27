@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { usePathname } from "next/navigation"
 
 import { MovementForm } from "@/components/movement-form"
 import { MOVEMENT_SHEET_CLASS } from "@/components/movement-form-dialog"
 import { Segmented } from "@/components/segmented"
+import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import type { IsoDate } from "@/lib/dates"
 import { defaultQuickAddKind, QUICK_ADD_EVENT } from "@/lib/mobile-nav"
+import { loadQuickAddData } from "@/server/actions/quick-add"
 import type { CardOption, DescriptionSuggestion } from "@/server/card-queries"
 import type { Category } from "@/server/queries"
 
@@ -26,41 +28,42 @@ export type QuickAddData = {
   today: IsoDate
 }
 
-type Props = QuickAddData & {
-  open?: boolean
-  onOpenChange?: (open: boolean) => void
-}
-
-export function QuickAddSheet({
-  expenseCategories,
-  incomeCategories,
-  cards,
-  expenseSuggestions,
-  incomeSuggestions,
-  today,
-  open: controlledOpen,
-  onOpenChange,
-}: Props) {
+/**
+ * El alta rápida del botón "+" móvil. Se abre con el evento global
+ * (`openQuickAddSheet`) y recién ahí pide sus catálogos: la primera vez
+ * muestra un esqueleto; las siguientes, lo que ya tenía mientras lo refresca
+ * (así una categoría o tarjeta nueva aparece sin recargar la página).
+ */
+export function QuickAddSheet() {
   const pathname = usePathname()
-  const [ownOpen, setOwnOpen] = useState(false)
+  const [open, setOpen] = useState(false)
   const [kind, setKind] = useState<"income" | "expense">(() => defaultQuickAddKind(pathname))
+  const [data, setData] = useState<QuickAddData | null>(null)
+  const [failed, setFailed] = useState(false)
+  const loading = useRef(false)
 
-  const controlled = controlledOpen !== undefined
-  const open = controlled ? controlledOpen : ownOpen
-  const setOpen = controlled ? (onOpenChange ?? (() => {})) : setOwnOpen
+  const refresh = useCallback(async () => {
+    if (loading.current) return
+    loading.current = true
+    setFailed(false)
+    try {
+      setData(await loadQuickAddData())
+    } catch {
+      setFailed(true)
+    } finally {
+      loading.current = false
+    }
+  }, [])
 
   useEffect(() => {
-    if (controlled) return
     function handleOpen() {
       setKind(defaultQuickAddKind(pathname))
-      setOwnOpen(true)
+      setOpen(true)
+      void refresh()
     }
     window.addEventListener(QUICK_ADD_EVENT, handleOpen)
     return () => window.removeEventListener(QUICK_ADD_EVENT, handleOpen)
-  }, [controlled, pathname])
-
-  const categories = kind === "income" ? incomeCategories : expenseCategories
-  const suggestions = kind === "income" ? incomeSuggestions : expenseSuggestions
+  }, [pathname, refresh])
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -81,16 +84,40 @@ export function QuickAddSheet({
             />
           </DialogHeader>
         </div>
-        <MovementForm
-          key={kind}
-          kind={kind}
-          categories={categories}
-          cards={kind === "expense" ? cards : []}
-          suggestions={suggestions}
-          today={today}
-          onSaved={() => setOpen(false)}
-        />
+        {data ? (
+          <MovementForm
+            key={kind}
+            kind={kind}
+            categories={kind === "income" ? data.incomeCategories : data.expenseCategories}
+            cards={kind === "expense" ? data.cards : []}
+            suggestions={kind === "income" ? data.incomeSuggestions : data.expenseSuggestions}
+            today={data.today}
+            onSaved={() => setOpen(false)}
+          />
+        ) : failed ? (
+          <div className="space-y-3 px-5 py-6 text-center sm:px-6">
+            <p className="text-muted-foreground text-sm">No pudimos cargar el formulario.</p>
+            <Button variant="outline" size="sm" onClick={() => void refresh()}>
+              Reintentar
+            </Button>
+          </div>
+        ) : (
+          <QuickAddSkeleton />
+        )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+function QuickAddSkeleton() {
+  return (
+    <div className="space-y-4 px-5 py-5 sm:px-6" aria-busy aria-label="Cargando formulario">
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="space-y-1.5">
+          <div className="h-4 w-1/3 animate-pulse rounded bg-graphite" />
+          <div className="h-9 w-full animate-pulse rounded-lg bg-white/[0.03]" />
+        </div>
+      ))}
+    </div>
   )
 }

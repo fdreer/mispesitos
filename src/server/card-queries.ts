@@ -2,7 +2,7 @@ import "server-only"
 
 import { cache } from "react"
 
-import { and, asc, count, desc, eq, gte, isNotNull, sql } from "drizzle-orm"
+import { aliasedTable, and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 
 import { withUser, type Tx } from "@/db/client"
 import { cardStatement, category, creditCard, installment, movement } from "@/db/schema"
@@ -11,30 +11,42 @@ import { monthKey, type IsoDate } from "@/lib/dates"
 
 export type CreditCard = typeof creditCard.$inferSelect
 
+export function selectCards(
+  tx: Tx,
+  userId: string,
+  includeArchived = false,
+): Promise<CreditCard[]> {
+  const conditions = [eq(creditCard.userId, userId)]
+  if (!includeArchived) conditions.push(eq(creditCard.archived, false))
+  return tx
+    .select()
+    .from(creditCard)
+    .where(and(...conditions))
+    .orderBy(asc(creditCard.name))
+}
+
 export const listCards = cache(async function listCards(
   userId: string,
   includeArchived = false,
 ): Promise<CreditCard[]> {
-  return withUser(userId, (tx) => {
-    const conditions = [eq(creditCard.userId, userId)]
-    if (!includeArchived) conditions.push(eq(creditCard.archived, false))
-    return tx
-      .select()
-      .from(creditCard)
-      .where(and(...conditions))
-      .orderBy(asc(creditCard.name))
-  })
+  return withUser(userId, (tx) => selectCards(tx, userId, includeArchived))
 })
 
-export async function getCard(userId: string, cardId: string): Promise<CreditCard | null> {
-  const rows = await withUser(userId, (tx) =>
-    tx
-      .select()
-      .from(creditCard)
-      .where(and(eq(creditCard.userId, userId), eq(creditCard.id, cardId)))
-      .limit(1),
-  )
+export async function selectCard(
+  tx: Tx,
+  userId: string,
+  cardId: string,
+): Promise<CreditCard | null> {
+  const rows = await tx
+    .select()
+    .from(creditCard)
+    .where(and(eq(creditCard.userId, userId), eq(creditCard.id, cardId)))
+    .limit(1)
   return rows[0] ?? null
+}
+
+export async function getCard(userId: string, cardId: string): Promise<CreditCard | null> {
+  return withUser(userId, (tx) => selectCard(tx, userId, cardId))
 }
 
 export type StatementRow = StatementSummary & {
@@ -43,33 +55,39 @@ export type StatementRow = StatementSummary & {
   usdPaidArsCents: number | null
 }
 
-export async function listStatementSummaries(
+export type StatementFilters = {
+  cardId?: string
+  /** Sólo los resúmenes impagos: el dashboard no necesita la historia. */
+  onlyUnpaid?: boolean
+}
+
+export async function selectStatementSummaries(
+  tx: Tx,
   userId: string,
-  cardId?: string,
+  { cardId, onlyUnpaid = false }: StatementFilters = {},
 ): Promise<StatementRow[]> {
-  const rows = await withUser(userId, (tx) => {
-    const conditions = [eq(cardStatement.userId, userId)]
-    if (cardId) conditions.push(eq(cardStatement.cardId, cardId))
-    return tx
-      .select({
-        id: cardStatement.id,
-        cardId: cardStatement.cardId,
-        period: cardStatement.period,
-        closingDate: cardStatement.closingDate,
-        dueDate: cardStatement.dueDate,
-        paidDate: cardStatement.paidDate,
-        usdPaidArsCents: cardStatement.usdPaidArsCents,
-        arsCents: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'ARS'), 0)`,
-        usdCents: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'USD'), 0)`,
-        count: count(installment.id),
-      })
-      .from(cardStatement)
-      .leftJoin(installment, eq(installment.statementId, cardStatement.id))
-      .leftJoin(movement, eq(installment.movementId, movement.id))
-      .where(and(...conditions))
-      .groupBy(cardStatement.id)
-      .orderBy(asc(cardStatement.period))
-  })
+  const conditions = [eq(cardStatement.userId, userId)]
+  if (cardId) conditions.push(eq(cardStatement.cardId, cardId))
+  if (onlyUnpaid) conditions.push(isNull(cardStatement.paidDate))
+  const rows = await tx
+    .select({
+      id: cardStatement.id,
+      cardId: cardStatement.cardId,
+      period: cardStatement.period,
+      closingDate: cardStatement.closingDate,
+      dueDate: cardStatement.dueDate,
+      paidDate: cardStatement.paidDate,
+      usdPaidArsCents: cardStatement.usdPaidArsCents,
+      arsCents: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'ARS'), 0)`,
+      usdCents: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'USD'), 0)`,
+      count: count(installment.id),
+    })
+    .from(cardStatement)
+    .leftJoin(installment, eq(installment.statementId, cardStatement.id))
+    .leftJoin(movement, eq(installment.movementId, movement.id))
+    .where(and(...conditions))
+    .groupBy(cardStatement.id)
+    .orderBy(asc(cardStatement.period))
 
   // `sum` de un bigint es `numeric` en Postgres, y llega como texto.
   return rows.map(({ arsCents, usdCents, count: n, ...s }) => ({
@@ -78,54 +96,93 @@ export async function listStatementSummaries(
   }))
 }
 
+export async function listStatementSummaries(
+  userId: string,
+  filters: StatementFilters = {},
+): Promise<StatementRow[]> {
+  return withUser(userId, (tx) => selectStatementSummaries(tx, userId, filters))
+}
+
 /**
  * Las cuotas impagas de compras con tarjeta, para el disponible de cada una
- * (`availableCredit` en @/lib/cards).
+ * (`availableCredit` en @/lib/cards). Con `cardId`, sólo las de esa tarjeta.
  */
-export async function listUnpaidCardInstallments(userId: string) {
-  return withUser(userId, (tx) =>
-    tx
-      .select({
-        cardId: movement.creditCardId,
-        amountCents: installment.amountCents,
-        currency: movement.currency,
-      })
-      .from(installment)
-      .innerJoin(movement, eq(installment.movementId, movement.id))
-      .where(
-        and(
-          eq(installment.userId, userId),
-          eq(installment.paid, false),
-          isNotNull(movement.creditCardId),
-        ),
+export function selectUnpaidCardInstallments(tx: Tx, userId: string, cardId?: string) {
+  return tx
+    .select({
+      cardId: movement.creditCardId,
+      amountCents: installment.amountCents,
+      currency: movement.currency,
+    })
+    .from(installment)
+    .innerJoin(movement, eq(installment.movementId, movement.id))
+    .where(
+      and(
+        eq(installment.userId, userId),
+        eq(installment.paid, false),
+        cardId ? eq(movement.creditCardId, cardId) : isNotNull(movement.creditCardId),
       ),
-  )
+    )
+}
+
+export async function listUnpaidCardInstallments(userId: string, cardId?: string) {
+  return withUser(userId, (tx) => selectUnpaidCardInstallments(tx, userId, cardId))
 }
 
 /**
  * Las cuotas que componen un resumen (§1.4: "Heladera · cuota 3/12"), con lo
  * que hace falta para nombrarlas. `total` es la cantidad de cuotas del
- * movimiento entero, no las de este resumen.
+ * movimiento entero, no las de este resumen: se cuenta una vez por compra del
+ * resumen, no con una subconsulta por cada fila.
  */
-export async function listStatementInstallments(userId: string, statementId: string) {
-  return withUser(userId, (tx) =>
+export function selectStatementInstallments(tx: Tx, userId: string, statementId: string) {
+  const i2 = aliasedTable(installment, "i2")
+  const totals = tx.$with("installment_totals").as(
     tx
       .select({
-        id: installment.id,
-        number: installment.number,
-        amountCents: installment.amountCents,
-        movementId: movement.id,
-        description: movement.description,
-        date: movement.date,
-        currency: movement.currency,
-        categoryId: movement.categoryId,
-        total: sql<number>`(select count(*)::int from ${installment} i2 where i2.movement_id = ${movement.id})`,
+        // Nombres propios: drizzle referencia las columnas del CTE sin
+        // calificar, y `movement_id` chocaría con la de `installment`.
+        movementId: sql<string>`${i2.movementId}`.as("totals_movement_id"),
+        total: sql<number>`count(*)::int`.as("installment_total"),
       })
-      .from(installment)
-      .innerJoin(movement, eq(installment.movementId, movement.id))
-      .where(and(eq(installment.userId, userId), eq(installment.statementId, statementId)))
-      .orderBy(asc(movement.date), asc(movement.description)),
+      .from(i2)
+      .where(
+        and(
+          eq(i2.userId, userId),
+          inArray(
+            i2.movementId,
+            tx
+              .select({ id: installment.movementId })
+              .from(installment)
+              .where(and(eq(installment.userId, userId), eq(installment.statementId, statementId))),
+          ),
+        ),
+      )
+      .groupBy(i2.movementId),
   )
+
+  return tx
+    .with(totals)
+    .select({
+      id: installment.id,
+      number: installment.number,
+      amountCents: installment.amountCents,
+      movementId: movement.id,
+      description: movement.description,
+      date: movement.date,
+      currency: movement.currency,
+      categoryId: movement.categoryId,
+      total: sql<number>`coalesce(${totals.total}, 1)`,
+    })
+    .from(installment)
+    .innerJoin(movement, eq(installment.movementId, movement.id))
+    .leftJoin(totals, eq(totals.movementId, installment.movementId))
+    .where(and(eq(installment.userId, userId), eq(installment.statementId, statementId)))
+    .orderBy(asc(movement.date), asc(movement.description))
+}
+
+export async function listStatementInstallments(userId: string, statementId: string) {
+  return withUser(userId, (tx) => selectStatementInstallments(tx, userId, statementId))
 }
 
 /**

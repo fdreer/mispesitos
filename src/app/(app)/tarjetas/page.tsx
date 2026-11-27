@@ -23,13 +23,8 @@ import {
 } from "@/lib/cards"
 import { formatIsoForDisplay, formatRelativeDue, todayInAr, type IsoDate } from "@/lib/dates"
 import { convertToArs, formatMoney } from "@/lib/money"
-import {
-  listCards,
-  listStatementSummaries,
-  listUnpaidCardInstallments,
-  type CreditCard,
-  type StatementRow,
-} from "@/server/card-queries"
+import { type CreditCard, type StatementRow } from "@/server/card-queries"
+import { getCardsOverviewData } from "@/server/page-data"
 import { resolveOfficialRate } from "@/server/rate"
 import { requireSettings } from "@/server/session"
 
@@ -251,10 +246,8 @@ function Overview({ views, today }: { views: CardView[]; today: IsoDate }) {
 async function TarjetasBody() {
   const { user, settings } = await requireSettings()
   const today = todayInAr()
-  const [cards, statements, unpaid, officialRate] = await Promise.all([
-    listCards(user.id, true),
-    listStatementSummaries(user.id),
-    listUnpaidCardInstallments(user.id),
+  const [{ cards, statements, unpaid }, officialRate] = await Promise.all([
+    getCardsOverviewData(user.id),
     resolveOfficialRate(user.id, settings),
   ])
 

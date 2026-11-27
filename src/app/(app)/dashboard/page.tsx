@@ -8,16 +8,10 @@ import { QuickPay } from "@/components/dashboard/quick-pay"
 import { InfoHint } from "@/components/info-hint"
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { buildDashboardView, isUpcomingStatement } from "@/lib/dashboard-view"
-import { todayInAr } from "@/lib/dates"
+import { addMonthsClamped, monthKey, todayInAr } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
 import { fetchSuggestedRate, type RatePreference } from "@/lib/rate"
-import { listStatementSummaries } from "@/server/card-queries"
-import {
-  listCategories,
-  listExchanges,
-  listPaidInstallments,
-  listPendingInstallments,
-} from "@/server/queries"
+import { getDashboardData } from "@/server/page-data"
 import { resolveOfficialRate } from "@/server/rate"
 import { requireSettings } from "@/server/session"
 
@@ -51,15 +45,17 @@ async function DashboardBody() {
   const { user, settings } = await requireSettings()
   const today = todayInAr()
 
-  const [paid, exchanges, pending, expenseCategories, officialRate, statements] =
-    await Promise.all([
-      listPaidInstallments(user.id),
-      listExchanges(user.id),
-      listPendingInstallments(user.id),
-      listCategories(user.id, "expense", true),
-      resolveOfficialRate(user.id, settings),
-      listStatementSummaries(user.id),
-    ])
+  // El saldo se suma en la base; de las cuotas pagadas sólo hace falta la
+  // ventana de los gráficos (los últimos HISTORY_MONTHS, con el actual).
+  const historyFrom = `${monthKey(addMonthsClamped(today, -(HISTORY_MONTHS - 1)))}-01`
+
+  const [data, officialRate, suggested] = await Promise.all([
+    getDashboardData(user.id, settings, today, historyFrom),
+    resolveOfficialRate(user.id, settings),
+    // Sale en paralelo y no después: es una lectura del cache de fetch (10
+    // min) y esperar a saber si hace falta sumaba una vuelta entera al render.
+    fetchSuggestedRate(settings.preferredRate as RatePreference),
+  ])
 
   const view = buildDashboardView({
     today,
@@ -69,22 +65,17 @@ async function DashboardBody() {
       initialBalanceDate: settings.initialBalanceDate,
     },
     officialRate,
-    paid,
-    exchanges: exchanges.map((e) => ({
-      date: e.date,
-      amountCents: e.amountCents,
-      rate: e.rate,
-      direction: e.direction,
-    })),
-    pending,
-    statements: statements.filter((s) => s.paidDate === null),
-    expenseCategories,
+    balances: data.balances,
+    paid: data.paid,
+    pending: data.pending,
+    statements: data.unpaidStatements,
+    expenseCategories: data.expenseCategories,
     horizonMonths: HORIZON_MONTHS,
     historyMonths: HISTORY_MONTHS,
   })
 
-  // La cotización sugerida sólo hace falta para precargar el TC de un resumen
-  // con dólares que ya se puede pagar desde la lista de pendientes.
+  // La cotización sugerida sólo se usa para precargar el TC de un resumen con
+  // dólares que ya se puede pagar desde la lista de pendientes.
   const needsSuggestedRate = view.upcomingPayments.some(
     (p) =>
       isUpcomingStatement(p) &&
@@ -92,9 +83,7 @@ async function DashboardBody() {
       p.closingDate !== null &&
       p.closingDate <= today,
   )
-  const suggestedRate = needsSuggestedRate
-    ? await fetchSuggestedRate(settings.preferredRate as RatePreference)
-    : null
+  const suggestedRate = needsSuggestedRate ? suggested : null
 
   return (
     <>

@@ -3,6 +3,7 @@ import "server-only"
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { APIError } from "better-auth/api"
+import { nextCookies } from "better-auth/next-js"
 
 import { db } from "@/db/client"
 import * as schema from "@/db/schema"
@@ -24,12 +25,25 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
+  session: {
+    /*
+     * La sesión (con el usuario) viaja firmada en una cookie y se relee de la
+     * base recién cuando vence: sin esto, cada request —layout, página y cada
+     * Server Action— consultaba `session` + `user`. El costo: deshabilitar a
+     * alguien o cambiarle el rol tarda hasta `maxAge` en llegar a una sesión
+     * abierta. Por eso es corto, y `requireAdmin` igual lee el rol de la base.
+     */
+    cookieCache: { enabled: true, maxAge: 60 },
+  },
   user: {
     additionalFields: {
       role: { type: "string", required: false, defaultValue: "member", input: false },
       disabledAt: { type: "date", required: false, input: false },
     },
   },
+  // Deja que `auth.api` escriba cookies desde Server Actions (por ejemplo,
+  // refrescar la cookie de sesión de arriba). Tiene que ir último.
+  plugins: [nextCookies()],
   databaseHooks: {
     user: {
       create: {

@@ -113,6 +113,13 @@
       "when": 1795800000000,
       "tag": "0015_tc_solo_en_cambios",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795814351557,
+      "tag": "0016_indices_parciales_cuotas",
+      "breakpoints": true
     }
   ]
 }

@@ -24,6 +24,9 @@ export async function requireUser() {
 
 export async function requireAdmin() {
   const user = await requireUser()
+  // De la base y no de `user.role`: la sesión puede venir del cache de cookie
+  // (src/auth.ts) con hasta un minuto de atraso, y esto abre la gestión de
+  // usuarios.
   if ((await getUserRole(user.id)) !== "admin") redirect("/dashboard")
   return user
 }

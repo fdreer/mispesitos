@@ -11,8 +11,20 @@ import {
   user,
   userSettings,
 } from "@/db/schema"
+import { computeBalances } from "@/lib/balance"
+import {
+  assertCurrency,
+  assertExchangeDirection,
+  assertInstallmentMovementKind,
+} from "@/lib/movement-asserts"
+import {
+  listStatementInstallments,
+  listStatementSummaries,
+  listUnpaidCardInstallments,
+} from "@/server/card-queries"
 import {
   countMovementsByCategory,
+  getBalances,
   getSettings,
   listCategories,
   listExchanges,
@@ -883,6 +895,20 @@ describe("listPaidInstallmentsForReport", () => {
 })
 
 describe("queryMovementsView", () => {
+  it("con includeTotals: false trae la misma página y conteos, sin totales", async () => {
+    const query = parseMovementQuery({}, "due")
+    const completa = await queryMovementsView(USUARIO_A, "expense", query, "2026-04-20")
+    const liviana = await queryMovementsView(USUARIO_A, "expense", query, "2026-04-20", {
+      includeTotals: false,
+    })
+
+    expect(ids(liviana.items)).toEqual(ids(completa.items))
+    expect(liviana.statusCounts).toEqual(completa.statusCounts)
+    expect(liviana.totalCount).toBe(completa.totalCount)
+    expect(liviana.totals.paid).toEqual({ arsCents: 0, usdCents: 0 })
+    expect(completa.totals.paid).not.toEqual({ arsCents: 0, usdCents: 0 })
+  })
+
   it("calcula conteos por estado, totales de cuotas y orden por vencimiento", async () => {
     // El 2026-04-20: comida tiene cuota 2 vencida (2026-04-10) -> overdue;
     // alquiler tiene cuota 2 pendiente (2026-05-01) -> pending; kioscos sin cuotas -> paid.
@@ -1001,6 +1027,16 @@ describe("queryMovementsView", () => {
 })
 
 describe("listPaidInstallments", () => {
+  it("con from deja afuera lo pagado antes de esa fecha", async () => {
+    const todas = await listPaidInstallments(USUARIO_A)
+    const desde = await listPaidInstallments(USUARIO_A, { from: "2026-04-01" })
+
+    expect(desde.length).toBeGreaterThan(0)
+    expect(desde.length).toBeLessThan(todas.length)
+    expect(desde.every((p) => p.paidDate >= "2026-04-01")).toBe(true)
+    expect(desde).toHaveLength(todas.filter((p) => p.paidDate >= "2026-04-01").length)
+  })
+
   it("trae sólo las cuotas pagadas, con la moneda, el tipo y la categoría del movimiento", async () => {
     const pagadas = await listPaidInstallments(USUARIO_A)
 
@@ -1297,5 +1333,348 @@ describe("tarjetas", () => {
         cardName: "Visa",
       }),
     ])
+  })
+})
+
+describe("tarjetas: filtros de resúmenes y cuotas", () => {
+  const USUARIO = "queries-test-tarjeta-filtros"
+  const CAT = "q-cat-tf"
+  const VISA = "q-card-tf-visa"
+  const MASTER = "q-card-tf-master"
+  const RES_PAGADO = "q-res-tf-pagado"
+  const RES_IMPAGO = "q-res-tf-impago"
+  const RES_MASTER = "q-res-tf-master"
+
+  async function limpiar() {
+    await withUser(USUARIO, async (tx) => {
+      await tx.delete(installment)
+      await tx.delete(movement)
+      await tx.delete(cardStatement)
+      await tx.delete(creditCard)
+      await tx.delete(category)
+      await tx.delete(userSettings)
+    })
+    await db.delete(user).where(eq(user.id, USUARIO))
+  }
+
+  beforeAll(async () => {
+    await limpiar()
+    await sembrarUsuario(USUARIO)
+    await withUser(USUARIO, async (tx) => {
+      await tx.insert(userSettings).values({ userId: USUARIO, initialBalanceDate: "2026-01-01" })
+      await tx.insert(category).values({ id: CAT, userId: USUARIO, name: "Compras", kind: "expense" })
+      await tx.insert(creditCard).values([
+        { id: VISA, userId: USUARIO, name: "Visa", closingDay: 25, dueDay: 5 },
+        { id: MASTER, userId: USUARIO, name: "Master", closingDay: 20, dueDay: 1 },
+      ])
+      await tx.insert(cardStatement).values([
+        {
+          id: RES_PAGADO,
+          userId: USUARIO,
+          cardId: VISA,
+          period: "2026-01",
+          closingDate: "2026-01-25",
+          dueDate: "2026-02-05",
+          paidDate: "2026-02-03",
+        },
+        {
+          id: RES_IMPAGO,
+          userId: USUARIO,
+          cardId: VISA,
+          period: "2026-02",
+          closingDate: "2026-02-25",
+          dueDate: "2026-03-05",
+        },
+        {
+          id: RES_MASTER,
+          userId: USUARIO,
+          cardId: MASTER,
+          period: "2026-02",
+          closingDate: "2026-02-20",
+          dueDate: "2026-03-01",
+        },
+      ])
+      await tx.insert(movement).values([
+        {
+          id: "q-mov-tf-tele",
+          userId: USUARIO,
+          kind: "expense",
+          description: "Tele",
+          categoryId: CAT,
+          date: "2026-01-10",
+          currency: "ARS",
+          amountCents: 300_00,
+          creditCardId: VISA,
+        },
+        {
+          id: "q-mov-tf-cafe",
+          userId: USUARIO,
+          kind: "expense",
+          description: "Café",
+          categoryId: CAT,
+          date: "2026-02-10",
+          currency: "ARS",
+          amountCents: 5_00,
+          creditCardId: MASTER,
+        },
+      ])
+      await tx.insert(installment).values([
+        {
+          id: "q-ins-tf-tele-1",
+          userId: USUARIO,
+          movementId: "q-mov-tf-tele",
+          number: 1,
+          amountCents: 100_00,
+          dueDate: "2026-02-05",
+          statementId: RES_PAGADO,
+          paid: true,
+          paidDate: "2026-02-03",
+        },
+        {
+          id: "q-ins-tf-tele-2",
+          userId: USUARIO,
+          movementId: "q-mov-tf-tele",
+          number: 2,
+          amountCents: 100_00,
+          dueDate: "2026-03-05",
+          statementId: RES_IMPAGO,
+        },
+        {
+          id: "q-ins-tf-tele-3",
+          userId: USUARIO,
+          movementId: "q-mov-tf-tele",
+          number: 3,
+          amountCents: 100_00,
+          dueDate: "2026-03-05",
+          statementId: RES_IMPAGO,
+        },
+        {
+          id: "q-ins-tf-cafe-1",
+          userId: USUARIO,
+          movementId: "q-mov-tf-cafe",
+          number: 1,
+          amountCents: 5_00,
+          dueDate: "2026-03-01",
+          statementId: RES_MASTER,
+        },
+      ])
+    })
+  })
+
+  afterAll(limpiar)
+
+  it("onlyUnpaid deja afuera los resúmenes pagados y cardId acota a una tarjeta", async () => {
+    const impagos = await listStatementSummaries(USUARIO, { onlyUnpaid: true })
+    expect(impagos.map((s) => s.id).sort()).toEqual([RES_IMPAGO, RES_MASTER].sort())
+
+    const visa = await listStatementSummaries(USUARIO, { cardId: VISA })
+    expect(visa.map((s) => s.id)).toEqual([RES_PAGADO, RES_IMPAGO])
+    expect(visa[1].totals).toEqual({ arsCents: 200_00, usdCents: 0, count: 2 })
+
+    const visaImpagos = await listStatementSummaries(USUARIO, { cardId: VISA, onlyUnpaid: true })
+    expect(visaImpagos.map((s) => s.id)).toEqual([RES_IMPAGO])
+  })
+
+  it("listUnpaidCardInstallments con cardId trae sólo lo impago de esa tarjeta", async () => {
+    const visa = await listUnpaidCardInstallments(USUARIO, VISA)
+    expect(visa).toHaveLength(2)
+    expect(visa.every((i) => i.cardId === VISA)).toBe(true)
+
+    const todas = await listUnpaidCardInstallments(USUARIO)
+    expect(todas).toHaveLength(3)
+  })
+
+  it("listStatementInstallments cuenta el total de cuotas de cada compra, no las del resumen", async () => {
+    const cuotas = await listStatementInstallments(USUARIO, RES_IMPAGO)
+    expect(cuotas.map((c) => [c.id, c.number, c.total])).toEqual([
+      ["q-ins-tf-tele-2", 2, 3],
+      ["q-ins-tf-tele-3", 3, 3],
+    ])
+  })
+})
+
+describe("getBalances", () => {
+  const USUARIO = "queries-test-saldo"
+  const CAT_E = "q-cat-s-gasto"
+  const CAT_I = "q-cat-s-ingreso"
+  const CARD = "q-card-s"
+  const RES_PESOS = "q-res-s-pesos"
+  const RES_DOLARES = "q-res-s-dolares"
+  const START = {
+    initialArsCents: 1_000_00,
+    initialUsdCents: 50_00,
+    initialDate: "2026-01-01",
+  }
+
+  async function limpiar() {
+    await withUser(USUARIO, async (tx) => {
+      await tx.delete(installment)
+      await tx.delete(movement)
+      await tx.delete(cardStatement)
+      await tx.delete(creditCard)
+      await tx.delete(category)
+      await tx.delete(userSettings)
+    })
+    await db.delete(user).where(eq(user.id, USUARIO))
+  }
+
+  type Mov = {
+    id: string
+    kind: "income" | "expense"
+    currency: "ARS" | "USD"
+    amountCents: number
+    date: string
+    creditCardId?: string
+  }
+  const mov = (m: Mov) => ({
+    userId: USUARIO,
+    description: m.id,
+    categoryId: m.kind === "income" ? CAT_I : CAT_E,
+    creditCardId: m.creditCardId ?? null,
+    ...m,
+  })
+  const cuota = (
+    movementId: string,
+    amountCents: number,
+    dueDate: string,
+    paidDate: string | null,
+    statementId: string | null = null,
+  ) => ({
+    id: `${movementId}-1`,
+    userId: USUARIO,
+    movementId,
+    number: 1,
+    amountCents,
+    dueDate,
+    paid: paidDate !== null,
+    paidDate,
+    statementId,
+  })
+  const cambio = (id: string, direction: "buy" | "sell", usdCents: number, rate: string, date: string) => ({
+    id,
+    userId: USUARIO,
+    kind: "exchange",
+    description: id,
+    categoryId: null,
+    date,
+    currency: "USD",
+    amountCents: usdCents,
+    rate,
+    direction,
+  })
+
+  beforeAll(async () => {
+    await limpiar()
+    await sembrarUsuario(USUARIO)
+    await withUser(USUARIO, async (tx) => {
+      await tx.insert(userSettings).values({ userId: USUARIO, initialBalanceDate: START.initialDate })
+      await tx.insert(category).values([
+        { id: CAT_E, userId: USUARIO, name: "Gastos", kind: "expense" },
+        { id: CAT_I, userId: USUARIO, name: "Ingresos", kind: "income" },
+      ])
+      await tx
+        .insert(creditCard)
+        .values({ id: CARD, userId: USUARIO, name: "Visa", closingDay: 25, dueDay: 5 })
+      await tx.insert(cardStatement).values([
+        // Dólares pagados con pesos: lo percibido es el débito en pesos.
+        {
+          id: RES_PESOS,
+          userId: USUARIO,
+          cardId: CARD,
+          period: "2026-01",
+          closingDate: "2026-01-25",
+          dueDate: "2026-02-05",
+          paidDate: "2026-02-03",
+          usdPaidArsCents: 15_001_37,
+        },
+        // Dólares pagados con dólares: siguen restando dólares.
+        {
+          id: RES_DOLARES,
+          userId: USUARIO,
+          cardId: CARD,
+          period: "2026-02",
+          closingDate: "2026-02-25",
+          dueDate: "2026-03-05",
+          paidDate: "2026-02-27",
+        },
+      ])
+      await tx.insert(movement).values([
+        mov({ id: "q-s-sueldo", kind: "income", currency: "ARS", amountCents: 100_000_00, date: "2026-01-15" }),
+        mov({ id: "q-s-usd-gasto", kind: "expense", currency: "USD", amountCents: 3_00, date: "2026-01-20" }),
+        mov({ id: "q-s-usd-cobro", kind: "income", currency: "USD", amountCents: 40_00, date: "2026-01-22" }),
+        mov({ id: "q-s-viejo", kind: "income", currency: "ARS", amountCents: 999_00, date: "2025-12-20" }),
+        mov({ id: "q-s-futuro", kind: "expense", currency: "ARS", amountCents: 7_00, date: "2026-02-20" }),
+        mov({ id: "q-s-pendiente", kind: "expense", currency: "ARS", amountCents: 50_00, date: "2026-01-10" }),
+        mov({ id: "q-s-tc-usd-a", kind: "expense", currency: "USD", amountCents: 7_33, date: "2026-01-05", creditCardId: CARD }),
+        mov({ id: "q-s-tc-usd-b", kind: "expense", currency: "USD", amountCents: 4_67, date: "2026-01-06", creditCardId: CARD }),
+        mov({ id: "q-s-tc-ars", kind: "expense", currency: "ARS", amountCents: 2_000_00, date: "2026-01-07", creditCardId: CARD }),
+        mov({ id: "q-s-tc-usd-dol", kind: "expense", currency: "USD", amountCents: 5_00, date: "2026-02-10", creditCardId: CARD }),
+        cambio("q-s-fx-compra", "buy", 100_00, "1234.5678", "2026-01-05"),
+        cambio("q-s-fx-venta", "sell", 7_77, "1180.5000", "2026-02-10"),
+        cambio("q-s-fx-viejo", "sell", 10_00, "900.0000", "2025-12-30"),
+        cambio("q-s-fx-futuro", "buy", 1_00, "1500.2500", "2026-03-15"),
+      ])
+      await tx.insert(installment).values([
+        cuota("q-s-sueldo", 100_000_00, "2026-01-15", "2026-01-15"),
+        cuota("q-s-usd-gasto", 3_00, "2026-01-20", "2026-01-20"),
+        cuota("q-s-usd-cobro", 40_00, "2026-01-22", "2026-01-25"),
+        cuota("q-s-viejo", 999_00, "2025-12-20", "2025-12-20"),
+        cuota("q-s-futuro", 7_00, "2026-03-10", "2026-03-10"),
+        cuota("q-s-pendiente", 50_00, "2026-01-10", null),
+        cuota("q-s-tc-usd-a", 7_33, "2026-02-05", "2026-02-03", RES_PESOS),
+        cuota("q-s-tc-usd-b", 4_67, "2026-02-05", "2026-02-03", RES_PESOS),
+        cuota("q-s-tc-ars", 2_000_00, "2026-02-05", "2026-02-03", RES_PESOS),
+        cuota("q-s-tc-usd-dol", 5_00, "2026-03-05", "2026-02-27", RES_DOLARES),
+      ])
+    })
+  })
+
+  afterAll(limpiar)
+
+  /** La cuenta de referencia: lo que hacían las páginas en Node. */
+  async function saldoEnNode(asOf: string) {
+    const [paid, exchanges] = await Promise.all([
+      listPaidInstallments(USUARIO),
+      listExchanges(USUARIO),
+    ])
+    return computeBalances(
+      START,
+      paid.map((p) => ({
+        paidDate: p.paidDate,
+        currency: assertCurrency(p.currency),
+        kind: assertInstallmentMovementKind(p.kind),
+        amountCents: p.amountCents,
+      })),
+      exchanges.map((e) => ({
+        date: e.date,
+        direction: assertExchangeDirection(e.direction),
+        usdCents: e.amountCents,
+        rate: Number(e.rate),
+      })),
+      asOf,
+    )
+  }
+
+  it.each(["2026-03-01", "2026-03-31", "2026-01-31", "2025-12-31"])(
+    "da lo mismo que computeBalances(perceivedPayments(...)) al %s",
+    async (asOf) => {
+      expect(await getBalances(USUARIO, START, asOf)).toEqual(await saldoEnNode(asOf))
+    },
+  )
+
+  it("cuenta el resumen pagado con pesos por su débito, y lo futuro y lo anterior al inicio no", async () => {
+    const fxCompra = Math.round(100_00 * 1234.5678)
+    const fxVenta = Math.round(7_77 * 1180.5)
+    expect(await getBalances(USUARIO, START, "2026-03-01")).toEqual({
+      arsCents: 1_000_00 + 100_000_00 - 15_001_37 - 2_000_00 - fxCompra + fxVenta,
+      usdCents: 50_00 - 3_00 + 40_00 - 5_00 + 100_00 - 7_77,
+    })
+  })
+
+  it("no ve datos de otro usuario", async () => {
+    expect(await getBalances(USUARIO_SIN_ONBOARDING, START, "2026-03-01")).toEqual({
+      arsCents: START.initialArsCents,
+      usdCents: START.initialUsdCents,
+    })
   })
 })

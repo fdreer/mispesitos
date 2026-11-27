@@ -60,22 +60,29 @@ export type Installment = typeof installment.$inferSelect
 export type InstallmentRow = Installment & { statementPeriod: string | null }
 export type MovementWithInstallments = Movement & { installments: InstallmentRow[] }
 
+export function selectCategories(
+  tx: Tx,
+  userId: string,
+  kind?: "income" | "expense",
+  includeArchived = false,
+): Promise<Category[]> {
+  const conditions = [eq(category.userId, userId)]
+  if (kind) conditions.push(eq(category.kind, kind))
+  if (!includeArchived) conditions.push(eq(category.archived, false))
+
+  return tx
+    .select()
+    .from(category)
+    .where(and(...conditions))
+    .orderBy(asc(category.name))
+}
+
 export const listCategories = cache(async function listCategories(
   userId: string,
   kind?: "income" | "expense",
   includeArchived = false,
 ): Promise<Category[]> {
-  return withUser(userId, (tx) => {
-    const conditions = [eq(category.userId, userId)]
-    if (kind) conditions.push(eq(category.kind, kind))
-    if (!includeArchived) conditions.push(eq(category.archived, false))
-
-    return tx
-      .select()
-      .from(category)
-      .where(and(...conditions))
-      .orderBy(asc(category.name))
-  })
+  return withUser(userId, (tx) => selectCategories(tx, userId, kind, includeArchived))
 })
 
 export const countMovementsByCategory = cache(async function countMovementsByCategory(
@@ -122,11 +129,13 @@ function movementConditions(userId: string, filters: MovementFilters) {
       selectedCategories.map((id) => sql`${id}`),
       sql`, `,
     )
+    // Subconsulta NO correlacionada: Postgres resuelve una vez el puñado de
+    // ids (las elegidas y sus hijas) y cruza por `movement_category_idx`, en
+    // vez de evaluar un EXISTS por cada movimiento.
     conditions.push(
-      sql`EXISTS (
-        SELECT 1 FROM "category" c
-        WHERE c."id" = ${movement.categoryId}
-          AND c."user_id" = ${userId}
+      sql`${movement.categoryId} IN (
+        SELECT c."id" FROM "category" c
+        WHERE c."user_id" = ${userId}
           AND (c."id" IN (${idsSql}) OR c."parent_id" IN (${idsSql}))
       )`,
     )
@@ -161,12 +170,12 @@ function movementConditions(userId: string, filters: MovementFilters) {
     const pattern = `%${escapeLike(filters.search)}%`
     const searchOr = [
       ilike(movement.description, pattern),
-      // Busca también en el nombre de la categoría y de su padre.
-      sql`EXISTS (
-        SELECT 1 FROM "category" c
-        LEFT JOIN "category" p ON p."id" = c."parent_id"
-        WHERE c."id" = ${movement.categoryId}
-          AND c."user_id" = ${userId}
+      // Busca también en el nombre de la categoría y de su padre. Igual que
+      // el filtro por categoría: una subconsulta no correlacionada.
+      sql`${movement.categoryId} IN (
+        SELECT c."id" FROM "category" c
+        LEFT JOIN "category" p ON p."id" = c."parent_id" AND p."user_id" = c."user_id"
+        WHERE c."user_id" = ${userId}
           AND (c."name" ILIKE ${pattern} OR p."name" ILIKE ${pattern})
       )`,
     ]
@@ -280,6 +289,12 @@ export type MovementListView = Page<MovementWithInstallments> & {
   totals: FilterTotals
 }
 
+const ZERO_TOTALS: FilterTotals = {
+  pending: { arsCents: 0, usdCents: 0 },
+  overdue: { arsCents: 0, usdCents: 0 },
+  paid: { arsCents: 0, usdCents: 0 },
+}
+
 /**
  * Consulta compartida de /ingresos, /egresos y la carga incremental móvil:
  * resuelve en SQL los conteos por estado (antes del filtro de estado, para que
@@ -287,12 +302,16 @@ export type MovementListView = Page<MovementWithInstallments> & {
  * estado de cuota y moneda (respetando lo percibido), el ordenamiento (`due`,
  * `date`, `amount` consolidado a ARS) y la paginación (`LIMIT`/`OFFSET`),
  * trayendo a Node sólo las cuotas de la página actual.
+ *
+ * `includeTotals: false` saltea la suma de cuotas por estado: "Cargar más"
+ * sólo necesita la página siguiente y cuántas hay, no los totales.
  */
 export async function queryMovementsView(
   userId: string,
   kind: "income" | "expense",
   query: MovementQuery,
   today: IsoDate,
+  { includeTotals = true }: { includeTotals?: boolean } = {},
 ): Promise<MovementListView> {
   return withUser(userId, async (tx) => {
     const baseConditions = movementConditions(userId, {
@@ -301,6 +320,8 @@ export async function queryMovementsView(
     })
     const baseWhere = and(...baseConditions)
 
+    // Sólo las cuotas de los movimientos que pasan el filtro, no todas las
+    // del usuario: con años de historia, agrupar todo era lo que más pesaba.
     const instStats = tx.$with("inst_stats").as(
       tx
         .select({
@@ -318,7 +339,15 @@ export async function queryMovementsView(
             ),
         })
         .from(installment)
-        .where(eq(installment.userId, userId))
+        .where(
+          and(
+            eq(installment.userId, userId),
+            inArray(
+              installment.movementId,
+              tx.select({ id: movement.id }).from(movement).where(baseWhere),
+            ),
+          ),
+        )
         .groupBy(installment.movementId),
     )
 
@@ -352,11 +381,7 @@ export async function queryMovementsView(
         totalPages,
         totalCount: 0,
         statusCounts,
-        totals: {
-          pending: { arsCents: 0, usdCents: 0 },
-          overdue: { arsCents: 0, usdCents: 0 },
-          paid: { arsCents: 0, usdCents: 0 },
-        },
+        totals: ZERO_TOTALS,
       }
     }
 
@@ -372,58 +397,72 @@ export async function queryMovementsView(
     }
     const filteredWhere = and(...filteredConditions)
 
-    const [totalsRow] = await tx
-      .with(instStats)
-      .select({
-        pendingArs: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'ARS' and ${installment.paid} = false and ${installment.dueDate} >= ${today}), 0)`,
-        pendingUsd: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'USD' and ${installment.paid} = false and ${installment.dueDate} >= ${today}), 0)`,
-        overdueArs: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'ARS' and ${installment.paid} = false and ${installment.dueDate} < ${today}), 0)`,
-        overdueUsd: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'USD' and ${installment.paid} = false and ${installment.dueDate} < ${today}), 0)`,
-        paidArs: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'ARS' and ${installment.paid} = true), 0)`,
-        paidUsd: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'USD' and ${installment.paid} = true), 0)`,
-      })
-      .from(movement)
-      .leftJoin(instStats, eq(instStats.movementId, movement.id))
-      .innerJoin(
-        installment,
-        and(eq(installment.movementId, movement.id), eq(installment.userId, userId)),
-      )
-      .where(filteredWhere)
+    let totals = ZERO_TOTALS
+    if (includeTotals) {
+      let totalsQuery = tx
+        .with(instStats)
+        .select({
+          pendingArs: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'ARS' and ${installment.paid} = false and ${installment.dueDate} >= ${today}), 0)`,
+          pendingUsd: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'USD' and ${installment.paid} = false and ${installment.dueDate} >= ${today}), 0)`,
+          overdueArs: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'ARS' and ${installment.paid} = false and ${installment.dueDate} < ${today}), 0)`,
+          overdueUsd: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'USD' and ${installment.paid} = false and ${installment.dueDate} < ${today}), 0)`,
+          paidArs: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'ARS' and ${installment.paid} = true), 0)`,
+          paidUsd: sql<string>`coalesce(sum(${installment.amountCents}) filter (where ${movement.currency} = 'USD' and ${installment.paid} = true), 0)`,
+        })
+        .from(movement)
+        .innerJoin(
+          installment,
+          and(eq(installment.movementId, movement.id), eq(installment.userId, userId)),
+        )
+        .$dynamic()
+      // Con estado "todos" el filtro no mira `inst_stats`: Postgres ni
+      // ejecuta un CTE que nadie referencia.
+      if (query.status !== "all") {
+        totalsQuery = totalsQuery.leftJoin(instStats, eq(instStats.movementId, movement.id))
+      }
+      const [totalsRow] = await totalsQuery.where(filteredWhere)
 
-    const totals: FilterTotals = {
-      pending: {
-        arsCents: Number(totalsRow?.pendingArs ?? 0),
-        usdCents: Number(totalsRow?.pendingUsd ?? 0),
-      },
-      overdue: {
-        arsCents: Number(totalsRow?.overdueArs ?? 0),
-        usdCents: Number(totalsRow?.overdueUsd ?? 0),
-      },
-      paid: {
-        arsCents: Number(totalsRow?.paidArs ?? 0),
-        usdCents: Number(totalsRow?.paidUsd ?? 0),
-      },
+      totals = {
+        pending: {
+          arsCents: Number(totalsRow?.pendingArs ?? 0),
+          usdCents: Number(totalsRow?.pendingUsd ?? 0),
+        },
+        overdue: {
+          arsCents: Number(totalsRow?.overdueArs ?? 0),
+          usdCents: Number(totalsRow?.overdueUsd ?? 0),
+        },
+        paid: {
+          arsCents: Number(totalsRow?.paidArs ?? 0),
+          usdCents: Number(totalsRow?.paidUsd ?? 0),
+        },
+      }
     }
 
     const parentCategory = aliasedTable(category, "parent_category")
     const orderBy = movementOrderBy(query, instStats.earliestUnpaidDue, parentCategory)
 
-    const movementRows = await tx
+    let rowsQuery = tx
       .with(instStats)
       .select({ movement })
       .from(movement)
       .leftJoin(instStats, eq(instStats.movementId, movement.id))
-      .leftJoin(
-        category,
-        and(eq(category.id, movement.categoryId), eq(category.userId, movement.userId)),
-      )
-      .leftJoin(
-        parentCategory,
-        and(
-          eq(parentCategory.id, category.parentId),
-          eq(parentCategory.userId, movement.userId),
-        ),
-      )
+      .$dynamic()
+    // Las categorías sólo hacen falta para ordenar por "Padre › Hija".
+    if (query.sort === "category") {
+      rowsQuery = rowsQuery
+        .leftJoin(
+          category,
+          and(eq(category.id, movement.categoryId), eq(category.userId, movement.userId)),
+        )
+        .leftJoin(
+          parentCategory,
+          and(
+            eq(parentCategory.id, category.parentId),
+            eq(parentCategory.userId, movement.userId),
+          ),
+        )
+    }
+    const movementRows = await rowsQuery
       .where(filteredWhere)
       .orderBy(...orderBy)
       .limit(PAGE_SIZE)
@@ -446,26 +485,42 @@ export async function queryMovementsView(
   })
 }
 
-/** Todas las cuotas pagadas, para el cálculo de saldo. */
-export async function listPaidInstallments(userId: string) {
-  return withUser(userId, async (tx) => {
-    const rows = await tx
-      .select({
-        paidDate: installment.paidDate,
-        amountCents: installment.amountCents,
-        currency: movement.currency,
-        kind: movement.kind,
-        categoryId: movement.categoryId,
-        statementId: installment.statementId,
-        usdPaidArsCents: cardStatement.usdPaidArsCents,
-      })
-      .from(installment)
-      .innerJoin(movement, eq(installment.movementId, movement.id))
-      .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
-      .where(and(eq(installment.userId, userId), eq(installment.paid, true)))
+/**
+ * Las cuotas pagadas, ya leídas como lo percibido (`perceivedPayments`). Con
+ * `from` sólo las pagadas desde esa fecha: el dashboard las quiere para los
+ * gráficos y los totales del mes, no para el saldo (eso es `getBalances`).
+ *
+ * El piso no parte un resumen pagado en pesos: todas sus cuotas comparten la
+ * fecha de pago del resumen (trigger `installment_matches_statement`).
+ */
+export async function selectPaidInstallments(
+  tx: Tx,
+  userId: string,
+  { from }: { from?: IsoDate } = {},
+) {
+  const conditions = [eq(installment.userId, userId), eq(installment.paid, true)]
+  if (from) conditions.push(gte(installment.paidDate, from))
 
-    return perceivedPayments(rows.map((r) => ({ ...r, paidDate: assertPaidDate(r.paidDate) })))
-  })
+  const rows = await tx
+    .select({
+      paidDate: installment.paidDate,
+      amountCents: installment.amountCents,
+      currency: movement.currency,
+      kind: movement.kind,
+      categoryId: movement.categoryId,
+      statementId: installment.statementId,
+      usdPaidArsCents: cardStatement.usdPaidArsCents,
+    })
+    .from(installment)
+    .innerJoin(movement, eq(installment.movementId, movement.id))
+    .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
+    .where(and(...conditions))
+
+  return perceivedPayments(rows.map((r) => ({ ...r, paidDate: assertPaidDate(r.paidDate) })))
+}
+
+export async function listPaidInstallments(userId: string, options: { from?: IsoDate } = {}) {
+  return withUser(userId, (tx) => selectPaidInstallments(tx, userId, options))
 }
 
 export type ReportPaidFilters = {
@@ -503,7 +558,40 @@ export async function listPaidInstallmentsForReport(
     if (filters.from) conditions.push(gte(installment.paidDate, filters.from))
     if (filters.to) conditions.push(lte(installment.paidDate, filters.to))
 
+    /*
+     * El total en dólares de cada resumen pagado en pesos, calculado una vez
+     * por resumen y no con una subconsulta por cada cuota. Hace falta entero
+     * (sin los filtros del informe) para repartir los pesos en proporción.
+     */
+    const i2 = aliasedTable(installment, "i2")
+    const m2 = aliasedTable(movement, "m2")
+    const s2 = aliasedTable(cardStatement, "s2")
+    const statementConditions = [
+      eq(i2.userId, userId),
+      eq(m2.currency, "USD"),
+      isNotNull(s2.usdPaidArsCents),
+    ]
+    // Una cuota de un resumen comparte su fecha de pago: los resúmenes que
+    // importan son los pagados dentro del mismo rango.
+    if (filters.from) statementConditions.push(gte(s2.paidDate, filters.from))
+    if (filters.to) statementConditions.push(lte(s2.paidDate, filters.to))
+    const statementUsd = tx.$with("statement_usd").as(
+      tx
+        .select({
+          // Nombres propios: drizzle referencia las columnas del CTE sin
+          // calificar, y `statement_id` chocaría con la de `installment`.
+          statementId: sql<string>`${i2.statementId}`.as("usd_statement_id"),
+          usdCents: sql<string>`sum(${i2.amountCents})`.as("statement_usd_cents"),
+        })
+        .from(i2)
+        .innerJoin(m2, eq(m2.id, i2.movementId))
+        .innerJoin(s2, eq(s2.id, i2.statementId))
+        .where(and(...statementConditions))
+        .groupBy(i2.statementId),
+    )
+
     const rows = await tx
+      .with(statementUsd)
       .select({
         paidDate: installment.paidDate,
         amountCents: installment.amountCents,
@@ -512,16 +600,12 @@ export async function listPaidInstallmentsForReport(
         categoryId: movement.categoryId,
         statementId: installment.statementId,
         usdPaidArsCents: cardStatement.usdPaidArsCents,
-        statementUsdCents: sql<string | null>`case when ${cardStatement.usdPaidArsCents} is null then null else (
-          select coalesce(sum(i2.amount_cents), 0)
-          from ${installment} i2
-          join ${movement} m2 on m2.id = i2.movement_id
-          where i2.statement_id = ${cardStatement.id} and m2.currency = 'USD'
-        ) end`,
+        statementUsdCents: sql<string | null>`case when ${cardStatement.usdPaidArsCents} is null then null else coalesce(${statementUsd.usdCents}, 0) end`,
       })
       .from(installment)
       .innerJoin(movement, eq(installment.movementId, movement.id))
       .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
+      .leftJoin(statementUsd, eq(statementUsd.statementId, installment.statementId))
       .where(and(...conditions))
 
     return perceivedPayments(
@@ -535,37 +619,39 @@ export async function listPaidInstallmentsForReport(
 }
 
 /** Todas las cuotas pendientes, para deudas, cobros y proyección. */
+export function selectPendingInstallments(tx: Tx, userId: string) {
+  return tx
+    .select({
+      id: installment.id,
+      number: installment.number,
+      dueDate: installment.dueDate,
+      amountCents: installment.amountCents,
+      movementId: movement.id,
+      description: movement.description,
+      currency: movement.currency,
+      kind: movement.kind,
+      // Para que el dashboard muestre un resumen de tarjeta como un solo
+      // renglón y no cada cuota suelta (§1.4 del plan v2).
+      statementId: installment.statementId,
+      statementPeriod: cardStatement.period,
+      cardId: creditCard.id,
+      cardName: creditCard.name,
+    })
+    .from(installment)
+    .innerJoin(movement, eq(installment.movementId, movement.id))
+    .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
+    .leftJoin(creditCard, eq(cardStatement.cardId, creditCard.id))
+    .where(and(eq(installment.userId, userId), eq(installment.paid, false)))
+    .orderBy(asc(installment.dueDate))
+}
+
 export async function listPendingInstallments(userId: string) {
-  return withUser(userId, (tx) =>
-    tx
-      .select({
-        id: installment.id,
-        number: installment.number,
-        dueDate: installment.dueDate,
-        amountCents: installment.amountCents,
-        movementId: movement.id,
-        description: movement.description,
-        currency: movement.currency,
-        kind: movement.kind,
-        // Para que el dashboard muestre un resumen de tarjeta como un solo
-        // renglón y no cada cuota suelta (§1.4 del plan v2).
-        statementId: installment.statementId,
-        statementPeriod: cardStatement.period,
-        cardId: creditCard.id,
-        cardName: creditCard.name,
-      })
-      .from(installment)
-      .innerJoin(movement, eq(installment.movementId, movement.id))
-      .leftJoin(cardStatement, eq(installment.statementId, cardStatement.id))
-      .leftJoin(creditCard, eq(cardStatement.cardId, creditCard.id))
-      .where(and(eq(installment.userId, userId), eq(installment.paid, false)))
-      .orderBy(asc(installment.dueDate)),
-  )
+  return withUser(userId, (tx) => selectPendingInstallments(tx, userId))
 }
 
 /**
- * Cambios de divisa, para saldo y /cambios. Trae TODOS, sin piso de fecha: los
- * dos llamadores necesitan la lista completa y cada uno decide el corte.
+ * Cambios de divisa, para /cambios. Trae TODOS, sin piso de fecha. El saldo
+ * no los necesita: lo calcula `getBalances` en la base.
  */
 export async function listExchanges(userId: string) {
   return withUser(userId, (tx) =>
@@ -575,4 +661,96 @@ export async function listExchanges(userId: string) {
       .where(and(eq(movement.userId, userId), eq(movement.kind, "exchange")))
       .orderBy(asc(movement.date)),
   )
+}
+
+export type BalanceStart = {
+  initialArsCents: number
+  initialUsdCents: number
+  initialDate: IsoDate
+}
+
+/**
+ * El saldo en pesos y dólares a `asOf` (inclusive), sumado en la base en vez
+ * de traer a Node todo el historial de cuotas pagadas y cambios. Es la misma
+ * cuenta que `computeBalances(perceivedPayments(...))` — los tests de
+ * `queries.db.test.ts` comparan las dos sobre los mismos datos:
+ *
+ * - Cada cuota pagada entre `initialDate` y `asOf`, con signo según el tipo.
+ * - Lo percibido: las cuotas en dólares de un resumen pagado en pesos no
+ *   restan dólares; el resumen resta sus `usd_paid_ars_cents` en pesos. Todas
+ *   comparten la fecha de pago del resumen, así que el corte de fechas no lo
+ *   parte, y son siempre egresos (sólo un egreso va con tarjeta).
+ * - Cada cambio de divisa en la ventana, con la pata en pesos redondeada por
+ *   cambio en doble precisión, igual que `convertToArs` (`Math.round`).
+ */
+export async function selectBalances(
+  tx: Tx,
+  userId: string,
+  start: BalanceStart,
+  asOf: IsoDate,
+): Promise<{ arsCents: number; usdCents: number }> {
+  const rows = await tx.execute<{ ars_cents: string | null; usd_cents: string | null }>(sql`
+    with paid as (
+      select
+        m.currency,
+        case when m.kind = 'income' then i.amount_cents else -i.amount_cents end as signed_cents,
+        i.amount_cents,
+        i.statement_id,
+        s.usd_paid_ars_cents
+      from ${installment} i
+      join ${movement} m on m.id = i.movement_id and m.user_id = i.user_id
+      left join ${cardStatement} s on s.id = i.statement_id and s.user_id = i.user_id
+      where i.user_id = ${userId}
+        and i.paid = true
+        and i.paid_date >= ${start.initialDate}
+        and i.paid_date <= ${asOf}
+    ),
+    paid_in_pesos as (
+      select statement_id, max(usd_paid_ars_cents) as ars_cents
+      from paid
+      where currency = 'USD' and statement_id is not null and usd_paid_ars_cents is not null
+      group by statement_id
+      having sum(amount_cents) > 0
+    ),
+    fx as (
+      select
+        m.direction,
+        m.amount_cents as usd_cents,
+        floor(m.amount_cents::float8 * m.rate::float8 + 0.5)::bigint as ars_cents
+      from ${movement} m
+      where m.user_id = ${userId}
+        and m.kind = 'exchange'
+        and m.date >= ${start.initialDate}
+        and m.date <= ${asOf}
+    )
+    select
+      coalesce((select sum(signed_cents) from paid where currency = 'ARS'), 0)
+        - coalesce((select sum(ars_cents) from paid_in_pesos), 0)
+        + coalesce((select sum(case when direction = 'sell' then ars_cents else -ars_cents end) from fx), 0)
+        as ars_cents,
+      coalesce((
+        select sum(signed_cents) from paid
+        where currency = 'USD' and (statement_id is null or usd_paid_ars_cents is null)
+      ), 0)
+        + coalesce((select sum(case when direction = 'buy' then usd_cents else -usd_cents end) from fx), 0)
+        as usd_cents
+  `)
+  const [row] = [...rows]
+  return {
+    arsCents: start.initialArsCents + Number(row?.ars_cents ?? 0),
+    usdCents: start.initialUsdCents + Number(row?.usd_cents ?? 0),
+  }
+}
+
+export async function getBalances(userId: string, start: BalanceStart, asOf: IsoDate) {
+  return withUser(userId, (tx) => selectBalances(tx, userId, start, asOf))
+}
+
+/** El punto de partida del saldo, tal como lo guarda `user_settings`. */
+export function balanceStart(settings: Settings): BalanceStart {
+  return {
+    initialArsCents: settings.initialBalanceArsCents,
+    initialUsdCents: settings.initialBalanceUsdCents,
+    initialDate: settings.initialBalanceDate,
+  }
 }

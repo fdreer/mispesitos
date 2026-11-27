@@ -4,13 +4,7 @@ import { MovementFilters, MovementFiltersSkeleton } from "@/components/movement-
 import { CashflowReport } from "@/components/reports/cashflow-report"
 import { PnlReport } from "@/components/reports/pnl-report"
 import { ReportControls } from "@/components/reports/report-controls"
-import { computeBalances } from "@/lib/balance"
 import { addMonthsClamped, formatIsoForDisplay, monthKey, todayInAr, type IsoDate } from "@/lib/dates"
-import {
-  assertCurrency,
-  assertExchangeDirection,
-  assertInstallmentMovementKind,
-} from "@/lib/movement-asserts"
 import { hayFiltrosActivos } from "@/lib/movement-query"
 import {
   effectiveCashflowRange,
@@ -20,15 +14,10 @@ import {
   type ReportQuery,
 } from "@/lib/report-query"
 import { buildCashflowReport } from "@/lib/reports-cashflow"
-import { buildPnlReport } from "@/lib/reports-pnl"
+import { buildPnlReport, monthsInRange } from "@/lib/reports-pnl"
 import { listCardOptions } from "@/server/card-queries"
-import {
-  listCategories,
-  listExchanges,
-  listPaidInstallments,
-  listPaidInstallmentsForReport,
-  listPendingInstallments,
-} from "@/server/queries"
+import { getCashflowData } from "@/server/page-data"
+import { listCategories, listPaidInstallmentsForReport } from "@/server/queries"
 import { resolveOfficialRate } from "@/server/rate"
 import { requireSettings } from "@/server/session"
 
@@ -106,33 +95,10 @@ async function InformeBody({
       today,
     )
 
-    const [paid, exchanges, pending, officialRate] = await Promise.all([
-      listPaidInstallments(user.id),
-      listExchanges(user.id),
-      listPendingInstallments(user.id),
+    const [{ balances, pending }, officialRate] = await Promise.all([
+      getCashflowData(user.id, settings, today),
       resolveOfficialRate(user.id, settings),
     ])
-
-    const balances = computeBalances(
-      {
-        initialArsCents: settings.initialBalanceArsCents,
-        initialUsdCents: settings.initialBalanceUsdCents,
-        initialDate: settings.initialBalanceDate,
-      },
-      paid.map((p) => ({
-        paidDate: p.paidDate,
-        currency: assertCurrency(p.currency),
-        kind: assertInstallmentMovementKind(p.kind),
-        amountCents: p.amountCents,
-      })),
-      exchanges.map((e) => ({
-        date: e.date,
-        direction: assertExchangeDirection(e.direction),
-        usdCents: e.amountCents,
-        rate: Number(e.rate),
-      })),
-      today,
-    )
 
     const view = buildCashflowReport({
       today,
@@ -148,7 +114,11 @@ async function InformeBody({
   }
 
   const range = effectivePnlRange(reportQuery.filters.from, reportQuery.filters.to, today)
-  const prevMonthStart = `${monthKey(addMonthsClamped(`${monthKey(range.from)}-01`, -1))}-01`
+  // El informe muestra como mucho MAX_REPORT_MONTHS meses (los últimos del
+  // rango) más el anterior para la variación: no tiene sentido traer cuotas
+  // de antes, que `buildPnlReport` descartaría.
+  const firstMonth = monthsInRange(range.from, range.to)[0] ?? monthKey(range.from)
+  const prevMonthStart = `${monthKey(addMonthsClamped(`${firstMonth}-01`, -1))}-01`
 
   const [categories, paid] = await Promise.all([
     listCategories(user.id, undefined, true),
