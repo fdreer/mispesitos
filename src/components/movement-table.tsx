@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useCallback, useRef, useState, useTransition, type ReactNode } from "react"
+import { Fragment, useCallback, useRef, useTransition, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { ChevronDown, ChevronRight } from "lucide-react"
 
@@ -25,7 +25,6 @@ import {
 import type { MovementGroup, MovementSort } from "@/lib/movement-list-view"
 import { buildMovementHref, nextHeaderSort, type MovementQuery } from "@/lib/movement-query"
 import { cn } from "@/lib/utils"
-import type { CardOption } from "@/server/card-queries"
 import type { Category, MovementWithInstallments } from "@/server/queries"
 
 /** Padding horizontal de una celda (`px-2`) más un respiro, para autoajustar. */
@@ -36,10 +35,13 @@ export type MovementTableProps = {
   groups: MovementGroup<MovementWithInstallments>[]
   categories: Category[]
   categoryLabel: Map<string, CategoryLabel>
-  cards: CardOption[]
+  cardNameById: Map<string, string>
   today: IsoDate
   expanded: Set<string>
   toggle: (id: string) => void
+  onEdit: (movement: MovementWithInstallments, kind: "income" | "expense") => void
+  onDelete: (movement: MovementWithInstallments) => void
+  deletingId: string | null
   basePath?: string
   query?: MovementQuery
   defaultSort?: MovementSort
@@ -67,27 +69,27 @@ export function MovementTable({
   groups,
   categories,
   categoryLabel,
-  cards,
+  cardNameById,
   today,
   expanded,
   toggle,
+  onEdit,
+  onDelete,
+  deletingId,
   basePath,
   query,
   defaultSort = "date",
 }: MovementTableProps) {
   const { push } = useRouter()
   const [sorting, startSorting] = useTransition()
-  const { visibleColumns, widthOf, setWidth, moveColumn, prefs } = useTablePrefs(kind)
-  const [liveWidths, setLiveWidths] = useState<Partial<Record<ColumnId, number>>>({})
+  const { visibleColumns, widthOf, setWidth, moveColumn } = useTablePrefs(kind)
   const tableRef = useRef<HTMLTableElement>(null)
 
   const visibleIds = visibleColumns.map((c) => c.id)
-  const hidden = new Set(prefs.hidden)
   const reorder = useColumnReorder<ColumnId>({ ids: visibleIds, onMove: moveColumn })
 
-  const width = (c: ColumnDef) => liveWidths[c.id] ?? widthOf(c)
   const totalWidth =
-    CHEVRON_WIDTH + ACTIONS_MIN_WIDTH + visibleColumns.reduce((acc, c) => acc + width(c), 0)
+    CHEVRON_WIDTH + ACTIONS_MIN_WIDTH + visibleColumns.reduce((acc, c) => acc + widthOf(c), 0)
 
   const canSort = Boolean(basePath && query)
 
@@ -96,6 +98,22 @@ export function MovementTable({
     const patch = nextHeaderSort(query, column, defaultSort)
     startSorting(() => push(buildMovementHref(basePath, query, patch, defaultSort)))
   }
+
+  /**
+   * Actualiza el ancho de `<col>` y `minWidth` de la tabla directo en el DOM
+   * durante el arrastre para mantener 60fps sin re-renderizar las filas.
+   */
+  const handleResize = useCallback(
+    (c: ColumnDef, rawWidth: number) => {
+      const table = tableRef.current
+      if (!table) return
+      const clamped = clampWidth(c, rawWidth)
+      const col = table.querySelector<HTMLTableColElement>(`col[data-col="${c.id}"]`)
+      if (col) col.style.width = `${clamped}px`
+      table.style.minWidth = `${totalWidth - widthOf(c) + clamped}px`
+    },
+    [totalWidth, widthOf],
+  )
 
   const autoFit = useCallback(
     (c: ColumnDef) => {
@@ -122,7 +140,7 @@ export function MovementTable({
         <colgroup>
           <col style={{ width: CHEVRON_WIDTH }} />
           {visibleColumns.map((c) => (
-            <col key={c.id} style={{ width: width(c) }} />
+            <col key={c.id} data-col={c.id} style={{ width: widthOf(c) }} />
           ))}
           <col />
         </colgroup>
@@ -134,20 +152,13 @@ export function MovementTable({
                 key={c.id}
                 id={c.id}
                 label={c.label}
-                width={width(c)}
+                width={widthOf(c)}
                 minWidth={c.minWidth}
                 align={c.align}
                 sorted={canSort && c.sortKey && query?.sort === c.sortKey ? query.dir : null}
                 onSort={canSort && c.sortKey ? () => handleSort(c.sortKey!) : undefined}
-                onResize={(w) => setLiveWidths((prev) => ({ ...prev, [c.id]: clampWidth(c, w) }))}
-                onResizeEnd={(w) => {
-                  setWidth(c.id, w)
-                  setLiveWidths((prev) => {
-                    const next = { ...prev }
-                    delete next[c.id]
-                    return next
-                  })
-                }}
+                onResize={(w) => handleResize(c, w)}
+                onResizeEnd={(w) => setWidth(c.id, w)}
                 onAutoFit={() => autoFit(c)}
                 onDragStart={(e) => reorder.start(e, c.id)}
                 onMoveBy={(delta) => {
@@ -182,9 +193,7 @@ export function MovementTable({
                 const currency = assertCurrency(m.currency)
                 const itemKind = assertInstallmentMovementKind(m.kind)
                 const isOpen = expanded.has(m.id)
-                const cardName = m.creditCardId
-                  ? cards.find((c) => c.id === m.creditCardId)?.name
-                  : undefined
+                const cardName = m.creditCardId ? cardNameById.get(m.creditCardId) : undefined
                 const ctx = {
                   movement: m,
                   kind: itemKind,
@@ -193,7 +202,6 @@ export function MovementTable({
                   categoryLabel,
                   cardName,
                   nextText: nextInstallmentText(m, today),
-                  hidden,
                 }
 
                 return (
@@ -246,9 +254,9 @@ export function MovementTable({
                           <MovementRowActions
                             movement={m}
                             kind={itemKind}
-                            categories={categories}
-                            cards={cards}
-                            today={today}
+                            onEdit={onEdit}
+                            onDelete={onDelete}
+                            deleting={deletingId === m.id}
                           />
                         </div>
                       </TableCell>

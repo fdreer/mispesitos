@@ -93,15 +93,18 @@ function readRaw(key: string): string | null {
   }
 }
 
-function subscribe(listener: () => void) {
-  listeners.add(listener)
-  const onStorage = (e: StorageEvent) => {
-    if (e.key === null || e.key.startsWith("mispesitos.table.")) listener()
+function onStorage(e: StorageEvent) {
+  if (e.key === null || e.key.startsWith("mispesitos.table.")) {
+    for (const l of listeners) l()
   }
-  window.addEventListener("storage", onStorage)
+}
+
+function subscribe(listener: () => void) {
+  if (listeners.size === 0) window.addEventListener("storage", onStorage)
+  listeners.add(listener)
   return () => {
     listeners.delete(listener)
-    window.removeEventListener("storage", onStorage)
+    if (listeners.size === 0) window.removeEventListener("storage", onStorage)
   }
 }
 

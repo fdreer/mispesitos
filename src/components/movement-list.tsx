@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useCallback, useMemo, useState, useTransition } from "react"
 import Link from "next/link"
 import { CreditCard } from "lucide-react"
 
 import { CategoryBadge } from "@/components/category-badge"
+import { DeleteMovementDialog } from "@/components/delete-movement-button"
 import { InstallmentRows } from "@/components/installment-rows"
 import { MovementFormDialog } from "@/components/movement-form-dialog"
 import {
@@ -29,6 +30,7 @@ import { formatMoney } from "@/lib/money"
 import { assertCurrency, assertInstallmentMovementKind } from "@/lib/movement-asserts"
 import {
   groupMovements,
+  type MovementGroup,
   type MovementGroupMode,
   type MovementSort,
 } from "@/lib/movement-list-view"
@@ -86,28 +88,26 @@ function CardName({ name }: { name: string }) {
 }
 
 function MovementCards({
-  movements,
-  categories,
-  cards,
+  groups,
+  cardNameById,
   categoryLabel,
   today,
   expanded,
   toggle,
-  groupBy,
-  paidGroupLabel,
+  onEdit,
+  onDelete,
+  deletingId,
 }: {
-  movements: MovementWithInstallments[]
-  categories: Category[]
-  cards: CardOption[]
+  groups: MovementGroup<MovementWithInstallments>[]
+  cardNameById: Map<string, string>
   categoryLabel: Map<string, CategoryLabel>
   today: IsoDate
   expanded: Set<string>
   toggle: (id: string) => void
-  groupBy: MovementGroupMode
-  paidGroupLabel: string
+  onEdit: (movement: MovementWithInstallments, kind: "income" | "expense") => void
+  onDelete: (movement: MovementWithInstallments) => void
+  deletingId: string | null
 }) {
-  const groups = groupMovements(movements, groupBy, today, paidGroupLabel)
-
   return (
     <div className="space-y-4 md:hidden">
       {groups.map((group) => (
@@ -125,9 +125,7 @@ function MovementCards({
             const categoria = m.categoryId ? categoryLabel.get(m.categoryId) : undefined
             const detailsId = `cuotas-${m.id}`
             const nextText = nextInstallmentText(m, today)
-            const cardName = m.creditCardId
-              ? cards.find((c) => c.id === m.creditCardId)?.name
-              : undefined
+            const cardName = m.creditCardId ? cardNameById.get(m.creditCardId) : undefined
 
             return (
               <article
@@ -170,9 +168,9 @@ function MovementCards({
                     <MovementRowActions
                       movement={m}
                       kind={kind}
-                      categories={categories}
-                      cards={cards}
-                      today={today}
+                      onEdit={onEdit}
+                      onDelete={onDelete}
+                      deleting={deletingId === m.id}
                     />
                   </span>
                 </div>
@@ -214,13 +212,20 @@ export function MovementList({
   totalPages = 1,
   totalCount,
 }: Props) {
-  const categoryLabel = categoryLabels(categories)
+  const categoryLabel = useMemo(() => categoryLabels(categories), [categories])
+  const cardNameById = useMemo(() => new Map(cards.map((c) => [c.id, c.name])), [cards])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [extraMovements, setExtraMovements] = useState<MovementWithInstallments[]>([])
   const [loadedPage, setLoadedPage] = useState(page)
   const [lastInitialMovements, setLastInitialMovements] = useState(movements)
   const [lastPage, setLastPage] = useState(page)
   const [loadingMore, startLoadMore] = useTransition()
+  const [editing, setEditing] = useState<{
+    movement: MovementWithInstallments
+    kind: "income" | "expense"
+  } | null>(null)
+  const [deleting, setDeleting] = useState<MovementWithInstallments | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   // Si llegan movimientos nuevos del servidor (cambio de filtro, recarga o
   // acción), reinicia el acumulado de "Cargar más" en móvil.
@@ -231,14 +236,25 @@ export function MovementList({
     setLoadedPage(page)
   }
 
-  function toggle(id: string) {
+  const toggle = useCallback((id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
-  }
+  }, [])
+
+  const handleEdit = useCallback(
+    (movement: MovementWithInstallments, itemKind: "income" | "expense") => {
+      setEditing({ movement, kind: itemKind })
+    },
+    [],
+  )
+
+  const handleDelete = useCallback((movement: MovementWithInstallments) => {
+    setDeleting(movement)
+  }, [])
 
   function handleLoadMore() {
     if (!kind || !query || loadedPage >= totalPages) return
@@ -252,6 +268,23 @@ export function MovementList({
       setLoadedPage(res.page)
     })
   }
+
+  const paidGroupLabel = kind === "income" ? "Cobrados" : "Pagados"
+  const desktopGroups = useMemo(
+    () => groupMovements(movements, groupBy, today, paidGroupLabel),
+    [movements, groupBy, today, paidGroupLabel],
+  )
+  const mobileMovements = useMemo(
+    () => (extraMovements.length === 0 ? movements : [...movements, ...extraMovements]),
+    [movements, extraMovements],
+  )
+  const mobileGroups = useMemo(
+    () =>
+      extraMovements.length === 0
+        ? desktopGroups
+        : groupMovements(mobileMovements, groupBy, today, paidGroupLabel),
+    [extraMovements.length, desktopGroups, mobileMovements, groupBy, today, paidGroupLabel],
+  )
 
   if (movements.length === 0) {
     return (
@@ -276,10 +309,7 @@ export function MovementList({
     )
   }
 
-  const paidGroupLabel = kind === "income" ? "Cobrados" : "Pagados"
-  const desktopGroups = groupMovements(movements, groupBy, today, paidGroupLabel)
   const tableKind = kind ?? assertInstallmentMovementKind(movements[0].kind)
-  const mobileMovements = [...movements, ...extraMovements]
   const canLoadMore = Boolean(kind && query && loadedPage < totalPages)
 
   return (
@@ -290,10 +320,13 @@ export function MovementList({
           groups={desktopGroups}
           categories={categories}
           categoryLabel={categoryLabel}
-          cards={cards}
+          cardNameById={cardNameById}
           today={today}
           expanded={expanded}
           toggle={toggle}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          deletingId={deletingId}
           basePath={basePath}
           query={query}
           defaultSort={defaultSort}
@@ -301,15 +334,15 @@ export function MovementList({
       </div>
 
       <MovementCards
-        movements={mobileMovements}
-        categories={categories}
-        cards={cards}
+        groups={mobileGroups}
+        cardNameById={cardNameById}
         categoryLabel={categoryLabel}
         today={today}
         expanded={expanded}
         toggle={toggle}
-        groupBy={groupBy}
-        paidGroupLabel={paidGroupLabel}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+        deletingId={deletingId}
       />
 
       {canLoadMore && (
@@ -329,6 +362,32 @@ export function MovementList({
             {loadingMore ? "Cargando..." : "Cargar más"}
           </Button>
         </div>
+      )}
+
+      {editing && (
+        <MovementFormDialog
+          kind={editing.kind}
+          categories={categories}
+          today={today}
+          movement={editing.movement}
+          cards={cards}
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setEditing(null)
+          }}
+        />
+      )}
+
+      {deleting && (
+        <DeleteMovementDialog
+          id={deleting.id}
+          description={deleting.description}
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setDeleting(null)
+          }}
+          onPendingChange={(p) => setDeletingId(p ? deleting.id : null)}
+        />
       )}
     </>
   )

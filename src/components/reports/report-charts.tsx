@@ -1,6 +1,6 @@
 "use client"
 
-import { useId, type ComponentProps } from "react"
+import { memo, useId, useMemo, type ComponentProps } from "react"
 import {
   Area,
   Bar,
@@ -53,6 +53,9 @@ function makeMoneyFormatter(currency: Currency): TooltipFormatter {
   return formatter
 }
 
+const TOOLTIP_FORMATTER_ARS = makeMoneyFormatter("ARS")
+const TOOLTIP_FORMATTER_USD = makeMoneyFormatter("USD")
+
 const PNL_CONFIG = {
   Ingresos: { label: "Ingresos", color: PULSE_GREEN },
   Egresos: { label: "Egresos", color: CORAL_RED },
@@ -65,20 +68,24 @@ const CASHFLOW_CONFIG = {
   saldo: { label: "Saldo proyectado", color: SIGNAL_TEAL },
 } satisfies ChartConfig
 
-export function PnlChart({
+export const PnlChart = memo(function PnlChart({
   data,
   currency,
 }: {
   data: { month: string; label: string; incomeCents: number; expenseCents: number; netCents: number }[]
   currency: Currency
 }) {
-  const formatter = makeMoneyFormatter(currency)
-  const chartData = data.map((d) => ({
-    label: d.label,
-    Ingresos: toUnits(d.incomeCents),
-    Egresos: toUnits(d.expenseCents),
-    Neto: toUnits(d.netCents),
-  }))
+  const formatter = currency === "USD" ? TOOLTIP_FORMATTER_USD : TOOLTIP_FORMATTER_ARS
+  const chartData = useMemo(
+    () =>
+      data.map((d) => ({
+        label: d.label,
+        Ingresos: toUnits(d.incomeCents),
+        Egresos: toUnits(d.expenseCents),
+        Neto: toUnits(d.netCents),
+      })),
+    [data],
+  )
 
   return (
     <ChartContainer config={PNL_CONFIG} className="aspect-auto h-[260px] w-full">
@@ -107,7 +114,7 @@ export function PnlChart({
       </ComposedChart>
     </ChartContainer>
   )
-}
+})
 
 /**
  * El flujo de fondos en un solo gráfico: lo que entra y lo que sale de cada
@@ -116,26 +123,30 @@ export function PnlChart({
  * magnitud mayor que lo que se mueve en un mes, y en un eje común las barras
  * quedarían chatas e ilegibles.
  */
-export function CashflowChart({
+export const CashflowChart = memo(function CashflowChart({
   rows,
   height = 260,
 }: {
   rows: Pick<CashflowRow, "key" | "label" | "inflowsCents" | "outflowsCents" | "closingCents">[]
   height?: number
 }) {
-  const formatter = makeMoneyFormatter("ARS")
-  const goesNegative = rows.some((r) => r.closingCents < 0)
+  const formatter = TOOLTIP_FORMATTER_ARS
+  const goesNegative = useMemo(() => rows.some((r) => r.closingCents < 0), [rows])
   // Único por instancia: dos gráficos en la misma página compartirían el
   // degradado. Sólo caracteres seguros adentro de `url(#…)`.
   const instanceId = useId()
   const fillId = `saldo-fill-${instanceId.replace(/[^\w-]/g, "")}`
 
-  const chartData = rows.map((r) => ({
-    label: r.label,
-    entradas: toUnits(r.inflowsCents),
-    salidas: toUnits(r.outflowsCents),
-    saldo: toUnits(r.closingCents),
-  }))
+  const chartData = useMemo(
+    () =>
+      rows.map((r) => ({
+        label: r.label,
+        entradas: toUnits(r.inflowsCents),
+        salidas: toUnits(r.outflowsCents),
+        saldo: toUnits(r.closingCents),
+      })),
+    [rows],
+  )
 
   return (
     <ChartContainer config={CASHFLOW_CONFIG} className="aspect-auto w-full" style={{ height }}>
@@ -199,4 +210,4 @@ export function CashflowChart({
       </ComposedChart>
     </ChartContainer>
   )
-}
+})

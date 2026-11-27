@@ -3,9 +3,7 @@
 import { useState, useTransition } from "react"
 import { MoreHorizontal, Pencil, Trash2 } from "lucide-react"
 
-import { DeleteMovementDialog } from "@/components/delete-movement-button"
 import { markInstallmentPaid } from "@/components/installment-toasts"
-import { MovementFormDialog } from "@/components/movement-form-dialog"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -16,72 +14,48 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { IsoDate } from "@/lib/dates"
 import { describeNextInstallment, nextUnpaidInstallment } from "@/lib/installments"
-import type { CardOption } from "@/server/card-queries"
-import type { Category, MovementWithInstallments } from "@/server/queries"
+import type { MovementWithInstallments } from "@/server/queries"
 
 type Kind = "income" | "expense"
 
 export function MovementRowActions({
   movement,
   kind,
-  categories,
-  cards,
-  today,
+  onEdit,
+  onDelete,
+  deleting = false,
 }: {
   movement: MovementWithInstallments
   kind: Kind
-  categories: Category[]
-  cards?: CardOption[]
-  today: IsoDate
+  onEdit: (movement: MovementWithInstallments, kind: Kind) => void
+  onDelete: (movement: MovementWithInstallments) => void
+  deleting?: boolean
 }) {
-  const [editOpen, setEditOpen] = useState(false)
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-
   return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            disabled={deleting}
-            aria-label={`Acciones de ${movement.description}`}
-          >
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => setEditOpen(true)}>
-            <Pencil />
-            Editar
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
-            <Trash2 />
-            Borrar
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <MovementFormDialog
-        kind={kind}
-        categories={categories}
-        today={today}
-        movement={movement}
-        cards={cards}
-        open={editOpen}
-        onOpenChange={setEditOpen}
-      />
-      <DeleteMovementDialog
-        id={movement.id}
-        description={movement.description}
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        onPendingChange={setDeleting}
-      />
-    </>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          disabled={deleting}
+          aria-label={`Acciones de ${movement.description}`}
+        >
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => onEdit(movement, kind)}>
+          <Pencil />
+          Editar
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onSelect={() => onDelete(movement)}>
+          <Trash2 />
+          Borrar
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

@@ -282,6 +282,22 @@ export function MovementForm({
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)))
   }
 
+  const suggestionCategoryByDescription = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const s of suggestions) {
+      if (!s.categoryId) continue
+      const key = s.description.toLocaleLowerCase()
+      if (map.has(key)) continue
+      if (
+        categories.some((c) => c.id === s.categoryId && !c.archived) &&
+        isLeafCategory(categories, s.categoryId)
+      ) {
+        map.set(key, s.categoryId)
+      }
+    }
+    return map
+  }, [suggestions, categories])
+
   /**
    * Autocompletar (§5.2): al elegir —o terminar de tipear— una descripción ya
    * usada, se propone la categoría de la última vez. Sólo al dar de alta, y
@@ -292,17 +308,8 @@ export function MovementForm({
   function changeDescription(next: string) {
     setDescription(next)
     if (movement) return
-    const match = suggestions.find(
-      (s) => s.description.toLocaleLowerCase() === next.trim().toLocaleLowerCase(),
-    )
-    const target = match?.categoryId
-    if (
-      target &&
-      categories.some((c) => c.id === target && !c.archived) &&
-      isLeafCategory(categories, target)
-    ) {
-      setCategoryId(target)
-    }
+    const target = suggestionCategoryByDescription.get(next.trim().toLocaleLowerCase())
+    if (target) setCategoryId(target)
   }
 
   function setCount(next: number) {
@@ -623,72 +630,86 @@ export function MovementForm({
           )}
 
           {/* Las filas viajan siempre en el FormData, se vean o no: el plan
-              colapsado sigue siendo el plan que se guarda. */}
-          <div
-            id={rowsId}
-            className={cn(
+              colapsado sigue siendo el plan que se guarda. Cuando está colapsado
+              sólo se montan los `<input type="hidden">` para evitar montar
+              decenas de `<Input>` y `<DateField>` con Popover de Radix. */}
+          {showRows ? (
+            <div
+              id={rowsId}
               // Sin scroll propio: el cuerpo del modal ya scrollea, y dos
               // barras anidadas se pelean por la rueda.
-              "space-y-1.5 border-t border-white/[0.06] pt-3",
-              !showRows && "hidden",
-            )}
-          >
-            {rows.map((row, index) => (
-              <div key={index} className="flex items-center gap-2">
-                <span className="text-muted-foreground w-5 shrink-0 text-center text-xs tabular-nums">
-                  {index + 1}
-                </span>
-                {/* El que viaja: centavos, el formato que espera la acción. Vacío
-                    si la fila todavía no es un número — así el servidor rechaza
-                    con su propio mensaje en vez de recibir texto suelto. */}
-                <input
-                  type="hidden"
-                  name="installmentAmount"
-                  value={installmentCents[index] ?? ""}
-                />
-                <div className="relative min-w-0 flex-1">
-                  <span className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs">
-                    {currency === "USD" ? "US$" : "$"}
+              className="space-y-1.5 border-t border-white/[0.06] pt-3"
+            >
+              {rows.map((row, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <span className="text-muted-foreground w-5 shrink-0 text-center text-xs tabular-nums">
+                    {index + 1}
                   </span>
-                  <Input
-                    inputMode="decimal"
-                    value={row.amount}
-                    onChange={(e) => updateRow(index, { amount: formatAmountInput(e.target.value, row.amount) })}
-                    aria-label={`Importe de la cuota ${index + 1}`}
-                    aria-invalid={row.amount !== "" && installmentCents[index] === null}
-                    className={cn(FIELD, "h-9 text-sm tabular-nums", currency === "USD" ? "pl-10" : "pl-6")}
+                  {/* El que viaja: centavos, el formato que espera la acción. Vacío
+                      si la fila todavía no es un número — así el servidor rechaza
+                      con su propio mensaje en vez de recibir texto suelto. */}
+                  <input
+                    type="hidden"
+                    name="installmentAmount"
+                    value={installmentCents[index] ?? ""}
                   />
-                </div>
-                <div className="w-[122px] shrink-0 sm:w-[132px]">
-                  {card && statementPlan?.[index] ? (
-                    // Con tarjeta el vencimiento no se elige: es el del
-                    // resumen. Se corrige desde /tarjetas, para todas las
-                    // cuotas de ese resumen a la vez.
-                    <>
-                      <input type="hidden" name="installmentDueDate" value={row.dueDate} />
-                      <p className="text-muted-foreground flex h-9 flex-col justify-center text-right text-xs leading-tight">
-                        <span className="whitespace-nowrap text-foreground/85 tabular-nums">
-                          {formatIsoForDisplay(row.dueDate)}
-                        </span>
-                        <span className="text-[11px] whitespace-nowrap">
-                          res. {formatPeriod(statementPlan[index].period)}
-                        </span>
-                      </p>
-                    </>
-                  ) : (
-                    <DateField
-                      size="sm"
-                      hiddenName="installmentDueDate"
-                      value={row.dueDate}
-                      onChange={(next) => updateRow(index, { dueDate: next })}
-                      ariaLabel={`Vencimiento de la cuota ${index + 1}: ${formatIsoForDisplay(row.dueDate)}`}
-                      className={cn(FIELD, "h-9 w-full cursor-pointer justify-start gap-1.5 px-2.5 text-sm font-normal tabular-nums")}
+                  <div className="relative min-w-0 flex-1">
+                    <span className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs">
+                      {currency === "USD" ? "US$" : "$"}
+                    </span>
+                    <Input
+                      inputMode="decimal"
+                      value={row.amount}
+                      onChange={(e) => updateRow(index, { amount: formatAmountInput(e.target.value, row.amount) })}
+                      aria-label={`Importe de la cuota ${index + 1}`}
+                      aria-invalid={row.amount !== "" && installmentCents[index] === null}
+                      className={cn(FIELD, "h-9 text-sm tabular-nums", currency === "USD" ? "pl-10" : "pl-6")}
                     />
-                  )}
+                  </div>
+                  <div className="w-[122px] shrink-0 sm:w-[132px]">
+                    {card && statementPlan?.[index] ? (
+                      // Con tarjeta el vencimiento no se elige: es el del
+                      // resumen. Se corrige desde /tarjetas, para todas las
+                      // cuotas de ese resumen a la vez.
+                      <>
+                        <input type="hidden" name="installmentDueDate" value={row.dueDate} />
+                        <p className="text-muted-foreground flex h-9 flex-col justify-center text-right text-xs leading-tight">
+                          <span className="whitespace-nowrap text-foreground/85 tabular-nums">
+                            {formatIsoForDisplay(row.dueDate)}
+                          </span>
+                          <span className="text-[11px] whitespace-nowrap">
+                            res. {formatPeriod(statementPlan[index].period)}
+                          </span>
+                        </p>
+                      </>
+                    ) : (
+                      <DateField
+                        size="sm"
+                        hiddenName="installmentDueDate"
+                        value={row.dueDate}
+                        onChange={(next) => updateRow(index, { dueDate: next })}
+                        ariaLabel={`Vencimiento de la cuota ${index + 1}: ${formatIsoForDisplay(row.dueDate)}`}
+                        className={cn(FIELD, "h-9 w-full cursor-pointer justify-start gap-1.5 px-2.5 text-sm font-normal tabular-nums")}
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div id={rowsId} hidden>
+              {rows.map((row, index) => (
+                <div key={index}>
+                  <input
+                    type="hidden"
+                    name="installmentAmount"
+                    value={installmentCents[index] ?? ""}
+                  />
+                  <input type="hidden" name="installmentDueDate" value={row.dueDate} />
+                </div>
+              ))}
+            </div>
+          )}
           {countValid && (showRows || !sumMatches) && (
             <p className={sumMatches ? "text-muted-foreground text-xs" : "text-destructive text-xs font-medium"}>
               Suma de cuotas: {formatMoney(rowsSum, currency)} de{" "}

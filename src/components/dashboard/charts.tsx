@@ -1,6 +1,6 @@
 "use client"
 
-import { useId, useState, type ComponentProps } from "react"
+import { useId, useMemo, useState, type ComponentProps } from "react"
 import { ChevronRight } from "lucide-react"
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, XAxis, YAxis } from "recharts"
 
@@ -46,6 +46,9 @@ function makeMoneyTooltipFormatter(currency: Currency): TooltipFormatter {
   }
 }
 
+const TOOLTIP_FORMATTER_ARS = makeMoneyTooltipFormatter("ARS")
+const TOOLTIP_FORMATTER_USD = makeMoneyTooltipFormatter("USD")
+
 const MONTHLY_CONFIG = {
   Ingresos: { label: "Ingresos", color: PULSE_GREEN },
   Egresos: { label: "Egresos", color: CORAL_RED },
@@ -65,6 +68,17 @@ export function CategoryPie({
   const active = currency === "USD" ? data.usd : data.ars
   const hasAny = data.ars.length > 0 || data.usd.length > 0
 
+  const chartData = useMemo(
+    () =>
+      active.map((d) => ({
+        name: d.name,
+        value: toUnits(d.arsCents),
+        fill: groupColor(d),
+      })),
+    [active],
+  )
+  const total = useMemo(() => active.reduce((acc, d) => acc + d.arsCents, 0), [active])
+
   if (!hasAny) {
     return (
       <p className="text-muted-foreground py-8 text-center text-sm">
@@ -73,13 +87,7 @@ export function CategoryPie({
     )
   }
 
-  const formatter = makeMoneyTooltipFormatter(currency)
-  const chartData = active.map((d) => ({
-    name: d.name,
-    value: toUnits(d.arsCents),
-    fill: groupColor(d),
-  }))
-  const total = active.reduce((acc, d) => acc + d.arsCents, 0)
+  const formatter = currency === "USD" ? TOOLTIP_FORMATTER_USD : TOOLTIP_FORMATTER_ARS
 
   return (
     <div className="space-y-3">
@@ -207,7 +215,16 @@ export function MonthlyBars({
 }) {
   const [currency, setCurrency] = useState<Currency>("ARS")
   const active = currency === "USD" ? data.usd : data.ars
-  const formatter = makeMoneyTooltipFormatter(currency)
+  const formatter = currency === "USD" ? TOOLTIP_FORMATTER_USD : TOOLTIP_FORMATTER_ARS
+  const chartData = useMemo(
+    () =>
+      active.map((d) => ({
+        month: d.month,
+        Ingresos: toUnits(d.incomeCents),
+        Egresos: toUnits(d.expenseCents),
+      })),
+    [active],
+  )
 
   return (
     <div className="space-y-3">
@@ -224,13 +241,7 @@ export function MonthlyBars({
         />
       </div>
       <ChartContainer config={MONTHLY_CONFIG} className="aspect-auto h-[220px] w-full">
-        <BarChart
-          data={active.map((d) => ({
-            month: d.month,
-            Ingresos: toUnits(d.incomeCents),
-            Egresos: toUnits(d.expenseCents),
-          }))}
-        >
+        <BarChart data={chartData}>
           <CartesianGrid vertical={false} stroke="var(--border)" />
           <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} tick={AXIS_TICK} />
           <YAxis

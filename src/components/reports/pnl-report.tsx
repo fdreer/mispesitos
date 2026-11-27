@@ -384,6 +384,145 @@ function CategorySectionRows({
   )
 }
 
+function PnlCategoryTableCard({
+  view,
+  filters,
+  hasActiveFilters,
+  hasAnyData,
+}: {
+  view: PnlReportView
+  filters: MovementQuery
+  hasActiveFilters: boolean
+  hasAnyData: boolean
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [showVariation, setShowVariation] = useState(false)
+
+  function toggle(key: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const { incomeRows, expenseRows, months, totalsByMonth, grandTotal } = view
+
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-1.5 text-base">
+          Estado por categoría
+          <InfoHint label="Cómo leer esta tabla">
+            Cada celda muestra pesos y, debajo, dólares cuando los hay, sin convertir entre
+            monedas. Tocá cualquier importe para ver esos movimientos en el listado.
+          </InfoHint>
+        </CardTitle>
+        {hasAnyData && (
+          <CardAction>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-pressed={showVariation}
+              onClick={() => setShowVariation((v) => !v)}
+              className={cn(showVariation && "border-mist/40 bg-accent text-paper")}
+            >
+              Variación %
+            </Button>
+          </CardAction>
+        )}
+      </CardHeader>
+      <CardContent>
+        {!hasAnyData ? (
+          <div className="flex flex-col items-center gap-3 py-6 text-center">
+            <p className="text-muted-foreground text-sm">
+              {hasActiveFilters
+                ? "Ningún movimiento pagado entra en los filtros elegidos."
+                : "Todavía no tenés cuotas pagadas en este período."}
+            </p>
+            {hasActiveFilters && (
+              <Button asChild variant="outline" size="sm">
+                <Link href="/informes">Limpiar filtros</Link>
+              </Button>
+            )}
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="sticky left-0 z-10 min-w-44 bg-card">
+                  Categoría
+                </TableHead>
+                {months.map((m) => (
+                  <TableHead key={m} className="min-w-24 text-right">
+                    {formatShortMonth(m)}
+                  </TableHead>
+                ))}
+                <TableHead className="min-w-28 text-right">Total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <CategorySectionRows
+                kind="income"
+                title="Ingresos"
+                totalLabel="Total ingresos"
+                rows={incomeRows}
+                view={view}
+                filters={filters}
+                expanded={expanded}
+                toggle={toggle}
+                showVariation={showVariation}
+              />
+              <CategorySectionRows
+                kind="expense"
+                title="Gastos"
+                totalLabel="Total gastos"
+                rows={expenseRows}
+                view={view}
+                filters={filters}
+                expanded={expanded}
+                toggle={toggle}
+                showVariation={showVariation}
+              />
+            </TableBody>
+            <TableFooter>
+              <TableRow>
+                <TableCell className="sticky left-0 z-10 bg-card font-semibold text-paper">
+                  Resultado neto
+                </TableCell>
+                {totalsByMonth.map((m) => (
+                  <TableCell
+                    key={m.month}
+                    className="text-right font-semibold text-paper tabular-nums"
+                  >
+                    <DualCurrencyCell
+                      arsCents={m.netArsCents}
+                      usdCents={m.netUsdCents}
+                      arsVarPct={m.netArsVarPct}
+                      usdVarPct={m.netUsdVarPct}
+                      showVariation={showVariation}
+                      href={null}
+                    />
+                  </TableCell>
+                ))}
+                <TableCell className="text-right font-semibold text-paper tabular-nums">
+                  <DualCurrencyCell
+                    arsCents={grandTotal.ars.netCents}
+                    usdCents={grandTotal.usd.netCents}
+                    href={null}
+                  />
+                </TableCell>
+              </TableRow>
+            </TableFooter>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function PnlReport({
   view,
   initialCurrency = "ARS",
@@ -395,20 +534,9 @@ export function PnlReport({
   filters: MovementQuery
   hasActiveFilters: boolean
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [showVariation, setShowVariation] = useState(false)
   const [chartCurrency, setChartCurrency] = useState<Currency>(initialCurrency)
 
-  function toggle(key: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
-  const { summary, chart, incomeRows, expenseRows, months, totalsByMonth, grandTotal } = view
+  const { summary, chart, incomeRows, expenseRows } = view
   const hasAnyData = incomeRows.length > 0 || expenseRows.length > 0
   const hasUsd =
     summary.usd.incomeCents !== 0 ||
@@ -500,116 +628,12 @@ export function PnlReport({
         </CardContent>
       </Card>
 
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-1.5 text-base">
-            Estado por categoría
-            <InfoHint label="Cómo leer esta tabla">
-              Cada celda muestra pesos y, debajo, dólares cuando los hay, sin convertir entre
-              monedas. Tocá cualquier importe para ver esos movimientos en el listado.
-            </InfoHint>
-          </CardTitle>
-          {hasAnyData && (
-            <CardAction>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-pressed={showVariation}
-                onClick={() => setShowVariation((v) => !v)}
-                className={cn(showVariation && "border-mist/40 bg-accent text-paper")}
-              >
-                Variación %
-              </Button>
-            </CardAction>
-          )}
-        </CardHeader>
-        <CardContent>
-          {!hasAnyData ? (
-            <div className="flex flex-col items-center gap-3 py-6 text-center">
-              <p className="text-muted-foreground text-sm">
-                {hasActiveFilters
-                  ? "Ningún movimiento pagado entra en los filtros elegidos."
-                  : "Todavía no tenés cuotas pagadas en este período."}
-              </p>
-              {hasActiveFilters && (
-                <Button asChild variant="outline" size="sm">
-                  <Link href="/informes">Limpiar filtros</Link>
-                </Button>
-              )}
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="sticky left-0 z-10 min-w-44 bg-card">
-                    Categoría
-                  </TableHead>
-                  {months.map((m) => (
-                    <TableHead key={m} className="min-w-24 text-right">
-                      {formatShortMonth(m)}
-                    </TableHead>
-                  ))}
-                  <TableHead className="min-w-28 text-right">Total</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <CategorySectionRows
-                  kind="income"
-                  title="Ingresos"
-                  totalLabel="Total ingresos"
-                  rows={incomeRows}
-                  view={view}
-                  filters={filters}
-                  expanded={expanded}
-                  toggle={toggle}
-                  showVariation={showVariation}
-                />
-                <CategorySectionRows
-                  kind="expense"
-                  title="Gastos"
-                  totalLabel="Total gastos"
-                  rows={expenseRows}
-                  view={view}
-                  filters={filters}
-                  expanded={expanded}
-                  toggle={toggle}
-                  showVariation={showVariation}
-                />
-              </TableBody>
-              <TableFooter>
-                <TableRow>
-                  <TableCell className="sticky left-0 z-10 bg-card font-semibold text-paper">
-                    Resultado neto
-                  </TableCell>
-                  {totalsByMonth.map((m) => (
-                    <TableCell
-                      key={m.month}
-                      className="text-right font-semibold text-paper tabular-nums"
-                    >
-                      <DualCurrencyCell
-                        arsCents={m.netArsCents}
-                        usdCents={m.netUsdCents}
-                        arsVarPct={m.netArsVarPct}
-                        usdVarPct={m.netUsdVarPct}
-                        showVariation={showVariation}
-                        href={null}
-                      />
-                    </TableCell>
-                  ))}
-                  <TableCell className="text-right font-semibold text-paper tabular-nums">
-                    <DualCurrencyCell
-                      arsCents={grandTotal.ars.netCents}
-                      usdCents={grandTotal.usd.netCents}
-                      href={null}
-                    />
-                  </TableCell>
-                </TableRow>
-              </TableFooter>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      <PnlCategoryTableCard
+        view={view}
+        filters={filters}
+        hasActiveFilters={hasActiveFilters}
+        hasAnyData={hasAnyData}
+      />
     </div>
   )
 }

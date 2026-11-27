@@ -44,6 +44,7 @@ describe("MovementForm", () => {
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
     fireEvent.click(screen.getByRole("switch", { name: /Pagado/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Editar cuotas" }))
     expect(screen.getByLabelText("Importe de la cuota 1")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: /^Fecha:/ }))
@@ -79,6 +80,7 @@ describe("MovementForm", () => {
     fireEvent.click(estado)
     expect(estado.getAttribute("aria-checked")).toBe("false")
     expect(container.querySelector<HTMLInputElement>('input[name="settled"]')?.value).toBe("false")
+    fireEvent.click(screen.getByRole("button", { name: "Editar cuotas" }))
     expect(screen.getByLabelText("Importe de la cuota 1")).toBeTruthy()
   })
 
@@ -90,6 +92,7 @@ describe("MovementForm", () => {
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
     fireEvent.click(screen.getByRole("switch", { name: /Pagado/ }))
     fireEvent.change(screen.getByLabelText("Cuotas"), { target: { value: "2" } })
+    fireEvent.click(screen.getByRole("button", { name: "Editar cuotas" }))
 
     const visible1 = screen.getByLabelText<HTMLInputElement>("Importe de la cuota 1")
     const visible2 = screen.getByLabelText<HTMLInputElement>("Importe de la cuota 2")
@@ -109,6 +112,7 @@ describe("MovementForm", () => {
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
     fireEvent.click(screen.getByRole("switch", { name: /Pagado/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Editar cuotas" }))
     fireEvent.change(screen.getByLabelText("Importe de la cuota 1"), {
       target: { value: "1.000,50" },
     })

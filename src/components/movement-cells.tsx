@@ -114,6 +114,84 @@ async function savePatch(
 
 // --- Categoría ---------------------------------------------------------------
 
+function CategoryPopoverBody({
+  categories,
+  categoryLabel,
+  currentCategoryId,
+  keepId,
+  query,
+  onQueryChange,
+  onChoose,
+}: {
+  categories: Category[]
+  categoryLabel: Map<string, CategoryLabel>
+  currentCategoryId: string | null
+  keepId: string | null
+  query: string
+  onQueryChange: (next: string) => void
+  onChoose: (id: string) => void
+}) {
+  const groups = selectorGroups(categories, { keepId, query })
+
+  function option(c: Category, nested: boolean) {
+    const l = categoryLabel.get(c.id)
+    const selected = c.id === currentCategoryId
+    return (
+      <button
+        key={c.id}
+        type="button"
+        role="option"
+        aria-selected={selected}
+        onClick={() => onChoose(c.id)}
+        className={cn(
+          "flex w-full cursor-pointer items-center justify-between gap-2 rounded-md py-1.5 pr-1.5 text-left text-sm hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:outline-none",
+          nested ? "pl-5" : "pl-1.5",
+        )}
+      >
+        <CategoryBadge name={c.name} hue={l?.hue} />
+        {selected && <Check className="size-3.5 shrink-0 text-primary" aria-hidden />}
+      </button>
+    )
+  }
+
+  return (
+    <>
+      <Input
+        autoFocus
+        value={query}
+        onChange={(e) => onQueryChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault()
+            const first = groups.flatMap((g) => (g.type === "leaf" ? [g.category] : g.options))[0]
+            if (first) onChoose(first.id)
+          }
+        }}
+        placeholder="Buscar categoría..."
+        aria-label="Buscar categoría"
+        className="mb-2 h-8"
+      />
+      <div role="listbox" aria-label="Categorías" className="max-h-64 space-y-0.5 overflow-y-auto">
+        {groups.length === 0 && (
+          <p className="py-4 text-center text-xs text-muted-foreground">Sin categorías.</p>
+        )}
+        {groups.map((g) =>
+          g.type === "leaf" ? (
+            option(g.category, false)
+          ) : (
+            <div key={g.parent.id} role="group" aria-label={g.parent.name}>
+              <p className="px-1.5 pt-1.5 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                {g.parent.name}
+              </p>
+              {g.options.map((c) => option(c, true))}
+            </div>
+          ),
+        )}
+      </div>
+    </>
+  )
+}
+
 function CategoryCell({
   movement,
   categories,
@@ -128,7 +206,6 @@ function CategoryCell({
   const [pending, startTransition] = useTransition()
   const [categoryId, setOptimistic] = useOptimistic(movement.categoryId)
   const label = categoryId ? categoryLabel.get(categoryId) : undefined
-  const groups = selectorGroups(categories, { keepId: movement.categoryId, query })
 
   function choose(id: string) {
     setOpen(false)
@@ -144,27 +221,6 @@ function CategoryCell({
         "Categoría cambiada",
       )
     })
-  }
-
-  function option(c: Category, nested: boolean) {
-    const l = categoryLabel.get(c.id)
-    const selected = c.id === categoryId
-    return (
-      <button
-        key={c.id}
-        type="button"
-        role="option"
-        aria-selected={selected}
-        onClick={() => choose(c.id)}
-        className={cn(
-          "flex w-full cursor-pointer items-center justify-between gap-2 rounded-md py-1.5 pr-1.5 text-left text-sm hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:outline-none",
-          nested ? "pl-5" : "pl-1.5",
-        )}
-      >
-        <CategoryBadge name={c.name} hue={l?.hue} />
-        {selected && <Check className="size-3.5 shrink-0 text-primary" aria-hidden />}
-      </button>
-    )
   }
 
   return (
@@ -187,38 +243,17 @@ function CategoryCell({
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-64 p-2">
-          <Input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault()
-                const first = groups.flatMap((g) => (g.type === "leaf" ? [g.category] : g.options))[0]
-                if (first) choose(first.id)
-              }
-            }}
-            placeholder="Buscar categoría..."
-            aria-label="Buscar categoría"
-            className="mb-2 h-8"
-          />
-          <div role="listbox" aria-label="Categorías" className="max-h-64 space-y-0.5 overflow-y-auto">
-            {groups.length === 0 && (
-              <p className="py-4 text-center text-xs text-muted-foreground">Sin categorías.</p>
-            )}
-            {groups.map((g) =>
-              g.type === "leaf" ? (
-                option(g.category, false)
-              ) : (
-                <div key={g.parent.id} role="group" aria-label={g.parent.name}>
-                  <p className="px-1.5 pt-1.5 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                    {g.parent.name}
-                  </p>
-                  {g.options.map((c) => option(c, true))}
-                </div>
-              ),
-            )}
-          </div>
+          {open && (
+            <CategoryPopoverBody
+              categories={categories}
+              categoryLabel={categoryLabel}
+              currentCategoryId={categoryId}
+              keepId={movement.categoryId}
+              query={query}
+              onQueryChange={setQuery}
+              onChoose={choose}
+            />
+          )}
         </PopoverContent>
       </Popover>
     </StopRowToggle>
@@ -589,8 +624,6 @@ export type MovementCellContext = {
   categoryLabel: Map<string, CategoryLabel>
   cardName?: string
   nextText: string | null
-  /** Columnas ocultas: su dato vuelve como subtítulo de la descripción. */
-  hidden: Set<ColumnId>
 }
 
 export function MovementCell({ column, ...ctx }: { column: ColumnId } & MovementCellContext) {
