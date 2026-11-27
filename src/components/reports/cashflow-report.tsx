@@ -43,6 +43,9 @@ export function CashflowReport({ view }: { view: CashflowReportView }) {
   } = view
 
   const periodNetCents = rows.reduce((acc, r) => acc + r.netCents, 0)
+  const committedCents =
+    rows.reduce((acc, r) => acc + r.outflowsCents, 0) + overdue.expenseCents
+  const incomingCents = rows.reduce((acc, r) => acc + r.inflowsCents, 0) + overdue.incomeCents
   const hasOverdue =
     overdue.expenseCount > 0 ||
     overdue.incomeCount > 0
@@ -89,22 +92,33 @@ export function CashflowReport({ view }: { view: CashflowReportView }) {
         )}
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <Card size="sm" className="gap-2 py-3">
+          <Card
+            size="sm"
+            className="gap-2 py-3 ring-1 ring-signal-teal/25 bg-gradient-to-br from-signal-teal/[0.07] to-transparent"
+          >
             <BalanceHeader
               title="Punto de partida hoy"
               hint="Saldo real en pesos más tu saldo en dólares valuado al oficial comprador."
             />
             <CardContent>
-              <BalanceAmount>{formatMoney(currentBalanceCents, "ARS", 0)}</BalanceAmount>
+              <BalanceAmount className="text-paper">
+                {formatMoney(currentBalanceCents, "ARS", 0)}
+              </BalanceAmount>
             </CardContent>
           </Card>
 
           <Card size="sm" className="gap-2 py-3">
-            <BalanceHeader title="Neto proyectado" />
+            <BalanceHeader
+              title="Comprometido"
+              hint="Egresos pendientes del período (cuotas, resúmenes de tarjeta, gastos fijos) más lo atrasado. Los dólares, al oficial vendedor."
+            />
             <CardContent>
-              <BalanceAmount>{formatMoney(periodNetCents, "ARS", 0)}</BalanceAmount>
-              <BalanceNote>
-                {rows.length} {view.granularity === "semanal" ? "semanas" : "meses"}
+              <BalanceAmount>{formatMoney(committedCents, "ARS", 0)}</BalanceAmount>
+              <BalanceNote className="tabular-nums">
+                Entran {formatMoney(incomingCents, "ARS", 0)} · neto{" "}
+                <span className={cn(periodNetCents < 0 ? "text-coral-red" : "text-pulse-green")}>
+                  {formatMoney(periodNetCents, "ARS", 0)}
+                </span>
               </BalanceNote>
             </CardContent>
           </Card>
@@ -115,7 +129,9 @@ export function CashflowReport({ view }: { view: CashflowReportView }) {
               hint="Saldo proyectado al final del último período visible, sin descontar cuotas atrasadas."
             />
             <CardContent>
-              <BalanceAmount>{formatMoney(projectedEndBalanceCents, "ARS", 0)}</BalanceAmount>
+              <BalanceAmount className={cn(projectedEndBalanceCents < 0 && "text-coral-red")}>
+                {formatMoney(projectedEndBalanceCents, "ARS", 0)}
+              </BalanceAmount>
               {rows.at(-1) && <BalanceNote>{rows.at(-1)!.label}</BalanceNote>}
             </CardContent>
           </Card>
@@ -124,7 +140,7 @@ export function CashflowReport({ view }: { view: CashflowReportView }) {
         <Card size="sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-1.5 text-base">
-              Neto y saldo acumulado
+              Entradas, salidas y saldo
               <InfoHint label="Cómo se calcula el flujo de caja">
                 Arranca desde hoy con tu saldo real en pesos más tus dólares valuados al oficial
                 comprador. Los cobros pendientes en dólares se valuán al oficial comprador y los
@@ -171,13 +187,24 @@ export function CashflowReport({ view }: { view: CashflowReportView }) {
                     <TableCell className="text-right tabular-nums">
                       {formatArs(row.initialCents)}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">
+                    <TableCell
+                      className={cn(
+                        "text-right tabular-nums",
+                        row.inflowsCents > 0 ? "text-pulse-green/90" : "text-muted-foreground",
+                      )}
+                    >
                       {formatArs(row.inflowsCents)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatArs(row.outflowsCents)}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">
+                    <TableCell
+                      className={cn(
+                        "text-right tabular-nums",
+                        row.netCents < 0 ? "text-coral-red" : "text-muted-foreground",
+                      )}
+                    >
+                      {row.netCents > 0 && "+"}
                       {formatArs(row.netCents)}
                     </TableCell>
                     <TableCell

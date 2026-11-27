@@ -78,12 +78,16 @@ export function PayStatementButton({
   officialSellRate,
   suggestedBuyRate,
   usdBalanceCents,
+  size = "default",
+  label = "Pagar resumen",
 }: {
   statement: StatementForActions
   today: IsoDate
   officialSellRate: number | null
   suggestedBuyRate: number | null
   usdBalanceCents: number
+  size?: "default" | "sm"
+  label?: string
 }) {
   const [open, setOpen] = useState(false)
   const notClosedYet = statement.closingDate > today
@@ -91,6 +95,7 @@ export function PayStatementButton({
     <>
       <Button
         type="button"
+        size={size}
         onClick={() => setOpen(true)}
         disabled={statement.count === 0 || notClosedYet}
         title={
@@ -99,7 +104,7 @@ export function PayStatementButton({
             : undefined
         }
       >
-        Pagar resumen
+        {label}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">

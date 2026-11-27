@@ -2,9 +2,9 @@
 
 import type { ComponentProps } from "react"
 import {
+  Area,
   Bar,
   CartesianGrid,
-  Cell,
   ComposedChart,
   Line,
   ReferenceLine,
@@ -60,8 +60,9 @@ const PNL_CONFIG = {
 } satisfies ChartConfig
 
 const CASHFLOW_CONFIG = {
-  neto: { label: "Neto", color: PULSE_GREEN },
-  saldoProyectado: { label: "Saldo proyectado", color: SIGNAL_TEAL },
+  entradas: { label: "Entra", color: PULSE_GREEN },
+  salidas: { label: "Sale", color: CORAL_RED },
+  saldo: { label: "Saldo proyectado", color: SIGNAL_TEAL },
 } satisfies ChartConfig
 
 export function PnlChart({
@@ -108,50 +109,88 @@ export function PnlChart({
   )
 }
 
+/**
+ * El flujo de fondos en un solo gráfico: lo que entra y lo que sale de cada
+ * período en barras (eje derecho) y el saldo que va quedando como área (eje
+ * izquierdo). Van en ejes distintos porque el saldo suele ser un orden de
+ * magnitud mayor que lo que se mueve en un mes, y en un eje común las barras
+ * quedarían chatas e ilegibles.
+ */
 export function CashflowChart({
   rows,
+  height = 260,
 }: {
-  rows: CashflowRow[]
+  rows: Pick<CashflowRow, "key" | "label" | "inflowsCents" | "outflowsCents" | "closingCents">[]
+  height?: number
 }) {
   const formatter = makeMoneyFormatter("ARS")
+  const goesNegative = rows.some((r) => r.closingCents < 0)
 
   const chartData = rows.map((r) => ({
     label: r.label,
-    neto: toUnits(r.netCents),
-    saldoProyectado: toUnits(r.closingCents),
+    entradas: toUnits(r.inflowsCents),
+    salidas: toUnits(r.outflowsCents),
+    saldo: toUnits(r.closingCents),
   }))
 
   return (
-    <ChartContainer config={CASHFLOW_CONFIG} className="aspect-auto h-[260px] w-full">
-      <ComposedChart data={chartData}>
+    <ChartContainer config={CASHFLOW_CONFIG} className="aspect-auto w-full" style={{ height }}>
+      <ComposedChart data={chartData} margin={{ left: 4, right: 4, top: 8 }}>
+        <defs>
+          <linearGradient id="saldo-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={SIGNAL_TEAL} stopOpacity={0.28} />
+            <stop offset="100%" stopColor={SIGNAL_TEAL} stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
         <CartesianGrid vertical={false} stroke="var(--border)" />
         <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} tick={AXIS_TICK} />
         <YAxis
-          width={80}
+          yAxisId="saldo"
+          width={72}
+          tickLine={false}
+          axisLine={false}
+          tick={{ ...AXIS_TICK, fill: SIGNAL_TEAL }}
+          tickFormatter={formatAxisPesos}
+        />
+        <YAxis
+          yAxisId="flujo"
+          orientation="right"
+          width={64}
           tickLine={false}
           axisLine={false}
           tick={AXIS_TICK}
           tickFormatter={formatAxisPesos}
         />
-        <ReferenceLine y={0} stroke="var(--border)" strokeDasharray="3 3" />
+        {goesNegative && (
+          <ReferenceLine yAxisId="saldo" y={0} stroke={CORAL_RED} strokeDasharray="3 3" />
+        )}
         <ChartTooltip content={<ChartTooltipContent formatter={formatter} />} />
         <ChartLegend content={<ChartLegendContent />} />
-        <Bar dataKey="neto" name="neto" radius={4}>
-          {chartData.map((entry) => (
-            <Cell
-              key={entry.label}
-              fill={entry.neto >= 0 ? PULSE_GREEN : CORAL_RED}
-              fillOpacity={0.65}
-            />
-          ))}
-        </Bar>
-        <Line
+        <Area
+          yAxisId="saldo"
           type="monotone"
-          dataKey="saldoProyectado"
-          stroke="var(--color-saldoProyectado)"
+          dataKey="saldo"
+          stroke="var(--color-saldo)"
           strokeWidth={2}
-          strokeDasharray="5 5"
-          dot={{ r: 3 }}
+          fill="url(#saldo-fill)"
+          dot={{ r: 2.5, fill: SIGNAL_TEAL, strokeWidth: 0 }}
+          activeDot={{ r: 4 }}
+        />
+        <Bar
+          yAxisId="flujo"
+          dataKey="entradas"
+          fill="var(--color-entradas)"
+          fillOpacity={0.8}
+          radius={[3, 3, 0, 0]}
+          maxBarSize={18}
+        />
+        <Bar
+          yAxisId="flujo"
+          dataKey="salidas"
+          fill="var(--color-salidas)"
+          fillOpacity={0.8}
+          radius={[3, 3, 0, 0]}
+          maxBarSize={18}
         />
       </ComposedChart>
     </ChartContainer>

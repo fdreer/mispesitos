@@ -7,7 +7,8 @@ import {
   type MovementQuery,
 } from "@/lib/movement-query"
 
-export const REPORT_TABS = ["ingresos-gastos", "flujo"] as const
+/** El flujo va primero: es el informe principal y el que se abre por defecto. */
+export const REPORT_TABS = ["flujo", "ingresos-gastos"] as const
 export type ReportTab = (typeof REPORT_TABS)[number]
 
 export const REPORT_CURRENCIES = ["ARS", "USD"] as const
@@ -36,7 +37,7 @@ export function parseReportQuery(raw: RawParams): ReportQuery {
 
   const tab: ReportTab = (REPORT_TABS as readonly string[]).includes(tabRaw)
     ? (tabRaw as ReportTab)
-    : "ingresos-gastos"
+    : "flujo"
   // Enlaces viejos con `?moneda=todo` caen en el default ("ARS").
   const currency: ReportCurrency = (REPORT_CURRENCIES as readonly string[]).includes(monedaRaw)
     ? (monedaRaw as ReportCurrency)
@@ -73,7 +74,7 @@ export function parseReportQuery(raw: RawParams): ReportQuery {
 
 export function reportExtraParams(query: ReportQuery): Record<string, string | undefined> {
   return {
-    tab: query.tab === "flujo" ? "flujo" : undefined,
+    tab: query.tab === "ingresos-gastos" ? "ingresos-gastos" : undefined,
     moneda: query.tab === "ingresos-gastos" && query.currency !== "ARS" ? query.currency : undefined,
     granularidad:
       query.tab === "flujo" && query.granularity === "semanal" ? "semanal" : undefined,

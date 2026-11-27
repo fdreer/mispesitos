@@ -2,7 +2,7 @@
 
 import { useState, type ComponentProps } from "react"
 import { ChevronRight } from "lucide-react"
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, XAxis, YAxis } from "recharts"
 
 import { Segmented } from "@/components/segmented"
 import {
@@ -20,7 +20,6 @@ import { formatAxisPesos, formatMoney, type Currency } from "@/lib/money"
 import { cn } from "@/lib/utils"
 
 const FOG = "#8a8f98"
-const SIGNAL_TEAL = "#02b8cc"
 const PULSE_GREEN = "#27a644"
 const CORAL_RED = "#eb5757"
 
@@ -47,47 +46,12 @@ function makeMoneyTooltipFormatter(currency: Currency): TooltipFormatter {
   }
 }
 
-const PROJECTION_CONFIG = {
-  saldo: { label: "Saldo", color: SIGNAL_TEAL },
-} satisfies ChartConfig
-
 const MONTHLY_CONFIG = {
   Ingresos: { label: "Ingresos", color: PULSE_GREEN },
   Egresos: { label: "Egresos", color: CORAL_RED },
 } satisfies ChartConfig
 
 const PIE_CONFIG = { value: { label: "Importe" } } satisfies ChartConfig
-
-export function ProjectionChart({
-  data,
-}: {
-  data: { month: string; arsCents: number }[]
-}) {
-  const formatter = makeMoneyTooltipFormatter("ARS")
-  return (
-    <ChartContainer config={PROJECTION_CONFIG} className="aspect-auto h-[220px] w-full">
-      <LineChart data={data.map((d) => ({ month: d.month, saldo: toUnits(d.arsCents) }))}>
-        <CartesianGrid vertical={false} stroke="var(--border)" />
-        <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} tick={AXIS_TICK} />
-        <YAxis
-          width={80}
-          tickLine={false}
-          axisLine={false}
-          tick={AXIS_TICK}
-          tickFormatter={formatAxisPesos}
-        />
-        <ChartTooltip content={<ChartTooltipContent formatter={formatter} />} />
-        <Line
-          type="monotone"
-          dataKey="saldo"
-          stroke="var(--color-saldo)"
-          strokeWidth={2}
-          dot={false}
-        />
-      </LineChart>
-    </ChartContainer>
-  )
-}
 
 const groupColor = (g: { name: string; hue: number | null }) =>
   hueColor(g.hue ?? categoryHue(g.name))

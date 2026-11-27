@@ -9,9 +9,9 @@ import {
 } from "@/lib/report-query"
 
 describe("parseReportQuery", () => {
-  it("una URL vacía cae en Ingresos vs Gastos, ARS y mensual", () => {
+  it("una URL vacía cae en Flujo de caja, ARS y mensual", () => {
     const q = parseReportQuery({})
-    expect(q.tab).toBe("ingresos-gastos")
+    expect(q.tab).toBe("flujo")
     expect(q.currency).toBe("ARS")
     expect(q.granularity).toBe("mensual")
     expect(q.filters.currency).toBe("all")
@@ -34,7 +34,7 @@ describe("parseReportQuery", () => {
     expect(
       parseReportQuery({ tab: "otra", moneda: "EUR", granularidad: "anual" }),
     ).toMatchObject({
-      tab: "ingresos-gastos",
+      tab: "flujo",
       currency: "ARS",
       granularity: "mensual",
     })
@@ -78,6 +78,7 @@ describe("buildReportHref y reportExtraParams", () => {
 
   it("en Flujo no lleva moneda en la URL y limpia los filtros de P&L", () => {
     const pnl = parseReportQuery({
+      tab: "ingresos-gastos",
       moneda: "USD",
       categoryId: "hogar",
       search: "luz",
@@ -86,7 +87,13 @@ describe("buildReportHref y reportExtraParams", () => {
     })
 
     expect(buildReportHref(pnl, { tab: "flujo" })).toBe(
-      "/informes?tab=flujo&from=2026-11-26&to=2027-03-31",
+      "/informes?from=2026-11-26&to=2027-03-31",
+    )
+  })
+
+  it("Ingresos vs Gastos sí lleva la pestaña en la URL", () => {
+    expect(buildReportHref(parseReportQuery({}), { tab: "ingresos-gastos" })).toBe(
+      "/informes?tab=ingresos-gastos",
     )
   })
 })

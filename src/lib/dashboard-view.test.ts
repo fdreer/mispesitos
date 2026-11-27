@@ -139,17 +139,17 @@ describe("buildDashboardView", () => {
     })
 
     expect(view.consolidatedArsCents).toBe(100_000 + 15_000_000)
-    expect(view.projection?.[0].arsCents).toBe(100_000 + 15_000_000)
+    expect(view.cashflow.rows[0].closingCents).toBe(100_000 + 15_000_000)
   })
 
-  it("deja la proyección en null cuando hay dólares y no hay cotización oficial", () => {
+  it("marca la proyección sin cotización cuando hay dólares y no hay oficial", () => {
     const view = buildDashboardView({
       ...BASE,
       settings: { ...BASE.settings, initialBalanceUsdCents: 10_000 },
       officialRate: null,
     })
 
-    expect(view.projection).toBeNull()
+    expect(view.cashflow.missingRateForUsd).toBe(true)
     expect(view.consolidatedArsCents).toBeNull()
   })
 
@@ -265,8 +265,10 @@ describe("buildDashboardView", () => {
         cardName: "Visa",
         period: "2026-07",
         dueDate: "2026-08-20",
+        closingDate: null,
         arsCents: 50_000,
         usdCents: 1_000,
+        count: 3,
         kind: "expense",
         status: "pending",
       },
@@ -276,6 +278,75 @@ describe("buildDashboardView", () => {
       usdCents: 1_000,
       count: 2,
       overdueCount: 0,
+    })
+  })
+
+  it("suma lo comprometido del horizonte más lo atrasado, y lo que entra aparte", () => {
+    const row = (id: string, dueDate: string, amountCents: number, kind = "expense", currency = "ARS") => ({
+      id,
+      number: 1,
+      dueDate,
+      amountCents,
+      movementId: id,
+      description: id,
+      currency,
+      kind,
+    })
+    const view = buildDashboardView({
+      ...BASE,
+      pending: [
+        row("atrasado", "2026-08-01", 10_000),
+        row("agosto", "2026-08-20", 20_000),
+        row("enero", "2027-01-10", 30_000),
+        row("fuera", "2027-03-10", 99_000),
+        row("usd", "2026-09-10", 100, "expense", "USD"),
+        row("sueldo", "2026-09-01", 500_000, "income"),
+      ],
+    })
+
+    expect(view.committed).toEqual({
+      totalCents: 10_000 + 20_000 + 30_000 + 100 * 1_550,
+      overdueCents: 10_000,
+      incomingCents: 500_000,
+      unconvertedUsdCents: 0,
+      untilLabel: expect.any(String),
+    })
+  })
+
+  it("el próximo vencimiento de tarjeta es el resumen impago más cercano, aunque caiga lejos", () => {
+    const cuota = (id: string, statementId: string, dueDate: string, cardName: string, currency = "ARS") => ({
+      id,
+      number: 1,
+      dueDate,
+      amountCents: 10_000,
+      movementId: id,
+      description: id,
+      currency,
+      kind: "expense",
+      statementId,
+      statementPeriod: dueDate.slice(0, 7),
+      cardId: cardName.toLowerCase(),
+      cardName,
+    })
+    const view = buildDashboardView({
+      ...BASE,
+      pending: [
+        cuota("a", "res-master", "2026-11-05", "Master"),
+        cuota("b", "res-visa", "2026-10-17", "Visa", "USD"),
+        cuota("c", "res-visa", "2026-10-17", "Visa"),
+      ],
+      statements: [{ id: "res-visa", closingDate: "2026-10-05" }],
+    })
+
+    expect(view.nextCardDue).toMatchObject({
+      id: "res-visa",
+      cardName: "Visa",
+      closingDate: "2026-10-05",
+      arsCents: 10_000,
+      usdCents: 10_000,
+      usdInArsCents: 10_000 * 1_550,
+      count: 2,
+      laterCount: 1,
     })
   })
 })

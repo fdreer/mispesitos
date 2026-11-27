@@ -13,8 +13,8 @@ import {
 import { cn } from "@/lib/utils"
 
 const TABS = [
-  { id: "ingresos-gastos" as const, label: "Ingresos vs Gastos" },
   { id: "flujo" as const, label: "Flujo de caja" },
+  { id: "ingresos-gastos" as const, label: "Ingresos vs Gastos" },
 ]
 
 const GRANULARITY_OPTIONS: { value: CashflowGranularity; label: string }[] = [

@@ -28,6 +28,7 @@ afterEach(() => {
 describe("ReportControls", () => {
   it("cambia de pestaña preservando el período y sin selector de moneda", () => {
     const query = parseReportQuery({
+      tab: "ingresos-gastos",
       categoryId: "hogar",
       from: "2026-11-26",
       to: "2027-03-31",
@@ -37,20 +38,20 @@ describe("ReportControls", () => {
 
     const flujoLink = screen.getByRole("link", { name: "Flujo de caja" })
     expect(flujoLink.getAttribute("href")).toBe(
-      "/informes?tab=flujo&from=2026-11-26&to=2027-03-31",
+      "/informes?from=2026-11-26&to=2027-03-31",
     )
     expect(screen.queryByRole("radiogroup", { name: "Moneda del informe" })).toBeNull()
   })
 
   it("muestra selector de granularidad sólo en Flujo de caja", () => {
-    render(<ReportControls query={parseReportQuery({})} />)
+    render(<ReportControls query={parseReportQuery({ tab: "ingresos-gastos" })} />)
     expect(screen.queryByRole("radiogroup", { name: "Granularidad" })).toBeNull()
 
     cleanup()
-    render(<ReportControls query={parseReportQuery({ tab: "flujo" })} />)
+    render(<ReportControls query={parseReportQuery({})} />)
     expect(screen.getByRole("radiogroup", { name: "Granularidad" })).toBeTruthy()
 
     fireEvent.click(screen.getByRole("radio", { name: "Semanal (3 meses)" }))
-    expect(push).toHaveBeenCalledWith("/informes?tab=flujo&granularidad=semanal")
+    expect(push).toHaveBeenCalledWith("/informes?granularidad=semanal")
   })
 })
