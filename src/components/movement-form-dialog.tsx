@@ -66,11 +66,13 @@ export function MovementFormDialog({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="top-auto bottom-0 left-0 max-h-[92dvh] w-full max-w-none translate-x-0 translate-y-0 overflow-y-auto overscroll-contain rounded-t-2xl rounded-b-none border-t border-graphite pb-[calc(1rem+env(safe-area-inset-bottom))] sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:max-h-[calc(100dvh-2rem)] sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:border-0 sm:pb-4">
-        <div aria-hidden className="mx-auto -mt-1 mb-1 h-1 w-10 rounded-full bg-smoke sm:hidden" />
-        <DialogHeader>
-          <DialogTitle>{(movement ? EDIT_TITLES : TITLES)[kind]}</DialogTitle>
-        </DialogHeader>
+      <DialogContent className="top-auto bottom-0 left-0 flex max-h-[92dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-t-2xl rounded-b-none border-t border-graphite p-0 ring-0 sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:max-h-[calc(100dvh-2rem)] sm:max-w-[540px] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:border sm:border-graphite">
+        <div className="shrink-0 border-b border-graphite/70 px-4 pt-3 pb-3 sm:px-6 sm:pt-5 sm:pb-4">
+          <div aria-hidden className="mx-auto mb-2.5 h-1 w-10 rounded-full bg-smoke sm:hidden" />
+          <DialogHeader>
+            <DialogTitle>{(movement ? EDIT_TITLES : TITLES)[kind]}</DialogTitle>
+          </DialogHeader>
+        </div>
         <MovementForm
           kind={kind}
           categories={categories}

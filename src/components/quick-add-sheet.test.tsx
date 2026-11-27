@@ -19,6 +19,12 @@ vi.mock("@/server/actions/movements", () => ({
   updateMovement: vi.fn().mockResolvedValue({ ok: true }),
 }))
 
+global.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 const expenseCategories: Category[] = [
   {
     id: "cat-exp-1",

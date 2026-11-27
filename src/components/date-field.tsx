@@ -17,6 +17,8 @@ export function DateField({
   hiddenName,
   disabledAfter,
   disabledBefore,
+  size = "default",
+  className,
 }: {
   id?: string
   value: IsoDate
@@ -25,6 +27,8 @@ export function DateField({
   hiddenName?: string
   disabledAfter?: IsoDate
   disabledBefore?: IsoDate
+  size?: "default" | "sm"
+  className?: string
 }) {
   const [open, setOpen] = useState(false)
   const disabled = [
@@ -41,9 +45,14 @@ export function DateField({
             type="button"
             variant="outline"
             aria-label={ariaLabel}
-            className="h-11 w-full justify-start font-normal"
+            className={
+              className ??
+              (size === "sm"
+                ? "h-9 w-full justify-start gap-1.5 px-2.5 text-sm font-normal tabular-nums"
+                : "h-11 w-full justify-start font-normal tabular-nums")
+            }
           >
-            <CalendarIcon />
+            <CalendarIcon className={size === "sm" ? "size-3.5 text-muted-foreground" : "text-muted-foreground"} />
             {formatIsoForDisplay(value)}
           </Button>
         </PopoverTrigger>

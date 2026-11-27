@@ -126,5 +126,7 @@
     @apply font-sans;
 
     font-feature-settings: "cv01" on, "ss03" on, "zero" on;
+    scrollbar-color: var(--color-smoke) transparent;
+    scrollbar-width: thin;
     }
 }

@@ -29,7 +29,7 @@ export function Segmented<T extends string>({
       role="radiogroup"
       aria-label={label}
       className={cn(
-        "inline-flex w-full rounded-lg border border-input bg-muted/30 p-0.5",
+        "inline-flex w-full rounded-lg border border-graphite bg-void/60 p-0.5",
         wrap && "flex-wrap gap-0.5",
         className,
       )}
@@ -50,9 +50,9 @@ export function Segmented<T extends string>({
           />
           <span
             className={cn(
-              "flex items-center justify-center rounded-md px-2 text-center font-medium whitespace-nowrap text-muted-foreground transition-colors",
-              size === "sm" ? "h-8 px-1.5 text-xs sm:px-2 sm:text-sm" : "h-10 text-sm",
-              "peer-checked:bg-background peer-checked:text-foreground peer-checked:shadow-sm",
+              "flex items-center justify-center rounded-md px-2 text-center font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
+              size === "sm" ? "h-8 px-1.5 text-xs sm:px-2 sm:text-sm" : "h-[38px] text-sm",
+              "peer-checked:bg-graphite peer-checked:text-paper peer-checked:shadow-sm",
               "peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50",
             )}
           >

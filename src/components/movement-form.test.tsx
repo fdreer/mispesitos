@@ -43,6 +43,7 @@ describe("MovementForm", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
+    fireEvent.click(screen.getByRole("checkbox", { name: /Pagado/ }))
     expect(screen.getByLabelText("Importe de la cuota 1")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: /^Fecha:/ }))
@@ -55,17 +56,16 @@ describe("MovementForm", () => {
   })
 
   it.each([
-    { kind: "income" as const, label: "Ya lo cobré" },
-    { kind: "expense" as const, label: "Ya lo pagué" },
-  ])("permite marcar un $kind inmediato y oculta las cuotas", ({ kind, label }) => {
+    { kind: "income" as const, label: /Cobrado/ },
+    { kind: "expense" as const, label: /Pagado/ },
+  ])("arranca marcado como $kind inmediato y oculta las cuotas hasta desactivarlo", ({ kind, label }) => {
     const { container } = render(
       <MovementForm kind={kind} categories={CATEGORIAS} suggestedRate={null} today="2026-08-10" />,
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
-    const estado = screen.getByRole("radio", { name: label })
-
-    fireEvent.click(estado)
+    const estado = screen.getByRole("checkbox", { name: label })
+    expect(estado.getAttribute("aria-checked")).toBe("true")
 
     expect(screen.queryByLabelText("Importe de la cuota 1")).toBeNull()
     expect(screen.queryByLabelText("Cuotas")).toBeNull()
@@ -75,6 +75,11 @@ describe("MovementForm", () => {
         (input) => input.value,
       ),
     ).toEqual(["100000"])
+
+    fireEvent.click(estado)
+    expect(estado.getAttribute("aria-checked")).toBe("false")
+    expect(container.querySelector<HTMLInputElement>('input[name="settled"]')?.value).toBe("false")
+    expect(screen.getByLabelText("Importe de la cuota 1")).toBeTruthy()
   })
 
   it("las cuotas se muestran en pesos y viajan en centavos", () => {
@@ -83,6 +88,7 @@ describe("MovementForm", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
+    fireEvent.click(screen.getByRole("checkbox", { name: /Pagado/ }))
     fireEvent.change(screen.getByLabelText("Cuotas"), { target: { value: "2" } })
 
     const visible1 = screen.getByLabelText<HTMLInputElement>("Importe de la cuota 1")
@@ -102,6 +108,7 @@ describe("MovementForm", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
+    fireEvent.click(screen.getByRole("checkbox", { name: /Pagado/ }))
     fireEvent.change(screen.getByLabelText("Importe de la cuota 1"), {
       target: { value: "1.000,50" },
     })
@@ -118,6 +125,7 @@ describe("MovementForm", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1000" } })
+    fireEvent.click(screen.getByRole("checkbox", { name: /Pagado/ }))
     fireEvent.change(screen.getByLabelText("Cuotas"), { target: { value: "5000" } })
 
     expect(screen.queryByLabelText("Importe de la cuota 121")).toBeNull()
@@ -333,6 +341,7 @@ describe("MovementForm, el formulario de carga", () => {
   it("los atajos y el stepper cambian la cantidad de cuotas", () => {
     alta()
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1200" } })
+    fireEvent.click(screen.getByRole("checkbox", { name: /Pagado/ }))
 
     fireEvent.click(screen.getByRole("button", { name: "12 cuotas" }))
     expect(screen.getByLabelText<HTMLInputElement>("Cuotas").value).toBe("12")
@@ -348,6 +357,7 @@ describe("MovementForm, el formulario de carga", () => {
   it("el plan arranca colapsado, con un resumen, y se despliega con Editar cuotas", () => {
     alta()
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1200" } })
+    fireEvent.click(screen.getByRole("checkbox", { name: /Pagado/ }))
     fireEvent.click(screen.getByRole("button", { name: "12 cuotas" }))
 
     expect(screen.getByText(/^12 cuotas de .*100,00 desde 10\/08$/)).toBeTruthy()
@@ -364,13 +374,13 @@ describe("MovementForm, el formulario de carga", () => {
     expect(screen.queryByRole("radiogroup", { name: "Medio de pago" })).toBeNull()
   })
 
-  it("con tarjeta, oculta Ya lo pagué y los vencimientos salen de los resúmenes", () => {
+  it("con tarjeta, oculta Pagado y los vencimientos salen de los resúmenes", () => {
     const { container } = alta({ cards: [VISA] })
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "300" } })
     fireEvent.click(screen.getByRole("radio", { name: "Visa" }))
     fireEvent.click(screen.getByRole("button", { name: "3 cuotas" }))
 
-    expect(screen.queryByRole("radio", { name: "Ya lo pagué" })).toBeNull()
+    expect(screen.queryByRole("checkbox", { name: /Pagado/ })).toBeNull()
     expect(valores(container, "creditCardId")).toEqual([VISA.id])
     expect(valores(container, "installmentDueDate")).toEqual([
       "2026-09-05",

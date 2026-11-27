@@ -16,6 +16,7 @@ import {
 import { DateField } from "@/components/date-field"
 import { Segmented } from "@/components/segmented"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { assignStatements, formatPeriod, type StatementDates } from "@/lib/cards"
@@ -115,7 +116,7 @@ export function MovementForm({
   // Medio de pago: "" es efectivo/débito. Sólo los egresos pueden ir con
   // tarjeta (CHECK `movement_credit_card_only_expense`, migración 0012).
   const [cardId, setCardId] = useState(movement?.creditCardId ?? "")
-  const [settled, setSettled] = useState(false)
+  const [settled, setSettled] = useState(true)
   const [countInput, setCountInput] = useState(String(movement?.installments.length ?? 1))
   const [planOpen, setPlanOpen] = useState(false)
   const [rows, setRows] = useState<Row[]>(
@@ -250,7 +251,7 @@ export function MovementForm({
       setDescription("")
       setCountInput("1")
       setPlanOpen(false)
-      setSettled(false)
+      setSettled(true)
     }
   }
 
@@ -312,9 +313,11 @@ export function MovementForm({
   const dueDatesForSummary = rows.map((r) => r.dueDate)
   const datalistId = `${ids}-descripciones`
   const rowsId = `${ids}-cuotas`
+  const settledId = `${ids}-settled`
 
   return (
-    <form action={action} className="space-y-5 rounded-xl border border-border/70 bg-card/40 p-4 sm:p-5">
+    <form action={action} className="flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">
       {/* Sólo editando. `updateMovement` lo valida como UUID y filtra además
           por usuario, igual que borrar: que el id viaje por el formulario no
           lo hace más confiable que cualquier otro campo. */}
@@ -343,11 +346,11 @@ export function MovementForm({
 
       {/* Importe primero (§5.2): es lo único que siempre hay que escribir, y
           con el foco puesto el diálogo arranca listo para tipear. */}
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label htmlFor="amount">Importe</Label>
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex items-stretch gap-2">
           <div className="relative flex-1">
-            <span className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-lg">
+            <span className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-base font-medium">
               {currency === "USD" ? "US$" : "$"}
             </span>
             <Input
@@ -370,7 +373,7 @@ export function MovementForm({
               onChange={(e) => setAmount(formatAmountInput(e.target.value, amount))}
               required
               aria-invalid={errors.amountCents !== undefined}
-              className={cn("h-12 text-lg tabular-nums", currency === "USD" ? "pl-14" : "pl-8")}
+              className={cn("h-11 text-lg font-medium tracking-tight tabular-nums", currency === "USD" ? "pl-13" : "pl-8")}
             />
           </div>
           <Segmented
@@ -381,14 +384,14 @@ export function MovementForm({
               { value: "ARS", label: "ARS" },
               { value: "USD", label: "USD" },
             ]}
-            className="sm:w-36"
+            className="w-28 shrink-0 sm:w-32"
           />
         </div>
         {errors.amountCents && <p className="text-destructive text-xs">{errors.amountCents[0]}</p>}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
+      <div className="grid gap-3.5 sm:grid-cols-2">
+        <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor="description">Descripción</Label>
           <Input
             ref={descriptionRef}
@@ -507,29 +510,38 @@ export function MovementForm({
         </div>
       )}
 
-      {/* "Ya lo pagué / Lo voy a pagar" (§5.2) en lugar del checkbox. Con
+      {/* Checkbox "Pagado / Cobrado" marcado por defecto: la mayoría de los
+          movimientos en efectivo/débito ya están pagos al cargarlos. Con
           tarjeta no se ofrece: se paga con el resumen (§1.3). */}
       {canSettle && (
-        <Segmented
-          label={kind === "income" ? "Estado del cobro" : "Estado del pago"}
-          value={settled ? "yes" : "no"}
-          onChange={(v) => setSettled(v === "yes")}
-          options={
-            kind === "income"
-              ? [
-                  { value: "yes", label: "Ya lo cobré" },
-                  { value: "no", label: "Lo voy a cobrar" },
-                ]
-              : [
-                  { value: "yes", label: "Ya lo pagué" },
-                  { value: "no", label: "Lo voy a pagar" },
-                ]
-          }
-        />
+        <label
+          htmlFor={settledId}
+          className="flex cursor-pointer items-center gap-3 rounded-lg border border-graphite bg-carbon/50 px-3.5 py-2.5 transition-colors hover:border-smoke"
+        >
+          <Checkbox
+            id={settledId}
+            checked={settled}
+            onCheckedChange={(checked) => setSettled(checked === true)}
+          />
+          <div className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-foreground">
+              {kind === "income" ? "Cobrado" : "Pagado"}
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              {settled
+                ? kind === "income"
+                  ? "Desmarcalo si queda pendiente de cobro"
+                  : "Desmarcalo si queda pendiente o es en cuotas"
+                : kind === "income"
+                  ? "Pendiente de cobro · elegí el vencimiento abajo"
+                  : "Pendiente de pago · podés dividir en cuotas"}
+            </span>
+          </div>
+        </label>
       )}
 
       {kind === "expense" && !isSettled && (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           <Label htmlFor="count">Cuotas</Label>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center">
@@ -537,12 +549,12 @@ export function MovementForm({
                 type="button"
                 variant="outline"
                 size="icon"
-                className="size-11 rounded-r-none"
+                className="size-9 rounded-r-none"
                 aria-label="Una cuota menos"
                 disabled={!countValid || count <= 1}
                 onClick={() => setCount(count - 1)}
               >
-                <Minus />
+                <Minus className="size-3.5" />
               </Button>
               <Input
                 id="count"
@@ -553,21 +565,21 @@ export function MovementForm({
                 aria-invalid={!countValid}
                 onFocus={(e) => e.currentTarget.select()}
                 onChange={(e) => setCountInput(e.target.value)}
-                className="h-11 w-16 rounded-none border-x-0 text-center tabular-nums"
+                className="h-9 w-12 rounded-none border-x-0 px-1 text-center text-sm tabular-nums"
               />
               <Button
                 type="button"
                 variant="outline"
                 size="icon"
-                className="size-11 rounded-l-none"
+                className="size-9 rounded-l-none"
                 aria-label="Una cuota más"
                 disabled={!countValid || count >= MAX_INSTALLMENTS}
                 onClick={() => setCount(count + 1)}
               >
-                <Plus />
+                <Plus className="size-3.5" />
               </Button>
             </div>
-            <div className="flex gap-1" role="group" aria-label="Cantidades frecuentes">
+            <div className="flex items-center gap-1" role="group" aria-label="Cantidades frecuentes">
               {COUNT_SHORTCUTS.map((n) => (
                 <Button
                   key={n}
@@ -577,7 +589,10 @@ export function MovementForm({
                   aria-pressed={countValid && count === n}
                   aria-label={n === 1 ? "1 cuota" : `${n} cuotas`}
                   onClick={() => setCount(n)}
-                  className="h-9 min-w-9"
+                  className={cn(
+                    "h-9 min-w-9 px-2.5 text-xs tabular-nums",
+                    countValid && count === n && "border border-graphite bg-graphite text-paper",
+                  )}
                 >
                   {n}
                 </Button>
@@ -604,10 +619,10 @@ export function MovementForm({
       )}
 
       {totalCents > 0 && !isSettled && (
-        <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-3 sm:p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="min-w-0 text-sm">
-              <p className="font-medium" aria-live="polite">
+        <div className="space-y-3 rounded-lg border border-graphite bg-carbon/70 p-3 sm:p-3.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium text-foreground sm:text-sm" aria-live="polite">
                 {planSummary(installmentCents, dueDatesForSummary, currency, today)}
               </p>
               {card && statementPlan?.[0] && (
@@ -620,8 +635,9 @@ export function MovementForm({
             </div>
             <Button
               type="button"
-              variant="ghost"
+              variant="secondary"
               size="sm"
+              className="h-7 shrink-0 px-2.5 text-xs"
               aria-expanded={showRows}
               aria-controls={rowsId}
               onClick={() => setPlanOpen((o) => !o)}
@@ -639,10 +655,17 @@ export function MovementForm({
 
           {/* Las filas viajan siempre en el FormData, se vean o no: el plan
               colapsado sigue siendo el plan que se guarda. */}
-          <div id={rowsId} className={cn("space-y-3", !showRows && "hidden")}>
+          <div
+            id={rowsId}
+            className={cn(
+              "space-y-2 border-t border-graphite/80 pt-2.5",
+              rows.length > 5 && "max-h-60 overflow-y-auto pr-1",
+              !showRows && "hidden",
+            )}
+          >
             {rows.map((row, index) => (
-              <div key={index} className="flex flex-wrap items-center gap-3">
-                <span className="text-muted-foreground w-8 shrink-0 text-sm tabular-nums">
+              <div key={index} className="flex items-center gap-2">
+                <span className="text-muted-foreground w-6 shrink-0 text-center text-xs font-medium tabular-nums">
                   {index + 1}
                 </span>
                 {/* El que viaja: centavos, el formato que espera la acción. Vacío
@@ -653,40 +676,38 @@ export function MovementForm({
                   name="installmentAmount"
                   value={installmentCents[index] ?? ""}
                 />
-                <Input
-                  inputMode="decimal"
-                  value={row.amount}
-                  onChange={(e) => updateRow(index, { amount: formatAmountInput(e.target.value, row.amount) })}
-                  aria-label={`Importe de la cuota ${index + 1}`}
-                  aria-invalid={row.amount !== "" && installmentCents[index] === null}
-                  className="h-11 min-w-0 flex-1 basis-24"
-                />
-                {/* Ancho propio (no el `w-full` del botón sin envolver): en la
-                    fila `flex-wrap`, sin este div el botón competía por el mismo
-                    espacio que el importe y desbordaba el formulario en mobile.
-                    Acá abajo del ancho de `sm` pasa a su propia línea completa;
-                    de `sm` para arriba comparte fila con margen de sobra. */}
-                <div className="w-full sm:w-auto sm:flex-1">
+                <div className="relative min-w-0 flex-1">
+                  <span className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs">
+                    {currency === "USD" ? "US$" : "$"}
+                  </span>
+                  <Input
+                    inputMode="decimal"
+                    value={row.amount}
+                    onChange={(e) => updateRow(index, { amount: formatAmountInput(e.target.value, row.amount) })}
+                    aria-label={`Importe de la cuota ${index + 1}`}
+                    aria-invalid={row.amount !== "" && installmentCents[index] === null}
+                    className={cn("h-9 text-sm tabular-nums", currency === "USD" ? "pl-10" : "pl-6")}
+                  />
+                </div>
+                <div className="w-[122px] shrink-0 sm:w-[138px]">
                   {card && statementPlan?.[index] ? (
                     // Con tarjeta el vencimiento no se elige: es el del
                     // resumen. Se corrige desde /tarjetas, para todas las
                     // cuotas de ese resumen a la vez.
                     <>
                       <input type="hidden" name="installmentDueDate" value={row.dueDate} />
-                      {/* Dos renglones que no se cortan: en una sola línea, al
-                          lado del importe y en un diálogo angosto, la fecha y
-                          el resumen se partían en cuatro pedazos. */}
-                      <p className="text-muted-foreground flex min-h-11 flex-col justify-center text-sm leading-tight">
-                        <span className="whitespace-nowrap">
-                          Vence {formatIsoForDisplay(row.dueDate)}
+                      <p className="text-muted-foreground flex h-9 flex-col justify-center text-right text-xs leading-tight">
+                        <span className="whitespace-nowrap text-foreground/85 tabular-nums">
+                          {formatIsoForDisplay(row.dueDate)}
                         </span>
-                        <span className="text-xs whitespace-nowrap">
-                          resumen {formatPeriod(statementPlan[index].period)}
+                        <span className="text-[11px] whitespace-nowrap">
+                          res. {formatPeriod(statementPlan[index].period)}
                         </span>
                       </p>
                     </>
                   ) : (
                     <DateField
+                      size="sm"
                       hiddenName="installmentDueDate"
                       value={row.dueDate}
                       onChange={(next) => updateRow(index, { dueDate: next })}
@@ -698,7 +719,7 @@ export function MovementForm({
             ))}
           </div>
           {countValid && (showRows || !sumMatches) && (
-            <p className={sumMatches ? "text-muted-foreground text-xs" : "text-destructive text-xs"}>
+            <p className={sumMatches ? "text-muted-foreground text-xs" : "text-destructive text-xs font-medium"}>
               Suma de cuotas: {formatMoney(rowsSum, currency)} de{" "}
               {formatMoney(totalCents, currency)}
               {!sumMatches && ` — faltan ${formatMoney(totalCents - rowsSum, currency)}`}
@@ -710,9 +731,11 @@ export function MovementForm({
         </div>
       )}
 
-      {/* Fijo abajo en el teléfono (§5.2): con el plan de cuotas desplegado
-          el botón quedaba varias pantallas más abajo. */}
-      <div className="sticky -bottom-4 z-10 -mx-4 flex flex-col gap-2 border-t border-border/70 bg-background/95 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur sm:static sm:mx-0 sm:flex-row-reverse sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
+      </div>
+
+      {/* Fijo abajo en el modal: header y botones quedan siempre accesibles
+          aunque el plan de cuotas tenga muchas filas. */}
+      <div className="flex shrink-0 flex-col gap-2 border-t border-graphite bg-popover px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:flex-row-reverse sm:px-6 sm:py-4">
         <Button
           type="submit"
           className="h-11 sm:flex-1"
